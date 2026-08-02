@@ -1,0 +1,104 @@
+name: Release
+
+# Builds the downloadable installers and attaches them to a GitHub Release.
+#
+# Windows is built on a WINDOWS RUNNER, and that is not a preference — it is
+# forced. Both native modules the daemon needs ship as platform-specific
+# optional dependencies (@lydell/node-pty-win32-x64, @parcel/watcher-win32-x64),
+# and npm running on Linux will not download the win32 ones. A Windows package
+# cross-built from Linux would install fine and then fail the moment a user
+# opened a terminal pane or a file tree.
+#
+# Everything here is UNSIGNED, deliberately (2026-08-02 decision):
+#   - Windows: SmartScreen shows an "unrecognized app" warning. Users can click
+#     through with "More info" -> "Run anyway". An OV code-signing certificate
+#     ($200-400/yr) would remove it; not bought yet.
+#   - macOS: not built at all. Gatekeeper refuses a quarantined unsigned app
+#     outright rather than warning, so an unsigned .dmg would be useless to a
+#     downloader. Needs Apple Developer Program ($99/yr) + notarization first.
+#
+# No third-party actions and no stored secrets: the release is created with the
+# preinstalled `gh` CLI using the automatic GITHUB_TOKEN.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: # rehearsal — builds and uploads artifacts, no release
+
+permissions:
+  contents: write # needed to create the Release and upload assets
+
+jobs:
+  build:
+    name: build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false # one platform failing shouldn't hide the other's result
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+            args: --linux
+          - name: windows
+            os: windows-latest
+            args: --win
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      # A tag that doesn't match package.json is a mis-cut release. Fail here,
+      # before spending ten minutes packaging the wrong version.
+      - name: Tag ↔ version check
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "tag v$TAG != package.json $PKG — refusing to build a release" >&2
+            exit 1
+          fi
+
+      - run: npm ci
+
+      # electron-builder downloads the Electron dist it packages by itself, so
+      # node_modules/electron/dist is NOT needed here — only the package.json
+      # beside it, which npm ci provides. (Electron 43 has no postinstall
+      # script; a dev checkout fetches the runtime with `install-electron`.)
+      - name: Build installers
+        run: npx electron-builder ${{ matrix.args }} --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            dist/*.deb
+            dist/*.tar.gz
+            dist/*.AppImage
+            dist/*.exe
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -lh artifacts
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Mirafold Desktop $GITHUB_REF_NAME" \
+            --notes-file .github/RELEASE_NOTES.md \
+            artifacts/*

@@ -1,0 +1,70 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Mirafold</title>
+<!--
+  Shown for the second or two between clicking the icon and the daemon
+  announcing its URL. Without it the app is a blank white rectangle during
+  boot, which reads as broken rather than busy.
+
+  Deliberately self-contained: no fonts, no scripts, no network. It has to be
+  the fastest thing in the app, and it must render before anything else exists.
+  Colors are the brand surface and accent from the shell's own mark.
+-->
+<style>
+  html,
+  body {
+    margin: 0;
+    height: 100%;
+    background: #0a0d13;
+    color: #8b98a9;
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+  }
+  svg {
+    width: 56px;
+    height: 56px;
+  }
+  p {
+    margin: 0;
+  }
+  /* A slow pulse rather than a spinner: boot is usually under two seconds, and
+     a spinner at that length reads as a stall. Respects reduced-motion. */
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 0.45;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+  .pulse {
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pulse {
+      animation: none;
+    }
+  }
+</style>
+<main>
+  <svg class="pulse" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true">
+    <rect width="64" height="64" rx="13" fill="#0a0d13" />
+    <g fill="none" stroke="#40d17f" stroke-linecap="round" stroke-linejoin="round">
+      <polyline
+        stroke-width="3"
+        points="18,49 13.5,49 13.5,15 18.5,15 32,31.5 45.5,15 50.5,15 50.5,49 46,49"
+      />
+      <polyline stroke-width="2.2" points="19,35 25,39.2 19,43.4" />
+      <line stroke-width="2.2" x1="27" y1="43.6" x2="33" y2="43.6" />
+    </g>
+  </svg>
+  <p>Starting Mirafold…</p>
+</main>

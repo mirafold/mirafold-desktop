@@ -1,0 +1,104 @@
+# Packaging configuration. Kept out of package.json so the reasoning below can
+# live as comments — electron-builder validates its config strictly and rejects
+# JSON comment keys.
+
+appId: com.mirafold.desktop
+productName: Mirafold
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - src/**/*
+  - build/icon.png
+  - package.json
+  - node_modules/**/*
+
+# asar is deliberately OFF.
+#
+# asar is Electron's app archive: normally the app's files are packed into a
+# single `app.asar` that Electron reads through a filesystem shim. Native `.node`
+# binaries can't be loaded from inside it, so they always have to be excluded —
+# and we have two of them (node-pty, @parcel/watcher).
+#
+# That partial-unpack split is the problem here. Our daemon is a SEPARATE Node
+# process, and Node's module resolution walks up from wherever a file lives. A
+# daemon unpacked to `app.asar.unpacked/` resolves its own path fine and then
+# fails to find its dependencies, which are still inside `app.asar/` — a
+# directory Node's resolver will not look into from outside.
+#
+# There are ways to thread that needle. None of them are worth it: the failure
+# mode is "works in dev, breaks only when packaged," and the platform where we
+# would find out is Windows, which neither of us can debug. Turning the archive
+# off makes the packaged layout identical to the dev layout.
+#
+# The cost is close to zero. asar is not compression — it does not shrink the
+# install. What it saves is file-count overhead at startup, which is noise next
+# to the bundled agent binaries this app already carries. Revisit only if
+# startup measurably drags.
+asar: false
+
+# Three Linux artifacts, because no single one covers the desktop.
+#
+#   deb      The primary. Double-click installs on Debian, Ubuntu, Mint and Pop,
+#            which is most of desktop Linux, and it registers the app menu entry.
+#   tar.gz   The universal fallback. No package manager, no dependencies, no
+#            FUSE — extract it and run ./mirafold. This is what Fedora, Arch and
+#            everyone else gets, and it is the answer to the AppImage caveat.
+#   AppImage The portable single file people expect from Linux desktop apps.
+#            CAVEAT, and the reason tar.gz exists: the AppImage runtime needs
+#            libfuse2, which Ubuntu 22.04+ and most current distros no longer
+#            install by default. Without it a double-click fails with
+#            "dlopen(): error loading libfuse.so.2" — a message that reads as a
+#            broken download. Verified on this machine. `--appimage-extract-and-run`
+#            works around it; the README says so, and points at tar.gz instead.
+linux:
+  target:
+    - deb
+    - tar.gz
+    - AppImage
+  icon: build/icon.png
+  category: Development
+  # Without these the running window is not linked to the installed .desktop
+  # entry: the taskbar shows a generic icon, "pin to dock" doesn't stick, and
+  # the window looks like it belongs to no application. syncDesktopName makes
+  # the installed .desktop filename match Electron's app_id / StartupWMClass,
+  # which is what the window manager pairs on. With no `desktopName` in
+  # package.json it derives that from executableName — hence `mirafold.desktop`.
+  executableName: mirafold
+  syncDesktopName: true
+  synopsis: A browser re-skin of your terminal coding agent
+  description: >-
+    Mirafold is a faithful browser re-skin of the terminal coding agent you
+    already use — Claude Code, Codex, or Gemini CLI — with generative UI
+    layered on top. This desktop build runs it without needing a terminal,
+    Node, or npm.
+  maintainer: Kyle Serrecchia <security@mirafold.com>
+  desktop:
+    entry:
+      Name: Mirafold
+      Comment: A browser re-skin of your terminal coding agent
+      Categories: Development;IDE;
+      Keywords: claude;codex;gemini;agent;coding;
+
+win:
+  target:
+    - nsis
+  icon: build/icon.png
+
+# This build is UNSIGNED, which shapes both settings below.
+#
+# perMachine: false installs into the user's own profile, so Windows never
+# raises a UAC elevation prompt. An admin prompt on top of the SmartScreen
+# "unrecognized app" warning is where an ordinary person stops — one scary
+# dialog is survivable, two stacked is not.
+#
+# oneClick: false gives a real installer with a visible destination and a Next
+# button. A silent one-click install of an unsigned binary reads as exactly the
+# thing people are told to be afraid of.
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-Setup-${version}.${ext}
