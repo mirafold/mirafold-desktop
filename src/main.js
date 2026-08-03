@@ -19,6 +19,7 @@ import { app, BrowserWindow, dialog, Menu, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Daemon } from "./daemon.js";
+import { navigationVerdict } from "./navigation.js";
 import { lastFolder, setLastFolder } from "./state.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -74,13 +75,12 @@ function createWindow() {
 
   // Same rule for in-page navigation: this window shows the daemon and nothing
   // else. Anything else is either a mistake or something that should have been
-  // an external link.
+  // an external link. See navigation.js for what each verdict means.
   win.webContents.on("will-navigate", (event, url) => {
-    const target = new URL(url);
-    if (target.hostname !== "127.0.0.1" && target.protocol !== "file:") {
-      event.preventDefault();
-      if (/^https?:$/.test(target.protocol)) void shell.openExternal(url);
-    }
+    const verdict = navigationVerdict(url, LOADING);
+    if (verdict === "allow") return;
+    event.preventDefault();
+    if (verdict === "external") void shell.openExternal(url);
   });
 
   win.on("closed", () => {
