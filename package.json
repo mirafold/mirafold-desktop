@@ -20,6 +20,7 @@
     "start": "electron .",
     "start:nosandbox": "electron . --no-sandbox",
     "node-version": "ELECTRON_RUN_AS_NODE=1 electron -e \"console.log(process.versions.node)\"",
+    "test": "node --test \"test/*.test.js\"",
     "pack": "electron-builder --dir",
     "dist:linux": "electron-builder --linux",
     "dist:win": "electron-builder --win"

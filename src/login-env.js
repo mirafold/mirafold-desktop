@@ -27,6 +27,16 @@ import { execFile } from "node:child_process";
 // never opens at all.
 const TIMEOUT_MS = 5000;
 
+// Markers so the PATH can be cut out of whatever else the profile printed.
+// Interactive startup files write greetings, fetch banners and sudo hints to
+// stdout — Ubuntu's stock bashrc does it out of the box — and taking raw
+// stdout as the PATH glued that text onto the first entry, silently breaking
+// the very directory this file exists to recover (version managers prepend
+// their shim directory, so it's always the first one).
+const BEGIN = "<mirafold-path>";
+const END = "</mirafold-path>";
+const MARKED_PATH = new RegExp(`${BEGIN}([\\s\\S]*?)${END}`);
+
 /**
  * The PATH an interactive login shell would have, or null if we can't get one.
  * `-i` (interactive) and `-l` (login) between them cover both conventions —
@@ -38,13 +48,13 @@ function shellPath() {
     if (!shell) return resolve(null);
     execFile(
       shell,
-      ["-ilc", 'printf "%s" "$PATH"'],
+      ["-ilc", `printf "%s" "${BEGIN}$PATH${END}"`],
       { timeout: TIMEOUT_MS, encoding: "utf8" },
       (err, stdout) => {
-        // Any failure at all — no such shell, non-zero exit, timeout, a profile
-        // that writes junk to stdout — falls back to what we already had.
+        // Any failure at all — no such shell, non-zero exit, timeout — falls
+        // back to what we already had. So does output with no marked PATH.
         if (err) return resolve(null);
-        const value = String(stdout).trim();
+        const value = String(stdout).match(MARKED_PATH)?.[1].trim() ?? "";
         resolve(value.includes("/") ? value : null);
       },
     );

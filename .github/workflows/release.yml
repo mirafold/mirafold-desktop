@@ -63,6 +63,7 @@ jobs:
           fi
 
       - run: npm ci
+      - run: npm test
 
       # electron-builder downloads the Electron dist it packages by itself, so
       # node_modules/electron/dist is NOT needed here — only the package.json
