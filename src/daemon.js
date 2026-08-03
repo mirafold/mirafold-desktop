@@ -40,8 +40,35 @@ const BOOT_TIMEOUT_MS = 60_000;
 
 // Stderr kept for the crash dialog. Bounded because a daemon in a failure loop
 // can produce output without limit, and this is held in memory for the life of
-// the app.
+// the app. Bounded in BOTH directions — a hundred lines of unlimited length is
+// not a bound, and agent output (which can be as long as a file someone else
+// wrote) reaches this stream.
 const STDERR_LINES = 100;
+const STDERR_LINE_CHARS = 1000;
+
+// The daemon mints a fresh auth token per launch and puts it in the URL it
+// prints. Anything that leaves this process — the mirrored output below, and
+// the crash dialog's text — gets it stripped: the app's own stdout is captured
+// by the system journal when it is launched from a desktop menu, and a crash
+// dialog is exactly the thing a user screenshots and sends to someone.
+const TOKEN_RE = /([?&]token=)[^\s&"'<>]+/gi;
+
+/** Replace any `token=…` value with a placeholder. */
+export function redactTokens(text) {
+  return text.replace(TOKEN_RE, "$1<redacted>");
+}
+
+/**
+ * Append `text`'s non-blank lines to `lines`, bounded by line count and line
+ * length, with tokens stripped. Pure so the bound is testable.
+ */
+export function appendStderr(lines, text) {
+  const next = lines.slice();
+  for (const line of redactTokens(text).split("\n")) {
+    if (line.trim()) next.push(line.slice(0, STDERR_LINE_CHARS));
+  }
+  return next.length > STDERR_LINES ? next.slice(-STDERR_LINES) : next;
+}
 
 /**
  * Absolute path to the daemon entry point.
@@ -138,13 +165,8 @@ export class Daemon {
 
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (text) => {
-      process.stderr.write(text); // still useful when run from a terminal
-      for (const line of text.split("\n")) {
-        if (line.trim()) this.#stderr.push(line);
-      }
-      if (this.#stderr.length > STDERR_LINES) {
-        this.#stderr = this.#stderr.slice(-STDERR_LINES);
-      }
+      process.stderr.write(redactTokens(text)); // still useful from a terminal
+      this.#stderr = appendStderr(this.#stderr, text);
     });
 
     const url = await new Promise((resolve, reject) => {
@@ -164,7 +186,9 @@ export class Daemon {
 
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", (text) => {
-        process.stdout.write(text);
+        // Mirrored redacted; `tail` below still matches against the real text,
+        // since the token is what makes the URL usable.
+        process.stdout.write(redactTokens(text));
         if (settled) return;
         tail = (tail + text).slice(-4096); // one boot line, bounded
         const match = tail.match(URL_RE);
