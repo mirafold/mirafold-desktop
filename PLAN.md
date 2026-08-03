@@ -24,7 +24,22 @@ packaged build:
 Both native-module checks were repeated against the packaged AppImage payload,
 not just the dev checkout.
 
-**Phase 2 — release: repo + CI DONE, tag HELD (2026-08-02).**
+**Phase 2 — release: DONE (2026-08-02). `v0.1.0` is published.**
+
+Four installers on GitHub Releases: `mirafold-desktop_0.1.0_amd64.deb` (236 MB),
+`mirafold-desktop-0.1.0.tar.gz` (295 MB), `Mirafold-0.1.0.AppImage` (312 MB),
+`Mirafold-Setup-0.1.0.exe` (230 MB). Release run `30772737027`, all three jobs
+green. **Anonymous download verified** — an unauthenticated range request
+returned `206` with a valid `PE32` header, so a tester needs no GitHub account.
+That was the whole reason to cut the tag: GitHub requires a login to download
+*workflow-run* artifacts even from a public repo, so without a release there was
+no way to hand anyone the file.
+
+**Not announced anywhere, and nothing goes on mirafold.com** (Kyle,
+2026-08-02) until it has been tested. The repo is public and therefore
+indexable, but nothing links to it.
+
+### Earlier state, kept for the record
 
 `mirafold/mirafold-desktop` is public. The release workflow was rehearsed with
 `workflow_dispatch` and came back **green on both platforms** (run
@@ -58,16 +73,33 @@ cut so release assets become anonymously downloadable.
 | `.deb` + `.tar.gz` + `.AppImage` | AppImage alone is not enough: it needs `libfuse2`, absent by default on Ubuntu 22.04+ and most current distros (reproduced) |
 | **npm**, not yarn | electron-builder assumes npm layouts; yarn 1 hoisting fights platform-specific optional deps, which is exactly how the native modules ship |
 
+## Facts about the world that no repo can observe
+
+- **Kyle has a Mac** (stated 2026-08-02). This is the reason macOS is a
+  *deferred cost decision* rather than an untestable one: when the $99/yr Apple
+  Developer membership is bought, he can verify the real download-and-open
+  experience himself, including the launched-from-Finder `PATH` problem that
+  `src/login-env.js` exists to solve and that only reproduces on real hardware.
+- **Nobody on this project has a Windows machine.** The Windows artifact is
+  CI-built and inspected, never launched.
+- **macOS is deferred until Mirafold "takes off"** (Kyle's words, 2026-08-02) —
+  a revenue trigger, not a technical blocker.
+
 ## Next
 
-1. **Ship the first release.** Create `mirafold/mirafold-desktop`, push, tag
-   `v0.1.0`, confirm CI produces Linux and Windows artifacts and that they
-   download and run.
-2. **Get the Windows build tested by a human.** Nobody on this project has
-   Windows hardware. Until a real person installs it, the Windows artifact is
-   "CI produced a file", and release notes should not imply more.
-3. **A download page.** Nobody can install this if they can't find it. Lives in
-   the marketing site, not here.
+1. **Get the Windows build tested by a human — the top priority.** Until a real
+   person installs it, the Windows artifact is "CI produced a file," and nothing
+   should imply more. What to have them check, in order: installs past
+   SmartScreen · folder picker works · a prompt gets a response · a `!` command
+   works (ConPTY, the most platform-specific path) · the file tree updates on an
+   external edit · **after quitting, Task Manager shows no leftover `mirafold`
+   processes** (the `taskkill /T /F` path, written but never observed).
+2. **Then, and only then, announce.** Requires Kyle's explicit go. A download
+   page on mirafold.com lives in the site repo, not here.
+3. **Push the held `genui-shell` commit.** `6d31c39` corrects `POST-RELEASE.md`
+   there, but that file ships in the **public** `mirafold/mirafold` repo, so
+   pushing it announces this app's existence. Held deliberately; push it when
+   the announcement happens.
 
 ## Known gaps, not yet scheduled
 
