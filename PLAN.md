@@ -50,6 +50,21 @@ error dialogs. All pinned by the repo's new test suite (`npm test`, node
 test: cut v0.1.1 so the tester gets these fixes, or hand out v0.1.0 knowing
 its orphan check can false-fail via the folder-switch race.**
 
+**Security audit, 2026-08-03 — all five findings fixed, also not in v0.1.0.**
+Clean on the things that matter most: no secrets anywhere in git history, zero
+dependency vulnerabilities, all 399 lockfile entries hashed and registry-sourced,
+Electron 43.2.0 (latest, Chromium 150), and the packaged payload carries only
+production dependencies — no dev tooling, tests, or planning docs. Fixed: the CI
+build job inherited a repo-**write** token while running ~400 packages' install
+scripts (now read-only, `persist-credentials: false`; the release job alone
+writes); the `will-navigate` guard permitted every `file://` URL (Chromium
+blocked it independently — verified in a real window — so nothing was
+exploitable, but the rule is ours now, in `src/navigation.js`); the daemon's
+per-launch auth token was mirrored to app stdout and into the crash dialog; and
+the crash buffer capped line count but not line length. `SECURITY.md` now gives
+a private reporting channel and records the deliberate decisions, so future
+audits don't re-litigate unsigned builds, the no-bridge window, or the size.
+
 *Pre-release state (rehearsal run, Windows-payload inspection, the
 hold-the-tag decision — since superseded by the v0.1.0 release above) →
 archived in PLAN-ARCHIVE.md.*
