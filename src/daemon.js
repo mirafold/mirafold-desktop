@@ -27,7 +27,6 @@
 // Node.js installed, which is the entire point of shipping a desktop build.
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { daemonEnv } from "./login-env.js";
 
@@ -47,16 +46,13 @@ const STDERR_LINES = 100;
 /**
  * Absolute path to the daemon entry point.
  *
- * In a packaged build the app's files live inside `app.asar`, an archive. The
- * `mirafold` package is deliberately excluded from it (see `asarUnpack` in
- * package.json) so that this child — an ordinary Node process — reads it from
- * a real directory on disk. Native `.node` binaries cannot be loaded from
- * inside an asar archive at all, which forces the unpack regardless.
+ * Ordinary resolution works in the packaged build too, because asar is off
+ * (electron-builder.yml explains why): the app ships as a real directory, so
+ * this child — an ordinary Node process — reads the `mirafold` package
+ * straight from disk, exactly as in a dev checkout.
  */
 function daemonPath() {
-  const resolved = require.resolve("mirafold/dist-server/index.js");
-  const unpacked = resolved.replace(/([\\/])app\.asar([\\/])/, "$1app.asar.unpacked$2");
-  return unpacked !== resolved && existsSync(unpacked) ? unpacked : resolved;
+  return require.resolve("mirafold/dist-server/index.js");
 }
 
 /**
