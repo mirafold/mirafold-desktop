@@ -76,6 +76,11 @@ archived in PLAN-ARCHIVE.md.*
    works (ConPTY, the most platform-specific path) · the file tree updates on an
    external edit · **after quitting, Task Manager shows no leftover `mirafold`
    processes** (the `taskkill /T /F` path, written but never observed).
+   **Tester instructions exist: `WINDOWS-TESTING.md`** (added 2026-08-03) — a
+   self-contained checklist covering all of the above plus the download-warning
+   click-throughs and the API-key path; send a tester that one file and nothing
+   else is needed. The download URL in it was re-verified anonymous-accessible
+   (HTTP 200, no auth) the same day.
 2. **Then, and only then, announce.** Requires Kyle's explicit go. A download
    page on mirafold.com lives in the site repo, not here.
 3. **Push the held `genui-shell` commit.** `6d31c39` corrects `POST-RELEASE.md`
