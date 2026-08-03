@@ -6,7 +6,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const workflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+// Normalized to LF: a Windows runner checks this repo out with CRLF endings,
+// and the line-anchored searches below would find nothing.
+const workflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8")
+  .split("\r\n")
+  .join("\n");
 
 /** The text of one top-level job block, by name. */
 function job(name) {

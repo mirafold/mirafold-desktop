@@ -4,9 +4,14 @@
 // exploitable — but that is Chromium's rule, not ours, and this is ours.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { navigationVerdict } from "../src/navigation.js";
 
-const LOADING = "/opt/Mirafold/resources/app/src/loading.html";
+// Built the way main.js builds it (path.join on the app directory) so the
+// fixture is a real path on whichever platform the suite runs — a hardcoded
+// POSIX path never matches what fileURLToPath returns on Windows.
+const LOADING = path.resolve("opt/Mirafold/resources/app/src/loading.html");
 
 test("arbitrary local files are refused", () => {
   for (const url of [
@@ -22,7 +27,7 @@ test("arbitrary local files are refused", () => {
 test("the daemon and the loading screen are allowed", () => {
   assert.equal(navigationVerdict("http://127.0.0.1:5173/?token=abc", LOADING), "allow");
   assert.equal(navigationVerdict("http://127.0.0.1:31337/session/1", LOADING), "allow");
-  assert.equal(navigationVerdict(`file://${LOADING}`, LOADING), "allow");
+  assert.equal(navigationVerdict(pathToFileURL(LOADING).href, LOADING), "allow");
 });
 
 test("web pages go to the browser, never this window", () => {
