@@ -25,13 +25,24 @@ on:
     tags: ["v*"]
   workflow_dispatch: # rehearsal — builds and uploads artifacts, no release
 
+# Least privilege by default; only the release job below opts up to write.
+#
+# This matters because the build job runs `npm ci` and electron-builder, which
+# execute code from the whole dependency tree (~400 packages, some with install
+# scripts). actions/checkout writes the job's token to disk in the workspace by
+# default, so any one of those packages can read it. With a write-scoped token
+# a single compromised dependency could push to this repo or replace the
+# installers attached to a release — binaries that are unsigned and downloaded
+# by strangers, so a tampered asset has nothing else standing behind it.
 permissions:
-  contents: write # needed to create the Release and upload assets
+  contents: read
 
 jobs:
   build:
     name: build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read # builds and uploads artifacts; never writes to the repo
     strategy:
       fail-fast: false # one platform failing shouldn't hide the other's result
       matrix:
@@ -43,7 +54,11 @@ jobs:
             os: windows-latest
             args: --win
     steps:
+      # Nothing in this job pushes, so don't leave a credential on disk for the
+      # dependency code that runs a few steps below.
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -87,6 +102,8 @@ jobs:
     needs: build
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the Release and upload assets — the only job that needs it
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
