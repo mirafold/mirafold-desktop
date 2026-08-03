@@ -24,46 +24,56 @@ packaged build:
 Both native-module checks were repeated against the packaged AppImage payload,
 not just the dev checkout.
 
-**Phase 2 — release: DONE (2026-08-02). `v0.1.0` is published.**
+**Phase 2 — release: DONE. `v0.1.1` is the current release (2026-08-03).**
 
-Four installers on GitHub Releases: `mirafold-desktop_0.1.0_amd64.deb` (236 MB),
-`mirafold-desktop-0.1.0.tar.gz` (295 MB), `Mirafold-0.1.0.AppImage` (312 MB),
-`Mirafold-Setup-0.1.0.exe` (230 MB). Release run `30772737027`, all three jobs
-green. **Anonymous download verified** — an unauthenticated range request
-returned `206` with a valid `PE32` header, so a tester needs no GitHub account.
-That was the whole reason to cut the tag: GitHub requires a login to download
-*workflow-run* artifacts even from a public repo, so without a release there was
-no way to hand anyone the file.
+Four installers on GitHub Releases: `mirafold-desktop_0.1.1_amd64.deb` (236 MB),
+`mirafold-desktop-0.1.1.tar.gz` (295 MB), `Mirafold-0.1.1.AppImage` (312 MB),
+`Mirafold-Setup-0.1.1.exe` (230 MB). Release run `30814902927`, all three jobs
+green. **Anonymous download verified** — an unauthenticated request returned
+`200` and the payload begins `MZ`, a real Windows executable, so a tester needs
+no GitHub account. That is why a tag is cut at all: GitHub requires a login to
+download *workflow-run* artifacts even from a public repo, so without a release
+there is no way to hand anyone the file.
+
+`v0.1.0` (2026-08-02, run `30772737027`) is superseded and should not be handed
+to anyone — it predates every fix below.
 
 **Not announced anywhere, and nothing goes on mirafold.com** (Kyle,
 2026-08-02) until it has been tested. The repo is public and therefore
 indexable, but nothing links to it.
 
-**Post-release fixes on main, 2026-08-03 — NOT in the v0.1.0 installers.** A
-full-project bughunt found and fixed three bugs: a chatty login-shell profile
-corrupted the first PATH entry in `login-env.js` (reproduced; even Ubuntu's
-stock bashrc triggers it); boots weren't serialized, so File → Open Folder or
-a quit during a slow boot could orphan a daemon past quit and raise a spurious
-error dialog; and a daemon dying right after reporting its URL stacked two
-error dialogs. All pinned by the repo's new test suite (`npm test`, node
---test, zero added dependencies, wired into CI). **Decide before the Windows
-test: cut v0.1.1 so the tester gets these fixes, or hand out v0.1.0 knowing
-its orphan check can false-fail via the folder-switch race.**
+### What v0.1.1 contains that v0.1.0 did not
 
-**Security audit, 2026-08-03 — all five findings fixed, also not in v0.1.0.**
-Clean on the things that matter most: no secrets anywhere in git history, zero
-dependency vulnerabilities, all 399 lockfile entries hashed and registry-sourced,
-Electron 43.2.0 (latest, Chromium 150), and the packaged payload carries only
-production dependencies — no dev tooling, tests, or planning docs. Fixed: the CI
-build job inherited a repo-**write** token while running ~400 packages' install
-scripts (now read-only, `persist-credentials: false`; the release job alone
-writes); the `will-navigate` guard permitted every `file://` URL (Chromium
-blocked it independently — verified in a real window — so nothing was
-exploitable, but the rule is ours now, in `src/navigation.js`); the daemon's
-per-launch auth token was mirrored to app stdout and into the crash dialog; and
-the crash buffer capped line count but not line length. `SECURITY.md` now gives
-a private reporting channel and records the deliberate decisions, so future
-audits don't re-litigate unsigned builds, the no-bridge window, or the size.
+A full-project **bughunt** found and fixed three bugs: a chatty login-shell
+profile corrupted the first PATH entry in `login-env.js` (reproduced; even
+Ubuntu's stock bashrc triggers it); boots weren't serialized, so File → Open
+Folder or a quit during a slow boot could orphan a daemon past quit and raise a
+spurious error dialog; and a daemon dying right after reporting its URL stacked
+two error dialogs. A failed boot also killed only the daemon, orphaning agent
+CLIs it had already spawned — now a process-tree kill on both paths.
+
+A **security audit** found and fixed five things. Clean on what matters most:
+no secrets anywhere in git history, zero dependency vulnerabilities, all 399
+lockfile entries hashed and registry-sourced, Electron 43.2.0 (latest, Chromium
+150), and the packaged payload carries only production dependencies — no dev
+tooling, tests, or planning docs. Fixed: the CI build job inherited a
+repo-**write** token while running ~400 packages' install scripts (now
+read-only, `persist-credentials: false`; the release job alone writes); the
+`will-navigate` guard permitted every `file://` URL (Chromium blocked it
+independently — verified in a real window — so nothing was exploitable, but the
+rule is ours now, in `src/navigation.js`); the daemon's per-launch auth token
+was mirrored to app stdout and into the crash dialog; and the crash buffer
+capped line count but not line length. `SECURITY.md` now gives a private
+reporting channel and records the deliberate decisions, so future audits don't
+re-litigate unsigned builds, the no-bridge window, or the size.
+
+**The repo now has a test suite** (`npm test` — node's built-in runner, zero
+added dependencies), 14 tests pinning every bug above, and CI runs it on both
+platforms before packaging. It has already earned itself: it failed the first
+v0.1.1 build attempt (run `30814632008`) on two platform-dependent fixtures of
+its own — a CRLF checkout on Windows, and a hardcoded POSIX path — before
+anything was packaged. **Write tests that run on Windows too**: git converts
+line endings on checkout there, and `fileURLToPath` returns backslashes.
 
 *Pre-release state (rehearsal run, Windows-payload inspection, the
 hold-the-tag decision — since superseded by the v0.1.0 release above) →
@@ -102,11 +112,12 @@ archived in PLAN-ARCHIVE.md.*
    works (ConPTY, the most platform-specific path) · the file tree updates on an
    external edit · **after quitting, Task Manager shows no leftover `mirafold`
    processes** (the `taskkill /T /F` path, written but never observed).
-   **Tester instructions exist: `WINDOWS-TESTING.md`** (added 2026-08-03) — a
-   self-contained checklist covering all of the above plus the download-warning
-   click-throughs and the API-key path; send a tester that one file and nothing
-   else is needed. The download URL in it was re-verified anonymous-accessible
-   (HTTP 200, no auth) the same day.
+   **Tester instructions exist: `WINDOWS-TESTING.md`** (added 2026-08-03, now
+   pointing at v0.1.1) — a self-contained checklist covering all of the above
+   plus the download-warning click-throughs and the API-key path; send a tester
+   that one file and nothing else is needed. Its download URL was verified
+   anonymous-accessible (HTTP 200, `MZ` header, no auth) after the v0.1.1
+   release published.
 2. **Then, and only then, announce.** Requires Kyle's explicit go. A download
    page on mirafold.com lives in the site repo, not here.
 3. **Push the held `genui-shell` commit.** `6d31c39` corrects `POST-RELEASE.md`
@@ -134,7 +145,8 @@ archived in PLAN-ARCHIVE.md.*
   and `Name` do apply, `Comment` and `Categories` don't. Cosmetic only; the
   entry, icon and `StartupWMClass` are all correct.
 - **Windows process-tree teardown is written but untested.** `taskkill /T /F` is
-  the right call; nobody has watched it work.
+  the right call; nobody has watched it work. It is now reached from two paths
+  (normal quit and failed boot), both through one `killTree()`.
 - **A hard kill of the app orphans the daemon.** The daemon is spawned
   `detached` so its process group can be signalled, which by construction means
   it survives a `SIGKILL` of the app. Normal quit and window close are handled.
