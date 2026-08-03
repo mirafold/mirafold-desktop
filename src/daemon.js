@@ -73,6 +73,29 @@ function daemonPath() {
  */
 const URL_RE = /http:\/\/127\.0\.0\.1:\d+\/\S*(?=\s)/;
 
+/**
+ * Kill `pid` and everything it spawned. The daemon starts the agent CLIs as
+ * its own children, so signalling only the daemon leaves those running —
+ * invisible processes holding an API session open after the user believes
+ * they quit. Every path that ends the daemon must go through here.
+ *
+ * Unix: signal the process GROUP (the negative pid), which detached:true made
+ * the daemon the leader of. Windows: `taskkill /T` walks the process tree,
+ * the only reliable way there — Windows has no process groups in the Unix
+ * sense — and `/F` makes it final, so `signal` is a Unix-only distinction.
+ */
+function killTree(pid, signal) {
+  if (process.platform === "win32") {
+    spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+    return;
+  }
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    /* group already gone */
+  }
+}
+
 export class Daemon {
   #child = null;
   #stopping = false;
@@ -152,11 +175,10 @@ export class Daemon {
       child.once("error", (err) => done(reject, err));
     }).catch((err) => {
       this.#child = null;
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        /* already gone — that's usually why we're here */
-      }
+      // The daemon may have spawned agent CLIs before failing, so take down
+      // the whole tree, not just the daemon. Straight to SIGKILL: the boot
+      // never completed, so there is nothing worth a graceful shutdown.
+      if (child.pid) killTree(child.pid, "SIGKILL");
       err.stderr = this.stderr;
       throw err;
     });
@@ -178,17 +200,9 @@ export class Daemon {
   }
 
   /**
-   * Stop the daemon AND everything it started.
-   *
-   * The daemon spawns the agent CLIs as its own children, so signalling only
-   * the daemon leaves those running — invisible processes holding an API
-   * session open after the user believes they quit.
-   *
-   * Unix: signal the process GROUP (the negative pid), which detached:true made
-   * the daemon the leader of. SIGTERM first so it can close sockets, SIGKILL
-   * after a grace period for anything ignoring it.
-   * Windows: `taskkill /T` walks the process tree, which is the only reliable
-   * way to do this there — Windows has no process groups in the Unix sense.
+   * Stop the daemon AND everything it started (see killTree). SIGTERM first
+   * so the daemon can close sockets, SIGKILL after a grace period for
+   * anything ignoring it; on Windows the first taskkill is already final.
    */
   stop() {
     const child = this.#child;
@@ -196,22 +210,9 @@ export class Daemon {
     this.#stopping = true;
     this.#child = null;
 
-    if (process.platform === "win32") {
-      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
-      return;
-    }
-    try {
-      process.kill(-child.pid, "SIGTERM");
-    } catch {
-      /* group already gone */
-    }
-    const grace = setTimeout(() => {
-      try {
-        process.kill(-child.pid, "SIGKILL");
-      } catch {
-        /* exited during the grace period, as intended */
-      }
-    }, 4000);
+    killTree(child.pid, "SIGTERM");
+    if (process.platform === "win32") return;
+    const grace = setTimeout(() => killTree(child.pid, "SIGKILL"), 4000);
     // Don't hold the app open waiting to escalate a kill that may not be needed.
     grace.unref?.();
     child.once("exit", () => clearTimeout(grace));
