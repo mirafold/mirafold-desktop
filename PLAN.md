@@ -39,6 +39,17 @@ no way to hand anyone the file.
 2026-08-02) until it has been tested. The repo is public and therefore
 indexable, but nothing links to it.
 
+**Post-release fixes on main, 2026-08-03 — NOT in the v0.1.0 installers.** A
+full-project bughunt found and fixed three bugs: a chatty login-shell profile
+corrupted the first PATH entry in `login-env.js` (reproduced; even Ubuntu's
+stock bashrc triggers it); boots weren't serialized, so File → Open Folder or
+a quit during a slow boot could orphan a daemon past quit and raise a spurious
+error dialog; and a daemon dying right after reporting its URL stacked two
+error dialogs. All pinned by the repo's new test suite (`npm test`, node
+--test, zero added dependencies, wired into CI). **Decide before the Windows
+test: cut v0.1.1 so the tester gets these fixes, or hand out v0.1.0 knowing
+its orphan check can false-fail via the folder-switch race.**
+
 *Pre-release state (rehearsal run, Windows-payload inspection, the
 hold-the-tag decision — since superseded by the v0.1.0 release above) →
 archived in PLAN-ARCHIVE.md.*
