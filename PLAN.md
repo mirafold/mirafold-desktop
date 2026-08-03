@@ -127,14 +127,41 @@ archived in PLAN-ARCHIVE.md.*
 
 ## Known gaps, not yet scheduled
 
-- **Credential entry has no GUI.** The onboarding screen tells you to set
-  `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`, which assumes a terminal. Users who
-  already have Claude Code, Codex, or Gemini CLI logged in are fine — their
-  existing config is picked up, and they are the target audience — but a
-  brand-new user with only an API key has to hand-write a `.env` in the project
-  folder. A settings screen would fix it; it likely belongs upstream.
-- **Auto-update.** Nothing here updates itself. Worth doing once there are
-  enough users that asking them to re-download is rude.
+- **Credential entry has no GUI — PARKED (Kyle, 2026-08-03), not scheduled.**
+  The onboarding screen tells you to set `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`,
+  which assumes a terminal. Users who already have Claude Code, Codex, or Gemini
+  CLI logged in are fine — their existing config is picked up, and they are the
+  target audience — but a brand-new user with only an API key has to hand-write
+  a `.env` in the project folder, per folder, and creating a dotfile is worst on
+  Windows (which is why `WINDOWS-TESTING.md` walks a tester through Notepad's
+  quoted "Save As"). **Reasons it stays parked, so this isn't re-derived:** (1)
+  it is product behavior — a settings screen is UI plus storage plus how the
+  daemon gets its environment, so it belongs in `mirafold` upstream, and
+  building it here would break this repo's no-product rule; (2) accepting a
+  credential means owning it — storage, encryption at rest, log/crash-report
+  leakage, uninstall — and this repo currently handles **zero** credentials, a
+  property the audit verified and worth keeping; (3) zero users have hit it.
+  **Trigger to revisit is evidence, not a date:** a tester stalling on it, or
+  the marketing site starting to pitch people who have only an API key.
+- **Auto-update — and the coupling it hides.** Nothing here updates itself, and
+  there is no notification: someone on `v0.1.0` cannot learn `v0.1.1` exists.
+  **The part that is easy to get wrong:** CI builds with `npm ci`, so the
+  `mirafold` version in `package-lock.json` is copied into the installer and
+  the app resolves the daemon from its *own* bundled copy. It never contacts npm
+  at install or run time. So **a user's `mirafold` version is frozen at the day
+  their installer was built**, and there is exactly ONE update vehicle — a new
+  tag, a new installer, a manual re-download — carrying both upstream and
+  desktop changes. This repo's *code* is decoupled from upstream (the whole
+  contract is: the daemon entry path, the URL it prints on stdout, and cwd), but
+  its *release cadence* is not: every upstream release users should have needs a
+  desktop tag. Picking one up isn't automatic for us either — `^0.3.0` is
+  overridden by the lockfile, so it takes `npm install mirafold@latest` plus a
+  committed lockfile. If this is ever built: electron-builder already emits the
+  `latest-*.yml` metadata `electron-updater` consumes, but coverage is uneven
+  (Windows NSIS and AppImage can self-update; a `.deb` cannot — the system
+  package manager owns it — and `.deb` is the primary Linux artifact), and
+  unsigned builds mean update integrity rests on HTTPS plus the metadata
+  checksum rather than a signature. Not verified in code — analysis only.
 - **One window at a time.** The architecture makes multi-window nearly free (a
   second `spawn` with a different `cwd`), but it needs window/daemon bookkeeping
   that v1 skips.

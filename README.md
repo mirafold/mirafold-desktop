@@ -66,6 +66,7 @@ need no bridge.
 | --- | --- |
 | `src/main.js` | app lifecycle, window, menu, folder picker, crash dialog |
 | `src/daemon.js` | spawn the daemon, read its URL, kill its whole process tree |
+| `src/navigation.js` | what the window is allowed to load, and what goes to the browser |
 | `src/login-env.js` | recover the login shell's `PATH` so agent CLIs are findable |
 | `src/state.js` | remember the last-opened folder |
 | `electron-builder.yml` | packaging targets, with the reasoning as comments |
@@ -82,6 +83,18 @@ On a Linux dev checkout, Electron's `chrome-sandbox` helper isn't installed with
 the root ownership it needs, and the app aborts. Use `npm run start:nosandbox`
 while developing — packaged builds install the sandbox correctly and don't need
 it.
+
+Tests:
+
+```
+npm test
+```
+
+Node's built-in runner, no test dependencies. They pin the process-teardown,
+`PATH`-recovery and navigation rules — the seams where this app's real risk
+lives — and CI runs them on Linux and Windows before packaging anything. Write
+them to pass on both: a Windows checkout converts line endings to CRLF, and
+`fileURLToPath` returns backslashes there.
 
 Building installers:
 
@@ -112,6 +125,12 @@ verified by symbol inspection of the compiled binaries, which carry `napi_*`
 symbols and no `v8::` ones. N-API is ABI-stable across runtimes, so they load
 unmodified inside Electron. There is no `electron-rebuild` step, and adding one
 would be a mistake.
+
+## Security
+
+Report anything exploitable privately to <security@mirafold.com> rather than in
+a public issue — see [SECURITY.md](SECURITY.md), which also records the
+deliberate decisions behind the points below.
 
 ## Signing status
 
