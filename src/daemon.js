@@ -121,6 +121,10 @@ export class Daemon {
     this.#stopping = false;
 
     const env = await daemonEnv();
+    // stop() may have landed while we awaited the login shell — the window
+    // between start() and the spawn. Spawning now would create a daemon that
+    // nothing will ever kill.
+    if (this.#stopping) throw new Error("stopped before the daemon was spawned");
     const child = spawn(process.execPath, [daemonPath()], {
       cwd: folder,
       env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
@@ -205,9 +209,11 @@ export class Daemon {
    * anything ignoring it; on Windows the first taskkill is already final.
    */
   stop() {
+    // Set before the child check: start() consults it between its env await
+    // and the spawn, so a stop that lands pre-spawn still takes effect.
+    this.#stopping = true;
     const child = this.#child;
     if (!child?.pid) return;
-    this.#stopping = true;
     this.#child = null;
 
     killTree(child.pid, "SIGTERM");

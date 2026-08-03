@@ -29,6 +29,7 @@ let win = null;
 let folder = null;
 let daemon = null;
 let quitting = false;
+let bootSeq = 0;
 
 /**
  * Ask for a project folder. Mirafold sessions run in the daemon's working
@@ -93,19 +94,51 @@ function createWindow() {
  * Start (or restart) the daemon in `folder` and point the window at it.
  * Every launch produces a fresh port and a fresh auth token, so the URL is
  * always read from the daemon rather than reconstructed.
+ *
+ * Boots can overlap: File → Open Folder during a slow boot, or a quit while
+ * one is in flight. `bootSeq` makes the newest boot the only one allowed to
+ * touch shared state or talk to the user — a superseded boot's daemon was
+ * already stopped by whoever superseded it, so its failure is expected noise,
+ * not news. Without this, that stale failure nulled the live `daemon`
+ * reference (orphaning the new daemon past quit) and raised a spurious
+ * "couldn't start" dialog over a working session.
  */
 async function boot() {
+  const seq = ++bootSeq;
+  const dir = folder;
+  const current = () => seq === bootSeq && !quitting && win !== null;
+
   await win.loadFile(LOADING);
-  daemon = new Daemon(onDaemonCrash);
+  if (!current()) return;
+
+  const booting = new Daemon(onDaemonCrash);
+  daemon = booting;
+
+  let url;
   try {
-    const url = await daemon.start(folder);
-    setLastFolder(folder);
-    await win.loadURL(url);
-    win.setTitle(`Mirafold — ${path.basename(folder)}`);
+    url = await booting.start(dir);
   } catch (err) {
+    if (!current()) return;
     daemon = null;
-    await onBootFailure(err);
+    return onBootFailure(err);
   }
+  if (!current()) return;
+
+  setLastFolder(dir);
+  try {
+    await win.loadURL(url);
+  } catch (err) {
+    // A failed load does not mean a failed daemon. If the daemon died in the
+    // gap between reporting its URL and the page loading, onDaemonCrash owns
+    // the report — a dialog here too would stack a second one on its. Only a
+    // load failure with the daemon still alive is boot's news; stopping it
+    // then also suppresses the crash callback, so exactly one dialog shows.
+    if (!current() || !booting.running) return;
+    booting.stop();
+    daemon = null;
+    return onBootFailure(err);
+  }
+  win.setTitle(`Mirafold — ${path.basename(dir)}`);
 }
 
 /** Swap the open project: stop this daemon, start another elsewhere. */
@@ -119,6 +152,9 @@ async function openFolder() {
 }
 
 async function onBootFailure(err) {
+  // Same guard as onDaemonCrash: during quit (or with the window gone) there
+  // is no one to ask — a dialog would race app teardown, parentless.
+  if (quitting || !win) return;
   const { response } = await dialog.showMessageBox(win, {
     type: "error",
     title: "Mirafold couldn't start",
