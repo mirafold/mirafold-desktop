@@ -21,7 +21,7 @@ Windows will warn you about it. The steps below say exactly where.
 
 ## 1. Download
 
-<https://github.com/mirafold/mirafold-desktop/releases/download/v0.1.0/Mirafold-Setup-0.1.0.exe>
+<https://github.com/mirafold/mirafold-desktop/releases/download/v0.1.1/Mirafold-Setup-0.1.1.exe>
 
 (~230 MB, no GitHub account needed.)
 
@@ -31,7 +31,7 @@ in the downloads popup, click the **⋯** (or the warning itself) → **Keep** �
 
 ## 2. Install
 
-Double-click `Mirafold-Setup-0.1.0.exe`.
+Double-click `Mirafold-Setup-0.1.1.exe`.
 
 - A blue **"Windows protected your PC"** screen appears (SmartScreen). Click
   **More info**, then **Run anyway**.

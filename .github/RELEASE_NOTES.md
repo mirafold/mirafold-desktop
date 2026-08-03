@@ -3,6 +3,24 @@ Mirafold as a desktop app — no terminal, no Node, no npm.
 Pick a project folder, and Mirafold opens in its own window. Everything the
 `mirafold` npm package does, this does: it runs the same daemon, unmodified.
 
+## What changed in 0.1.1
+
+<!-- Refresh this section when cutting a release; the rest of the file is
+     evergreen install guidance reused by every build. -->
+
+Reliability and hardening. No feature changes.
+
+- Switching project folders (or quitting) while the app was still starting
+  could leave the background daemon running after you closed the app, and
+  could show a "couldn't start" error over a session that was working fine.
+- Coding agents installed through a version manager (nvm, asdf, volta, fnm)
+  could go undetected if your shell profile printed anything on startup —
+  a greeting, a fetch banner, or Ubuntu's own `sudo` hint.
+- A failed startup now shuts down everything it started, rather than leaving
+  agent processes behind.
+- The app no longer writes its session's access token to the system log, and
+  the window can no longer be navigated away from Mirafold to a local file.
+
 ## Which file do I want?
 
 **Linux**
