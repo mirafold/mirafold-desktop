@@ -122,9 +122,9 @@ archived in PLAN-ARCHIVE.md.*
 2. **Then, and only then, announce — and the announcement is now a launch of
    its own (Kyle, 2026-08-05).** The desktop app launches separately from the
    core product's 2026-07-31 launch, and its launch waits on the paid
-   metered-access tier (accounts + prepaid credits so non-technical users
-   never touch an API key — built server-side and upstream, nothing in this
-   repo), because zero-setup convenience is the story the launch tells.
+   metered-access tier (accounts + a flat subscription with a capped usage
+   allowance, so non-technical users never touch an API key — built
+   server-side and upstream, nothing in this repo), because zero-setup convenience is the story the launch tells.
    Requires Kyle's explicit go. A download page on mirafold.com lives in the
    site repo, not here.
 3. **Push the held `genui-shell` commit.** `6d31c39` corrects `POST-RELEASE.md`
