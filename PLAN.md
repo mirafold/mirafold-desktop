@@ -119,8 +119,14 @@ archived in PLAN-ARCHIVE.md.*
    that one file and nothing else is needed. Its download URL was verified
    anonymous-accessible (HTTP 200, `MZ` header, no auth) after the v0.1.1
    release published.
-2. **Then, and only then, announce.** Requires Kyle's explicit go. A download
-   page on mirafold.com lives in the site repo, not here.
+2. **Then, and only then, announce — and the announcement is now a launch of
+   its own (Kyle, 2026-08-05).** The desktop app launches separately from the
+   core product's 2026-07-31 launch, and its launch waits on the paid
+   metered-access tier (accounts + prepaid credits so non-technical users
+   never touch an API key — built server-side and upstream, nothing in this
+   repo), because zero-setup convenience is the story the launch tells.
+   Requires Kyle's explicit go. A download page on mirafold.com lives in the
+   site repo, not here.
 3. **Push the held `genui-shell` commit.** `6d31c39` corrects `POST-RELEASE.md`
    there, but that file ships in the **public** `mirafold/mirafold` repo, so
    pushing it announces this app's existence. Held deliberately; push it when
