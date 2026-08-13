@@ -2,7 +2,9 @@
 
 Mirafold Desktop is a **thin Electron shell** around the published `mirafold`
 npm package. Read `README.md` first for the architecture; this file is the set
-of rules that are easy to violate by accident.
+of rules that are easy to violate by accident. `GLOSSARY.md` is the Mirafold
+product vocabulary (shell, daemon, session, viewport, …); docs and user-facing
+copy here use its terms.
 
 ## The prime directive: this repo contains no product
 
