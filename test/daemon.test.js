@@ -497,7 +497,10 @@ test(
       assert.equal(ptyReport.pid, ptyPid);
       assert.equal(daemonReport.runAsNode, null);
       assert.equal(daemonReport.ledger, null);
-      assert.equal(daemonReport.electron, "43.4.0");
+      // The locked Electron's own version, not a hardcoded copy: the assertion
+      // stays exact (the bootstrap ran under the packaged Electron, not plain
+      // Node) without failing on every routine Electron upgrade.
+      assert.equal(daemonReport.electron, require("electron/package.json").version);
       assert.equal(ptyReport.runAsNode, null);
       assert.equal(ptyReport.ledger, null);
 

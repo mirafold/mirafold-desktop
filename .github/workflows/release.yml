@@ -43,9 +43,10 @@ on:
 
 # Least privilege by default; only the release job below opts up to write.
 #
-# This matters because the build job runs `npm ci` and electron-builder, which
-# execute code from the whole dependency tree (~400 packages, some with install
-# scripts). actions/checkout writes the job's token to disk in the workspace by
+# This matters because the build job runs electron-builder, which executes
+# code from the dependency tree (~400 packages; their lifecycle scripts are
+# additionally disabled below, matching CI and Shell intake).
+# actions/checkout writes the job's token to disk in the workspace by
 # default, so any one of those packages can read it. With a write-scoped token
 # a single compromised dependency could push to this repo or replace the
 # installers attached to a release — binaries that are unsigned and downloaded
@@ -59,6 +60,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read # builds and uploads artifacts; never writes to the repo
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false # one platform failing shouldn't hide the other's result
       matrix:
@@ -69,6 +73,10 @@ jobs:
           - name: windows
             os: windows-latest
             args: --win
+    env:
+      NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+      NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/mirafold-empty-npmrc
+      NPM_CONFIG_IGNORE_SCRIPTS: "true"
     steps:
       # Nothing in this job pushes, so don't leave a credential on disk for the
       # dependency code that runs a few steps below.
@@ -78,7 +86,6 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-          cache: npm
 
       # A tag that doesn't match package.json is a mis-cut release. The stable
       # feed also refuses prerelease versions outright: a beta must never become
@@ -93,8 +100,33 @@ jobs:
           inputs.fail_platform == matrix.name
         run: node -e "process.exit(1)"
 
-      - run: npm ci
-      - run: npm test
+      # Same script-free install boundary as CI and Shell intake: lifecycle
+      # scripts stay disabled (the packaged tree needs none — Electron 43 has no
+      # postinstall, and both native modules ship prebuilt), so what electron-
+      # builder packages is byte-identical to the signature-verified registry
+      # tarballs rather than whatever ~400 packages' install scripts leave
+      # behind.
+      - name: Use the declared npm release toolchain
+        run: |
+          set -euo pipefail
+          touch "$NPM_CONFIG_USERCONFIG"
+          chmod 600 "$NPM_CONFIG_USERCONFIG"
+          npm install --global npm@12.0.2 \
+            --ignore-scripts \
+            --audit=false \
+            --fund=false \
+            --registry=https://registry.npmjs.org
+          test "$(npm --version)" = "12.0.2"
+
+      - name: Install and test exact tagged source
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --audit=false --fund=false \
+            --registry=https://registry.npmjs.org
+          npm ls --all
+          npm audit --audit-level=moderate
+          npm audit signatures --include-attestations
+          npm test
 
       # electron-builder downloads the Electron dist it packages by itself, so
       # node_modules/electron/dist is NOT needed here — only the package.json

@@ -93,11 +93,19 @@ function escapeRegularExpression(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function parsePassingTests(output, label) {
+function parsePassingTests(output, name, label) {
   const pass = output.match(/^# pass (\d+)$/m);
   const fail = output.match(/^# fail (\d+)$/m);
   if (pass === null || Number(pass[1]) < 1 || fail === null || Number(fail[1]) !== 0) {
     throw new Error(`${label} returned no passing test summary`);
+  }
+  // `# pass 1` alone proves nothing about the named scenario: Node counts the
+  // test FILE as one passing test, so a --test-name-pattern that matches no
+  // test at all — a renamed or deleted evidence test — still reports one pass
+  // (verified on Node 22, 2026-08-14). Only the named TAP result line proves
+  // the referenced test really ran in this invocation.
+  if (!new RegExp(`^ok \\d+ - ${escapeRegularExpression(name)}$`, "m").test(output)) {
+    throw new Error(`${label} did not run the named test "${name}"`);
   }
   return Number(pass[1]);
 }
@@ -128,7 +136,7 @@ export function runReleaseRehearsal({ root = ROOT, spawn = spawnSync } = {}) {
           `${rehearsal.name} failed ${evidence.file} (${result.signal ?? `exit ${result.status}`}): ${detail}`,
         );
       }
-      passingTests += parsePassingTests(String(result.stdout), `${rehearsal.name} ${evidence.file}`);
+      passingTests += parsePassingTests(String(result.stdout), evidence.test, `${rehearsal.name} ${evidence.file}`);
     }
     results.push({
       name: rehearsal.name,

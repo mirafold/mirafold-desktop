@@ -140,8 +140,10 @@ npm test
 
 Node's built-in runner, no test dependencies. They pin process teardown across
 separate pseudo-terminal groups, the asynchronous quit gate, non-destructive
-platform-installer failures, `PATH` recovery, and navigation rules — the seams
-where this app's real risk lives. CI runs them on Linux and Windows before
+platform-installer failures, `PATH` recovery, navigation rules, and the
+window's actual security wiring (that the real window consults those rules on
+every navigation, redirect, popup, and permission request) — the seams where
+this app's real risk lives. CI runs them on Linux and Windows before
 packaging anything. Write them to pass on both: a Windows checkout converts
 line endings to CRLF, and `fileURLToPath` returns backslashes there.
 
@@ -215,10 +217,15 @@ installer build, or GitHub Release action from a maintainer.
 state-machine rehearsal. It covers no update, one update, rapid consecutive
 updates, either native build failing, stale `main`, a duplicate run, every safe
 retry state, publication isolation, and the exact Shell identity carried from
-reviewed intake into the proposed native package. A manual dispatch of the
+reviewed intake into the proposed native package. Each scenario must prove its
+named evidence test really ran — Node counts a test file itself as one passing
+test, so a bare pass count would accept a renamed or deleted scenario test. A manual dispatch of the
 `Release` workflow is the separate native Linux/Windows rehearsal: it builds,
 smoke-checks, verifies, retains, and attests the nine files, while the event gate
-keeps its only `contents: write` publication job skipped. Its manual form also
+keeps its only `contents: write` publication job skipped. Its build jobs use
+the same script-free pinned npm toolchain and signature/advisory gates as
+Shell intake, so the manual tag path and the automated path package identical,
+registry-verified bytes. Its manual form also
 accepts `fail_platform=linux` or `fail_platform=windows`; the selected native
 leg fails before dependency code, proving that either platform failure prevents
 provenance and publication while the other matrix leg is still allowed to run.

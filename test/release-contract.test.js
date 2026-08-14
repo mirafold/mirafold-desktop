@@ -27,6 +27,7 @@ import {
   verifyGitHubDraft,
   verifyGitHubPublished,
   verifyPlatformArtifacts,
+  verifyPlatformPayloadArtifacts,
 } from "../scripts/release-contract.mjs";
 
 const VERSION = "1.2.3";
@@ -214,6 +215,38 @@ test("the complete contract rejects omitted metadata and blockmaps", async () =>
     await assert.rejects(
       verifyPlatformArtifacts(directory, VERSION, "windows"),
       /missing=\[Mirafold-Setup-1\.2\.3\.exe\.blockmap\]/,
+    );
+  });
+});
+
+// Pins the 2026-08-14 test-audit finding: every prior tamper fixture also
+// changed the payload's SIZE, so the size guard masked the SHA-512 guard —
+// deleting the hash equality left the whole suite green. The .deb has no
+// block map, so before the SHA256SUMS manifest exists (the exact state the
+// CI `manifest` step runs in) the metadata SHA-512 is the only check that can
+// refuse these bytes.
+test("a same-size payload substitution is refused by the metadata SHA-512 alone", async () => {
+  await temporaryDirectory(async (directory) => {
+    writeLinuxPayloads(directory);
+    const debFile = path.join(directory, `mirafold-desktop_${VERSION}_amd64.deb`);
+    const original = readFileSync(debFile);
+    const substituted = Buffer.from("a complete tiny DEBIAN fixture");
+    assert.equal(substituted.length, original.length, "the substitution fixture must keep the size");
+    writeFileSync(debFile, substituted);
+    await assert.rejects(
+      verifyPlatformPayloadArtifacts(directory, VERSION, "linux"),
+      /SHA-512 does not match/,
+    );
+
+    writeFileSync(debFile, original);
+    const metadataFile = path.join(directory, "latest-linux.yml");
+    const corrupted = readFileSync(metadataFile, "utf8")
+      .replace(sha512(original), Buffer.alloc(64, 7).toString("base64"));
+    writeFileSync(metadataFile, corrupted);
+    await assert.rejects(
+      verifyPlatformPayloadArtifacts(directory, VERSION, "linux"),
+      /SHA-512 does not match/,
+      "a corrupted metadata digest over an intact payload must also be refused",
     );
   });
 });
