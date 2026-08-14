@@ -11,25 +11,38 @@ installing it is a download and a double-click.
 **Download:** [Releases](https://github.com/mirafold/mirafold-desktop/releases)
 — Linux (`.deb`, `.tar.gz`, `.AppImage`) and Windows (`.exe`).
 
-## How Linux updates work
+## How updates work
 
 The public `v0.1.1` build predates the updater, so it cannot discover a newer
 release. Install the first updater-capable release manually once. After that,
 Mirafold checks for a newer Desktop release after startup and through **Help →
 Check for Updates…**. A Desktop release carries its own exact Mirafold Shell
-version; the Help menu shows both versions separately.
+version; the Help menu shows both versions separately. It never installs a
+different Shell package from npm on an end user's machine.
 
 | installed form | when a newer release exists |
 | --- | --- |
-| `.AppImage` | Downloads and verifies the new AppImage, asks before restarting, stops the complete daemon/agent process tree, and replaces the current user-writable file without administrator access. |
+| direct Windows `.exe` | Downloads and verifies the complete NSIS installer, asks before restarting, stops the complete daemon/agent process tree, then opens the visible per-user installer and requests that the new version reopen. Mirafold waits for Windows to acknowledge that launch; a launch failure restores the working session without quitting it. The automated Windows probe proves a silent current-user install with no machine-wide registration; the visible installer and elevation behavior still await the human protocol below. |
+| `.AppImage` | Downloads and verifies the new AppImage, asks before restarting, and stops the complete daemon/agent process tree. It stages the replacement beside its destination, retains the current executable until the new file launches, and rolls a custom-filename replacement back if launch fails. No administrator access is needed. |
 | `.deb` | Downloads and verifies the new Debian package, asks before restarting, stops the complete daemon/agent process tree, then requests administrator authorization through the available system elevation helper before running `dpkg -i`. The local probe selected `pkexec`; the exact authorization dialog depends on the Linux desktop. |
 | extracted `.tar.gz` | Shows a native notice and opens the official HTTPS Releases page. It never downloads an installer or changes the extracted tree; close Mirafold and replace it manually. |
+| Microsoft Store package | Not offered yet. Once one exists, it will use the Store's update channel; the app's GitHub updater is disabled for that package. |
 
-Choosing **Later** never installs on ordinary quit. Microsoft Store packages,
-once offered, use the Store's update channel instead of contacting GitHub.
-Mirafold also refuses lower-numbered Desktop versions. If a release must be
-recovered, maintainers rebuild the last known-good source as a new, higher
-Desktop version so every user moves forward through the same verified path.
+Choosing **Later** never installs on ordinary quit. Mirafold also refuses
+lower-numbered Desktop versions. If a release must be recovered, maintainers
+rebuild the last known-good source as a new, higher Desktop version so every
+user moves forward through the same verified path. A failed background check
+does not interrupt a working session; a manual check reports the failure. An
+installer is not started unless Mirafold confirms that its local processes
+stopped, and an installer-start failure attempts to restore the current
+session. On Linux, that proof includes pseudo-terminal children that create
+their own sessions and process groups rather than remaining in the daemon's
+group.
+
+The exact Windows checks that automation cannot perform are in
+[WINDOWS-TESTING.md](WINDOWS-TESTING.md). The separate free Store path, its
+account boundary, and everything that remains unimplemented are recorded in
+[MICROSOFT-STORE.md](MICROSOFT-STORE.md).
 
 ## What this is, precisely
 
@@ -67,9 +80,19 @@ as a child instead, for three reasons:
    `spawn()`. An in-process daemon would read `process.cwd()`, which is global
    and effectively one-shot.
 
-The child is started with **Electron's own binary** under
-`ELECTRON_RUN_AS_NODE=1`, which makes it behave as a plain Node interpreter.
-That is what lets this app run on a machine with no Node.js installed.
+The bootstrap is started with **Electron's own binary** under
+`ELECTRON_RUN_AS_NODE=1`, which makes that one process behave as a plain Node
+interpreter. It removes the switch before importing Mirafold Shell, so Shell
+and agent commands inherit an ordinary environment. That is what lets this app
+run on a machine with no separately installed Node.js without changing the
+meaning of an Electron executable an agent might launch.
+
+On Linux, the bootstrap records each pseudo-terminal's PID and kernel start
+time synchronously when it is created; the app corroborates those identities
+against `/proc` before signalling them. On Windows, a PowerShell wrapper joins
+a kill-on-close Job Object before starting the daemon, so a daemon crash also
+closes every descendant. Ordinary quit waits through bounded graceful and
+forced cleanup before Electron exits.
 
 ### There is no bridge into the page
 
@@ -85,8 +108,12 @@ need no bridge.
 | file | what it does |
 | --- | --- |
 | `src/main.js` | app lifecycle, window, menu, folder picker, crash dialog |
-| `src/daemon.js` | spawn the daemon, read its URL, kill its whole process tree |
+| `src/app-lifecycle.js` | hold ordinary Electron quit until asynchronous cleanup finishes |
+| `src/daemon-bootstrap.cjs` | enter packaged Node mode, scrub it, and register Linux pseudo-terminals |
+| `src/daemon.js` | spawn the daemon, read its URL, track and stop its whole process tree |
+| `src/windows-daemon-job.ps1` | own the Windows daemon tree with a kill-on-close Job Object |
 | `src/navigation.js` | what the window is allowed to load, and what goes to the browser |
+| `src/platform-updaters.js` | atomic AppImage replacement and acknowledged NSIS launch |
 | `src/updater.js` | update policy for direct installers, Store packages, and Linux tar archives |
 | `src/login-env.js` | recover the login shell's `PATH` so agent CLIs are findable |
 | `src/state.js` | remember the last-opened folder |
@@ -111,11 +138,12 @@ Tests:
 npm test
 ```
 
-Node's built-in runner, no test dependencies. They pin the process-teardown,
-`PATH`-recovery and navigation rules — the seams where this app's real risk
-lives — and CI runs them on Linux and Windows before packaging anything. Write
-them to pass on both: a Windows checkout converts line endings to CRLF, and
-`fileURLToPath` returns backslashes there.
+Node's built-in runner, no test dependencies. They pin process teardown across
+separate pseudo-terminal groups, the asynchronous quit gate, non-destructive
+platform-installer failures, `PATH` recovery, and navigation rules — the seams
+where this app's real risk lives. CI runs them on Linux and Windows before
+packaging anything. Write them to pass on both: a Windows checkout converts
+line endings to CRLF, and `fileURLToPath` returns backslashes there.
 
 ### Preparing a Shell release
 
@@ -154,6 +182,11 @@ also silently installs the actual NSIS candidate in explicit current-user mode,
 proves it registered only under that user, repeats the runtime/daemon smoke from
 the installed bytes, silently uninstalls it, and proves its files and registry
 entry are gone.
+
+The separate Linux update probe uses the real bundled daemon and node-pty. It
+starts a heartbeat command inside a pseudo-terminal, performs the verified
+AppImage and Debian update lifecycles against a loopback feed, and refuses the
+install if that heartbeat can still run after Desktop's shutdown proof.
 
 After every read-only gate succeeds, a separate job reconstructs the same
 candidate without installing dependencies. It permits only the reviewed
@@ -196,14 +229,17 @@ interactive destination selection, Start-menu launch, folder selection, or the
 full agent/ConPTY/file-watching experience. Those remain the real-Windows human
 checks in [WINDOWS-TESTING.md](WINDOWS-TESTING.md).
 
-Every workflow action is pinned to a reviewed commit SHA. Normal pushes and
-pull requests run stable `test (linux)` and `test (windows)` checks, while
-weekly Dependabot pull requests review npm dependencies and those action pins.
-The exact proposed repository rules, release environments, free security
-settings, account responsibilities, and break-glass recovery procedure are in
-[RELEASE-RECOVERY.md](RELEASE-RECOVERY.md). Those external GitHub settings are
-prepared but intentionally not applied until the non-publishing rehearsal
-proves the live workflow behavior.
+Every workflow action is pinned to a reviewed commit SHA. The committed CI
+policy defines stable `test (linux)` and `test (windows)` checks for `main` and
+pull requests, while the Dependabot policy requests weekly review of npm
+dependencies and those action pins. The exact proposed repository rules,
+release environments, free security settings, account responsibilities, and
+break-glass recovery procedure are in
+[RELEASE-RECOVERY.md](RELEASE-RECOVERY.md). The live non-publishing rehearsal
+has passed, but those external GitHub settings remain unapplied. Applying them
+is a separate repository-administration action after this work reaches `main`;
+the local reconciler refuses to activate the ruleset before both named CI
+checks have succeeded there.
 
 Building installers:
 
@@ -245,12 +281,25 @@ deliberate decisions behind the points below.
 
 Nothing here is code-signed yet.
 
-- **Windows** ships unsigned: SmartScreen warns, users click through with
-  "More info → Run anyway". An OV certificate ($200–400/yr) would remove it.
-- **macOS is not built at all.** Unsigned Mac apps aren't warned about, they're
-  refused by Gatekeeper — so an unsigned `.dmg` would be useless to whoever
-  downloaded it. It needs Apple Developer Program membership ($99/yr) plus
-  notarization first.
+- **Direct Windows downloads** are unsigned. Microsoft Defender SmartScreen
+  can show **Windows protected your PC** because every new unsigned file starts
+  without publisher reputation. Windows may offer **More info → Run anyway**,
+  but device policy can prevent continuation. Verify that the file came from
+  this repository's exact release and matches its published SHA-256 before
+  deciding whether to run it. A conventional certificate would display a
+  verified publisher and let reputation carry across releases, but Microsoft
+  says even a newly signed binary can still be warned about while reputation
+  accumulates. A future Microsoft Store package would instead be signed and
+  updated by the Store at no charge; it does not exist yet. See Microsoft's
+  current [SmartScreen guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation).
+- **macOS is not built or supported.** Apple documents a manual security
+  override for an app from an unidentified developer, so an unsigned download
+  is not categorically impossible to open. It is not the normal distribution
+  experience Mirafold intends to ask users to accept. A supported direct Mac
+  release would first need Developer ID signing, notarization, packaging, and
+  real-Mac testing; see Apple's [Developer ID](https://developer.apple.com/support/developer-id/)
+  and [Gatekeeper override](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac)
+  documentation.
 
 ## License
 

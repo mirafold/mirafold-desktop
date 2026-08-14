@@ -314,6 +314,25 @@ test("an installer error recovers Mirafold and remains non-fatal", async () => {
   assert.match(h.messages.at(-1).message, /keep using this version/);
 });
 
+test("an asynchronous installer error completes recovery before the install request returns", async () => {
+  const h = harness({ messageResponse: () => 0 });
+  h.fakeUpdater.installImplementation = async () => {
+    await flushEvents();
+    h.fakeUpdater.emit("error", new Error("installer launch failed asynchronously"));
+    return false;
+  };
+
+  await h.controller.start();
+  h.fakeUpdater.emit("update-downloaded", { version: "1.2.4" });
+  await flushEvents();
+  await flushEvents();
+  await flushEvents();
+
+  assert.deepEqual(h.lifecycle, ["prepare", "recover"]);
+  assert.equal(h.messages.at(-1).title, "Mirafold update failed");
+  assert.match(h.messages.at(-1).detail, /asynchronously/);
+});
+
 test("manual check/download failures are reported without leaking URL credentials", async () => {
   const h = harness();
   h.fakeUpdater.checkImplementation = async () => {

@@ -10,13 +10,17 @@ name: Release
 # cross-built from Linux would install fine and then fail the moment a user
 # opened a terminal pane or a file tree.
 #
-# Everything here is UNSIGNED, deliberately (2026-08-02 decision):
-#   - Windows: SmartScreen shows an "unrecognized app" warning. Users can click
-#     through with "More info" -> "Run anyway". An OV code-signing certificate
-#     ($200-400/yr) would remove it; not bought yet.
-#   - macOS: not built at all. Gatekeeper refuses a quarantined unsigned app
-#     outright rather than warning, so an unsigned .dmg would be useless to a
-#     downloader. Needs Apple Developer Program ($99/yr) + notarization first.
+# Direct-download artifacts here are UNSIGNED, deliberately (2026-08-02
+# decision). Windows SmartScreen can warn about each new unsigned file; a
+# device's policy may offer "More info" -> "Run anyway" or may prevent a
+# bypass. A conventional signature would establish the publisher and carry
+# reputation across releases, but does not guarantee that a new binary avoids
+# an initial warning. The separately planned Microsoft Store AppX would receive
+# Store signing, but no Store target exists here. macOS is not built: a normal
+# direct Mac distribution would require Developer ID signing, notarization,
+# packaging, and real-Mac validation. Apple documents a manual unidentified-
+# developer override, so the old claim that an unsigned app is categorically
+# unusable was inaccurate.
 #
 # Every GitHub-authored action is pinned to one reviewed commit. There are no
 # stored release secrets: publication uses the automatic GITHUB_TOKEN, while

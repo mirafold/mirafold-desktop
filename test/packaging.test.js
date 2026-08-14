@@ -18,6 +18,14 @@ const packageMetadata = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 );
 const mainSource = readFileSync(new URL("../src/main.js", import.meta.url), "utf8");
+const daemonBootstrapSource = readFileSync(
+  new URL("../src/daemon-bootstrap.cjs", import.meta.url),
+  "utf8",
+);
+const windowsJobSource = readFileSync(
+  new URL("../src/windows-daemon-job.ps1", import.meta.url),
+  "utf8",
+);
 
 test("electron-builder preserves npm-selected N-API binaries", () => {
   assert.match(builderConfig, /(?:^|\n)npmRebuild:\s*false(?:\n|$)/);
@@ -26,6 +34,11 @@ test("electron-builder preserves npm-selected N-API binaries", () => {
 test("the updater protocol implementation is an exact runtime dependency", () => {
   assert.equal(packageMetadata.dependencies?.["electron-updater"], "6.8.9");
   assert.equal(packageMetadata.devDependencies?.["electron-updater"], undefined);
+});
+
+test("blockmap verification pins the builder's existing hash implementation for development only", () => {
+  assert.equal(packageMetadata.devDependencies?.["@noble/hashes"], "2.2.0");
+  assert.equal(packageMetadata.dependencies?.["@noble/hashes"], undefined);
 });
 
 test("packaged update metadata targets only Mirafold's public stable GitHub channel", () => {
@@ -37,13 +50,15 @@ test("packaged update metadata targets only Mirafold's public stable GitHub chan
   assert.doesNotMatch(builderConfig, /(?:^|\n)\s*token:/, "a client update credential must never be packaged");
 });
 
-test("the packaged runtime wires Linux form detection to the updater policy", () => {
+test("the packaged runtime wires Linux form detection and guarded platform updaters", () => {
   for (const required of [
     "desktopUpdateStrategy({",
     "process.env.APPIMAGE",
     'path.join(process.resourcesPath, "package-type")',
     'updateStrategy === "manual-download"',
     "new AppUpdater()",
+    "createSafeAppImageUpdater(AppImageUpdater",
+    "createSafeNsisUpdater(NsisUpdater",
   ]) {
     assert.ok(mainSource.includes(required), `main-process update wiring omits ${required}`);
   }
@@ -55,6 +70,26 @@ test("both native wrappers load their installed platform packages", () => {
 
   assert.equal(typeof pty.spawn, "function");
   assert.equal(typeof watcher.subscribe, "function");
+});
+
+test("packaging carries the daemon bootstrap and Windows kill-on-close wrapper", () => {
+  assert.match(builderConfig, /(?:^|\n)files:\s*\n\s+- src\/\*\*\/\*(?:\n|$)/);
+  const deleteNodeMode = daemonBootstrapSource.indexOf("delete process.env.ELECTRON_RUN_AS_NODE");
+  const importDaemon = daemonBootstrapSource.indexOf("await import(");
+  assert.ok(deleteNodeMode !== -1 && deleteNodeMode < importDaemon);
+
+  for (const required of [
+    "CreateJobObject",
+    "SetInformationJobObject",
+    "AssignProcessToJobObject",
+    "0x00002000",
+  ]) {
+    assert.ok(windowsJobSource.includes(required), `Windows Job Object wrapper omits ${required}`);
+  }
+  assert.ok(
+    windowsJobSource.indexOf("AssignProcessToJobObject") < windowsJobSource.lastIndexOf("& $ElectronExecutable"),
+    "the wrapper must join the Job Object before starting Electron",
+  );
 });
 
 test("Linux desktop filename and runtime window identity stay synchronized", () => {

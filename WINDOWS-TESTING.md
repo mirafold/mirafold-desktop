@@ -10,6 +10,21 @@ interactive pseudo-console, the file watcher, or a human-driven update and
 restart. Those claims stay unverified until the evidence record below is
 complete.
 
+## Candidate status — paused; the recorded executable is superseded
+
+There is currently **no candidate authorized for human testing**. The retained
+candidate recorded below was built before the daemon Job Object, environment
+scrubbing, serialized folder switching, and semantic blockmap verification
+were added. Its exact historical values remain here so evidence is not erased,
+but do not download, install, or give that executable to a tester.
+
+Before Session A begins, a fresh non-publishing Windows run from the current
+implementation must pass the normal installed lifecycle plus the new forced
+daemon-crash descendant probe. This document must then replace the historical
+source commit, run, artifact, retention deadline, byte size, SHA-256, and
+embedded versions with that one coherent result. Until that replacement is
+written, every Session A instruction below is reference material only.
+
 Do not disable Microsoft Defender, SmartScreen, Smart App Control, or any other
 security control for this test. Mirafold's direct installer is currently
 unsigned. If Windows offers a per-file continuation after the tester has
@@ -20,10 +35,11 @@ showed. That is useful evidence, not a failed favor.
 ## Why this requires two sessions
 
 The public `v0.1.1` package was built before the updater existed and its release
-has no updater metadata. It cannot discover a later Desktop release. The
-private candidate below contains the current updater, but it is still numbered
-`0.1.1`, so there is no higher public version for it to install. One session
-therefore cannot honestly establish every Windows claim.
+has no updater metadata. It cannot discover a later Desktop release. A fresh
+private candidate will contain the current updater, but there is still
+no higher public version for it to install. One session therefore cannot
+honestly establish every Windows claim. The historical candidate recorded
+below is superseded and is not that fresh candidate.
 
 1. **Candidate session:** exercise the current private package's visible
    installer and ordinary runtime before any release decision. This can find a
@@ -63,7 +79,7 @@ Ask the tester to avoid screenshots containing credentials, private filenames,
 their Windows username, or unrelated applications. Exact warning and error
 text can be transcribed when a screenshot would expose private information.
 
-## Current candidate record
+## Superseded historical candidate record — do not use
 
 This record identifies the private package for the first session. It is not the
 published `v0.1.1` installer even though both files have the same name.
@@ -80,17 +96,22 @@ published `v0.1.1` installer even though both files have the same name.
 | Embedded versions | Mirafold Desktop `0.1.1`; Mirafold Shell `0.3.7` |
 
 The adjacent `SHA256SUMS-windows.txt`, updater metadata, block map, and payload
-were independently rechecked with the repository's release-contract verifier.
-The same workflow's automated install/run/uninstall proof passed. The later
-commit `6ce2b58` records that proof but changes only documentation.
+were independently rechecked with the repository's then-current
+release-contract verifier. The same workflow's automated
+install/run/uninstall proof passed. It did not run the current semantic block
+checksum gate or Job Object crash probe. The later commit `6ce2b58` records the
+historical proof but changes only documentation.
 
 GitHub may require a signed-in account to retrieve a retained Actions artifact.
 That is another reason this download cannot stand in for the later anonymous
-GitHub Release test. If the artifact expires, run a new non-publishing
-rehearsal and replace this entire record; do not substitute the older public
-`v0.1.1` file.
+GitHub Release test. Even before this artifact expires, it is superseded. Run a
+new non-publishing rehearsal and replace this entire record; do not substitute
+either this artifact or the older public `v0.1.1` file.
 
 ## Session A: current candidate
+
+**Paused:** do not perform this session until the candidate-status section has
+been replaced with a fresh exact record from the current implementation.
 
 ### 1. Establish the clean test boundary
 
@@ -211,9 +232,10 @@ Windows reputation flow as the production direct-download observation. Verify
 the exact byte size and SHA-256 supplied in the completed table before running
 the installer.
 
-Install and launch the bridge through the same visible-installer, no-UAC,
-Start-menu, folder-picker, and live-agent checks used in Session A. Confirm the
-Help menu shows the bridge Desktop and Shell versions.
+Install and launch the bridge through the same visible current-user installer,
+Start-menu, folder-picker, and live-agent checks used in Session A. Record UAC
+again rather than assuming it is absent. Confirm the Help menu shows the bridge
+Desktop and Shell versions.
 
 Leave Mirafold open and connected without choosing **Check for Updates…**. The
 startup check should discover and download the higher public target in the

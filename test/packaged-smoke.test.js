@@ -30,6 +30,7 @@ function daemonSmokeText() {
     processTreeStopped: true,
     unreachableAfterStop: true,
     crashReported: false,
+    windowsCrashTreeStopped: true,
   })}\n`;
 }
 
@@ -166,6 +167,7 @@ test("the packaged runtime starts, reaches, and completely stops its daemon", (t
   assert.equal(report.processTreeStopped, true);
   assert.equal(report.unreachableAfterStop, true);
   assert.equal(report.crashReported, false);
+  assert.equal(report.windowsCrashTreeStopped, null);
 });
 
 test("the packaged daemon smoke rejects credential-bearing diagnostics", (t) => {
@@ -213,6 +215,7 @@ test("the Windows packaged daemon smoke uses native tasklist and proves no Miraf
   });
 
   assert.equal(result.executableProcessesAfterProbe, 0);
+  assert.equal(result.windowsCrashTreeStopped, true);
   assert.deepEqual(calls[1], {
     command: "tasklist.exe",
     args: ["/FI", "IMAGENAME eq Mirafold.exe", "/FO", "CSV", "/NH"],

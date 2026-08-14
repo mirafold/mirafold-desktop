@@ -15,14 +15,23 @@
 // a desktop app owes you — a real folder picker, a menu, a crash dialog — live
 // out here in the main process, where they need no bridge at all.
 
-import { app, BrowserWindow, dialog, Menu, shell } from "electron";
+import {
+  app,
+  autoUpdater as electronAutoUpdater,
+  BrowserWindow,
+  dialog,
+  Menu,
+  shell,
+} from "electron";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createBeforeQuitHandler } from "./app-lifecycle.js";
 import { Daemon } from "./daemon.js";
 import { daemonOriginFromUrl, navigationVerdict } from "./navigation.js";
 import { installPermissionGuards } from "./permissions.js";
+import { createSafeAppImageUpdater, createSafeNsisUpdater } from "./platform-updaters.js";
 import { lastFolder, setLastFolder } from "./state.js";
 import { createDesktopUpdater, desktopUpdateStrategy } from "./updater.js";
 
@@ -38,6 +47,7 @@ let daemon = null;
 let daemonOrigin = null;
 let quitting = false;
 let bootSeq = 0;
+let folderChangePromise = null;
 let desktopUpdater = null;
 
 /**
@@ -46,12 +56,15 @@ let desktopUpdater = null;
  * "run mirafold in the directory you want to work in".
  */
 async function pickFolder(title = "Choose a project folder") {
-  const { canceled, filePaths } = await dialog.showOpenDialog({
+  const options = {
     title,
     properties: ["openDirectory", "createDirectory"],
     buttonLabel: "Open",
     defaultPath: folder ?? app.getPath("home"),
-  });
+  };
+  const { canceled, filePaths } = win && !win.isDestroyed()
+    ? await dialog.showOpenDialog(win, options)
+    : await dialog.showOpenDialog(options);
   return canceled || !filePaths[0] ? null : filePaths[0];
 }
 
@@ -111,15 +124,13 @@ function createWindow() {
  * Every launch produces a fresh port and a fresh auth token, so the URL is
  * always read from the daemon rather than reconstructed.
  *
- * Boots can overlap: File → Open Folder during a slow boot, or a quit while
- * one is in flight. `bootSeq` makes the newest boot the only one allowed to
- * touch shared state or talk to the user — a superseded boot's daemon was
- * already stopped by whoever superseded it, so its failure is expected noise,
- * not news. Without this, that stale failure nulled the live `daemon`
- * reference (orphaning the new daemon past quit) and raised a spurious
- * "couldn't start" dialog over a working session.
+ * A quit or folder change can supersede a boot while it is in flight.
+ * `bootSeq` makes the newest boot the only one allowed to touch shared state or
+ * talk to the user. Every stale path also stops the particular Daemon it
+ * created; sequence ownership alone is not process ownership.
  */
 async function boot() {
+  if (quitting || !win) return;
   const seq = ++bootSeq;
   const dir = folder;
   const current = () => seq === bootSeq && !quitting && win !== null;
@@ -128,23 +139,36 @@ async function boot() {
   await win.loadFile(LOADING);
   if (!current()) return;
 
-  const booting = new Daemon(onDaemonCrash);
+  const booting = new Daemon((info) => onDaemonCrash(booting, info));
   daemon = booting;
+
+  const retire = async () => {
+    const clean = await booting.stop();
+    if (daemon === booting) {
+      daemon = null;
+      daemonOrigin = null;
+    }
+    return clean;
+  };
 
   let url;
   try {
     url = await booting.start(dir);
   } catch (err) {
+    await retire();
     if (!current()) return;
-    daemon = null;
     return onBootFailure(err);
   }
-  if (!current()) return;
+  if (!current() || daemon !== booting) {
+    await retire();
+    return;
+  }
 
   const origin = daemonOriginFromUrl(url);
   if (origin === null) {
-    void booting.stop();
-    daemon = null;
+    const clean = await retire();
+    if (!current()) return;
+    if (!clean) return onDaemonCleanupFailure("starting Mirafold");
     return onBootFailure(new Error("The daemon reported an invalid local URL."));
   }
 
@@ -158,36 +182,74 @@ async function boot() {
     // the report — a dialog here too would stack a second one on its. Only a
     // load failure with the daemon still alive is boot's news; stopping it
     // then also suppresses the crash callback, so exactly one dialog shows.
-    if (!current() || !booting.running) return;
-    daemonOrigin = null;
-    void booting.stop();
-    daemon = null;
+    if (!current() || daemon !== booting) {
+      await retire();
+      return;
+    }
+    if (!booting.running) return;
+    const clean = await retire();
+    if (!current()) return;
+    if (!clean) return onDaemonCleanupFailure("recovering from a page-load failure");
     return onBootFailure(err);
+  }
+  if (!current() || daemon !== booting || !booting.running) {
+    await retire();
+    return;
   }
   win.setTitle(`Mirafold — ${path.basename(dir)}`);
 }
 
 /** Swap the open project: stop this daemon, start another elsewhere. */
-async function openFolder() {
+async function performFolderChange() {
+  if (quitting || !win) return;
   const chosen = await pickFolder("Open another project folder");
-  if (!chosen) return;
+  if (!chosen || quitting || !win) return;
+  ++bootSeq;
   daemonOrigin = null;
-  void daemon?.stop();
+  const stopping = daemon;
   daemon = null;
+  const clean = stopping ? await stopping.stop() : true;
+  if (!clean) return onDaemonCleanupFailure("switching project folders");
+  if (quitting || !win) return;
   folder = chosen;
   await boot();
+}
+
+function openFolder() {
+  if (folderChangePromise) return folderChangePromise;
+  folderChangePromise = performFolderChange().finally(() => {
+    folderChangePromise = null;
+  });
+  return folderChangePromise;
 }
 
 async function loadAutoUpdater(updateStrategy) {
   // electron-updater is CommonJS. Read either Node's detected named export or
   // the default object so this remains correct across Node/Electron interop
   // changes. Tar archives need AppUpdater's version/feed comparison without a
-  // platform installer; every directly installable form uses autoUpdater.
+  // platform installer; directly installable forms use the matching platform
+  // updater, with Mirafold's guarded launch/replacement step below.
   const updaterModule = await import("electron-updater");
   if (updateStrategy === "manual-download") {
     const AppUpdater = updaterModule.AppUpdater ?? updaterModule.default?.AppUpdater;
     if (!AppUpdater) throw new Error("electron-updater did not export AppUpdater");
     return new AppUpdater();
+  }
+  const emitBeforeQuit = () => electronAutoUpdater.emit("before-quit-for-update");
+  if (process.platform === "win32") {
+    const NsisUpdater = updaterModule.NsisUpdater ?? updaterModule.default?.NsisUpdater;
+    if (!NsisUpdater) throw new Error("electron-updater did not export NsisUpdater");
+    const MirafoldNsisUpdater = createSafeNsisUpdater(NsisUpdater, {
+      emitBeforeQuit,
+      openPath: (installerPath) => shell.openPath(installerPath),
+    });
+    return new MirafoldNsisUpdater();
+  }
+  if (process.platform === "linux" && typeof process.env.APPIMAGE === "string") {
+    const AppImageUpdater = updaterModule.AppImageUpdater ?? updaterModule.default?.AppImageUpdater;
+    if (!AppImageUpdater) throw new Error("electron-updater did not export AppImageUpdater");
+    const MirafoldAppImageUpdater = createSafeAppImageUpdater(AppImageUpdater, { emitBeforeQuit });
+    return new MirafoldAppImageUpdater();
   }
   const autoUpdater = updaterModule.autoUpdater ?? updaterModule.default?.autoUpdater;
   if (!autoUpdater) throw new Error("electron-updater did not export autoUpdater");
@@ -224,7 +286,7 @@ async function prepareForUpdateInstall() {
   daemon = null;
   const clean = stopping ? await stopping.stop() : true;
   if (!clean) {
-    if (win && folder && !quitting) await boot();
+    await onDaemonCleanupFailure("installing an update");
     return false;
   }
   quitting = true;
@@ -264,16 +326,38 @@ async function onBootFailure(err) {
   app.quit();
 }
 
+async function onDaemonCleanupFailure(action) {
+  daemonOrigin = null;
+  if (quitting || !win) return;
+  try {
+    await dialog.showMessageBox(win, {
+      type: "error",
+      title: "Mirafold couldn't stop safely",
+      message: `Mirafold could not prove its background processes stopped while ${action}.`,
+      detail: "No replacement daemon or installer was started. Quit Mirafold, then check your system's process list before reopening it.",
+      buttons: ["Quit"],
+      defaultId: 0,
+    });
+  } finally {
+    // A native-dialog failure cannot authorize a replacement process or leave
+    // a disconnected window running after cleanup itself failed.
+    quitting = true;
+    app.quit();
+  }
+}
+
 /**
  * The daemon died on its own. This is the case the child-process architecture
  * exists to handle well: the daemon's own crash handler calls process.exit(1),
  * which in-process would have taken this window and every explanation with it.
  * Here it's an exit code, and the user gets the log and a way back.
  */
-async function onDaemonCrash({ code, signal, stderr }) {
+async function onDaemonCrash(crashed, { code, signal, stderr, clean }) {
+  if (daemon !== crashed) return;
   daemon = null;
   daemonOrigin = null;
   if (quitting || !win) return;
+  if (clean !== true) return onDaemonCleanupFailure("recovering from a daemon crash");
   const how = signal ? `was killed (${signal})` : `exited with code ${code}`;
   const { response } = await dialog.showMessageBox(win, {
     type: "error",
@@ -399,10 +483,20 @@ if (!app.requestSingleInstanceLock()) {
 
   // The daemon and every agent CLI beneath it go down with us. Without this the
   // user quits the app and leaves processes running that they cannot see.
-  app.on("before-quit", () => {
-    quitting = true;
-    daemonOrigin = null;
-    void daemon?.stop();
-    daemon = null;
+  const handleBeforeQuit = createBeforeQuitHandler({
+    beginQuit() {
+      quitting = true;
+      daemonOrigin = null;
+    },
+    async stop() {
+      const stopping = daemon;
+      daemon = null;
+      if (stopping && (await stopping.stop()) !== true) {
+        throw new Error("Mirafold could not prove that its daemon process tree stopped");
+      }
+    },
+    finishQuit: () => app.quit(),
+    reportError: (error) => console.error("Mirafold quit cleanup failed:", error),
   });
+  app.on("before-quit", (event) => void handleBeforeQuit(event));
 }
