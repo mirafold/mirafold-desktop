@@ -76,13 +76,14 @@ test("the smoke check refuses a packaged Shell other than the reviewed pin", (t)
 });
 
 test("native build output paths are exact for Linux and Windows", () => {
-  assert.deepEqual(packagedPaths("linux", "/tmp/dist"), {
-    executable: "/tmp/dist/linux-unpacked/mirafold",
-    appDirectory: "/tmp/dist/linux-unpacked/resources/app",
+  const outputDirectory = path.resolve("fixture-dist");
+  assert.deepEqual(packagedPaths("linux", outputDirectory), {
+    executable: path.join(outputDirectory, "linux-unpacked", "mirafold"),
+    appDirectory: path.join(outputDirectory, "linux-unpacked", "resources", "app"),
   });
-  assert.deepEqual(packagedPaths("windows", "/tmp/dist"), {
-    executable: "/tmp/dist/win-unpacked/Mirafold.exe",
-    appDirectory: "/tmp/dist/win-unpacked/resources/app",
+  assert.deepEqual(packagedPaths("windows", outputDirectory), {
+    executable: path.join(outputDirectory, "win-unpacked", "Mirafold.exe"),
+    appDirectory: path.join(outputDirectory, "win-unpacked", "resources", "app"),
   });
-  assert.throws(() => packagedPaths("darwin", "/tmp/dist"), /unsupported smoke platform/);
+  assert.throws(() => packagedPaths("darwin", outputDirectory), /unsupported smoke platform/);
 });
