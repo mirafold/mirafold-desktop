@@ -14,6 +14,10 @@ import assert from "node:assert/strict";
 const daemonInstances = [];
 const rememberedFolders = [];
 const messages = [];
+const windows = [];
+const openedExternally = [];
+const permissionInstalls = { check: 0, request: 0 };
+let windowOpenHandler = null;
 const mode = process.env.MIRAFOLD_MAIN_PROBE_MODE;
 let folderDialogs = 0;
 let menuTemplate = null;
@@ -51,14 +55,26 @@ class FakeWindow extends EventEmitter {
     this.destroyed = false;
     this.webContents = new EventEmitter();
     this.webContents.session = {
-      setPermissionCheckHandler() {},
-      setPermissionRequestHandler() {},
+      setPermissionCheckHandler() { permissionInstalls.check += 1; },
+      setPermissionRequestHandler() { permissionInstalls.request += 1; },
     };
-    this.webContents.setWindowOpenHandler = () => {};
+    this.webContents.setWindowOpenHandler = (handler) => { windowOpenHandler = handler; };
+    windows.push(this);
   }
 
   async loadFile() {}
-  async loadURL() {}
+  async loadURL() {
+    if (mode !== "crash-during-load") return;
+    // The v0.1.1 bug's exact ordering: the daemon dies right after reporting
+    // its URL, so the page load REJECTS FIRST and the crash callback lands
+    // afterwards — boot() must stay silent and let the crash report own the
+    // only dialog. (Delivering the crash before the rejection would let the
+    // daemon-identity guard absorb it and would not exercise this fix.)
+    const crashed = daemonInstances[0];
+    crashed.running = false;
+    setImmediate(() => crashed.onCrash({ code: 1, signal: null, stderr: "fixture crash after URL", clean: true }));
+    throw new Error("page load failed after the daemon crashed");
+  }
   setTitle(value) { this.title = value; }
   isDestroyed() { return this.destroyed; }
   isMinimized() { return false; }
@@ -82,9 +98,16 @@ const dialog = {
     return { canceled: false, filePaths: ["/next-project"] };
   },
   async showMessageBox(...args) {
-    if (mode !== "cleanup-failure") throw new Error("no error dialog was expected");
+    if (mode !== "cleanup-failure" && mode !== "crash-during-load") {
+      throw new Error("no error dialog was expected");
+    }
     messages.push(args);
-    return { response: 0 };
+    // cleanup-failure offers only Quit (0). crash-during-load answers Quit on
+    // the expected crash dialog (1) and also Quit (2) on the boot-failure
+    // dialog that only a regression would show, so a broken guard terminates
+    // instead of looping through folder pickers.
+    if (mode !== "crash-during-load") return { response: 0 };
+    return { response: args[1].title === "Mirafold stopped" ? 1 : 2 };
   },
 };
 const Menu = {
@@ -95,7 +118,7 @@ const Menu = {
   setApplicationMenu() {},
 };
 const shell = {
-  async openExternal() {},
+  async openExternal(url) { openedExternally.push(url); },
   async openPath() { return ""; },
 };
 
@@ -123,12 +146,23 @@ async function waitFor(predicate, message) {
 }
 
 await waitFor(
-  () => menuTemplate !== null && daemonInstances.length === 1 && daemonInstances[0].running,
+  () => menuTemplate !== null && daemonInstances.length === 1
+    && (mode === "crash-during-load" || daemonInstances[0].running),
   "initial daemon did not finish booting",
 );
 const openFolder = menuTemplate.find((item) => item.label === "File").submenu[0].click;
 
-if (mode === "cleanup-failure") {
+if (mode === "crash-during-load") {
+  // Pins the v0.1.1 bug: a daemon dying right after reporting its URL made
+  // BOTH onDaemonCrash and the page-load failure path report, stacking two
+  // dialogs. Exactly one dialog — the crash report — may appear.
+  await waitFor(() => quitCalls === 1, "a crash during page load did not settle");
+  assert.equal(messages.length, 1, "exactly one dialog must report a crash during page load");
+  assert.equal(messages[0][1].title, "Mirafold stopped");
+  assert.equal(daemonInstances.length, 1, "no replacement daemon may start after Quit");
+  assert.equal(daemonInstances[0].running, false);
+  process.stdout.write("main lifecycle probe passed\n");
+} else if (mode === "cleanup-failure") {
   failStops = true;
   openFolder();
   await waitFor(() => quitCalls === 1, "cleanup failure did not force a safe quit");
@@ -140,6 +174,41 @@ if (mode === "cleanup-failure") {
   assert.deepEqual(rememberedFolders, ["/initial-project"]);
   process.stdout.write("main lifecycle probe passed\n");
 } else {
+// The window-security wiring. The navigation and permission RULES are unit
+// tested (navigation.test.js, permissions.test.js), but pinned here is that
+// the real window actually consults them — 2026-08-14 test audit: deleting
+// the will-redirect guard, the installPermissionGuards call, or denying
+// nothing in the window-open handler each left the entire suite green.
+assert.equal(permissionInstalls.check, 1, "the permission check handler was not installed");
+assert.equal(permissionInstalls.request, 1, "the permission request handler was not installed");
+assert.equal(typeof windowOpenHandler, "function", "no window-open handler was installed");
+assert.deepEqual(windowOpenHandler({ url: "https://example.com/" }), { action: "deny" });
+assert.deepEqual(windowOpenHandler({ url: "javascript:alert(1)" }), { action: "deny" });
+assert.deepEqual(
+  openedExternally,
+  ["https://example.com/"],
+  "a web popup goes to the real browser exactly once; unsafe schemes never do",
+);
+openedExternally.length = 0;
+
+const guardedWindow = windows[0];
+for (const eventName of ["will-frame-navigate", "will-redirect"]) {
+  let prevented = 0;
+  const preventDefault = () => { prevented += 1; };
+  guardedWindow.webContents.emit(eventName, { url: "https://example.com/page", isMainFrame: true, preventDefault });
+  assert.equal(prevented, 1, eventName + " must stop an external main-frame navigation");
+  guardedWindow.webContents.emit(eventName, { url: "https://example.com/frame", isMainFrame: false, preventDefault });
+  assert.equal(prevented, 2, eventName + " must refuse an external subframe");
+  guardedWindow.webContents.emit(eventName, { url: "http://127.0.0.1:4100/session/1", isMainFrame: true, preventDefault });
+  assert.equal(prevented, 2, eventName + " must allow this daemon's own origin");
+}
+assert.deepEqual(
+  openedExternally,
+  ["https://example.com/page", "https://example.com/page"],
+  "external main-frame navigations open in the real browser; subframes are simply refused",
+);
+openedExternally.length = 0;
+
 openFolder();
 openFolder();
 
@@ -200,4 +269,8 @@ test("rapid folder changes coalesce and a superseded successful boot retires its
 
 test("an unproven daemon stop starts no replacement and forces a safe quit", () => {
   runProbe("cleanup-failure");
+});
+
+test("a daemon crash during the page load produces exactly one dialog", () => {
+  runProbe("crash-during-load");
 });

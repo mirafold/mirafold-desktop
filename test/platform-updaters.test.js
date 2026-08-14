@@ -15,8 +15,17 @@ import path from "node:path";
 import { createSafeAppImageUpdater, createSafeNsisUpdater } from "../src/platform-updaters.js";
 
 const require = createRequire(import.meta.url);
-const { AppImageUpdater, NsisUpdater } = require("electron-updater");
+const { AppImageUpdater, AppUpdater, NsisUpdater } = require("electron-updater");
 const QUIET_LOGGER = { debug() {}, info() {}, warn() {}, error() {} };
+
+// The tar-archive strategy constructs the real package's AppUpdater directly
+// (src/main.js loadAutoUpdater). A dependency bump that reshapes that export
+// would otherwise go green in CI and fail silently on users' machines, since
+// background update-check failures are deliberately non-fatal and quiet.
+test("the real electron-updater still exports the tar-strategy AppUpdater", () => {
+  assert.equal(typeof AppUpdater, "function");
+  assert.equal(typeof AppUpdater.prototype.checkForUpdates, "function");
+});
 
 function appAdapter(version = "1.0.0") {
   const state = { quitCalls: 0 };

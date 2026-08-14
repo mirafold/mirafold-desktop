@@ -62,6 +62,30 @@ test("the build job verifies every updater asset before retaining it", () => {
   assert.match(build, /if-no-files-found: error/);
 });
 
+// Pins the 2026-08-14 audit finding: the build job was the only dependency
+// install in the repository that still ran lifecycle scripts, so ~400 packages'
+// install scripts could execute on the manual-release path and shape the exact
+// bytes published to users — a surface the CI and Shell-intake installs had
+// already closed with `--ignore-scripts` and the pinned npm toolchain.
+test("the build job installs with the script-free pinned npm toolchain", () => {
+  const build = job("build");
+  assert.match(build, /NPM_CONFIG_IGNORE_SCRIPTS: "true"/);
+  assert.match(build, /NPM_CONFIG_USERCONFIG: \$\{\{ runner\.temp \}\}\/mirafold-empty-npmrc/);
+  assert.match(build, /NPM_CONFIG_REGISTRY: https:\/\/registry\.npmjs\.org/);
+  assert.match(build, /test "\$\(npm --version\)" = "12\.0\.2"/);
+  assert.doesNotMatch(build, /cache:/);
+  const installTool = build.indexOf("npm install --global npm@12.0.2");
+  const installTree = build.indexOf("npm ci --ignore-scripts");
+  const list = build.indexOf("npm ls --all");
+  const audit = build.indexOf("npm audit --audit-level=moderate");
+  const signatures = build.indexOf("npm audit signatures --include-attestations");
+  const tests = build.indexOf("npm test");
+  assert.ok(installTool !== -1 && installTool < installTree, "the pinned toolchain must precede npm ci");
+  assert.ok(installTree < list && list < audit && audit < signatures && signatures < tests,
+    "install, tree, audit, signature, and test order changed");
+  assert.doesNotMatch(build, /run: npm ci\s*$/m, "no unhardened npm ci may remain");
+});
+
 test("tag identity and stable-channel policy are checked before dependency code", () => {
   const build = job("build");
   const identity = build.indexOf("release-contract.mjs identity");
@@ -99,7 +123,7 @@ for (const platform of ["linux", "windows"]) {
   test(`a manual ${platform} failure rehearsal stops before dependency code`, () => {
     const build = job("build");
     const injection = build.indexOf("name: Inject requested rehearsal failure");
-    const install = build.indexOf("run: npm ci");
+    const install = build.indexOf("npm ci --ignore-scripts");
     assert.ok(injection !== -1 && injection < install);
     assert.match(
       build.slice(injection, install),
