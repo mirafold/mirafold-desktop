@@ -1023,11 +1023,119 @@ also bump the Desktop version without inventing a Shell version.
   account-recovery readiness remains unverified. External application waits
   until the non-publishing rehearsal demonstrates the committed live workflow;
   that is Step 5.5, not an unclaimed result of this Step.
-- [ ] **Step 5.5 — rehearse without publishing.** Exercise no-update,
+- [x] **Step 5.5 — rehearse without publishing.** Exercise no-update,
   one-update, rapid-two-update, failed-Linux, failed-Windows, stale-main,
   duplicate-run, and retry scenarios. Verify that the workflow creates no
   public tag/release during rehearsal and that the proposed release contains
   the exact proven Shell package.
+
+  **Completed 2026-08-13 — deterministic state-machine and hosted native
+  rehearsal:** the verified starting point was local and remote `main` at
+  `bee5bd51b127c086114a6833004b34d8c04faf39`, exactly the two existing tags
+  `v0.1.0` and `v0.1.1`, exactly the two corresponding public releases, and no
+  repository variables. The npm registry reported `mirafold@0.3.7` as latest.
+  A live `shell-intake prepare` probe selected that same version and integrity
+  (`sha512-gAlbgcHbcpXedv0yJCGpXLoh2XGs2ym+A3oEB4jGhlpxn1P1Ea9W8OWqpq326Q+PgSKWPUP46RV2/SeC+Jw7Qg==`),
+  returned `changed=false`, and left the then-current `package.json` and
+  `package-lock.json` byte-identical. Thus the rehearsal began from a proven
+  no-update state rather than manufacturing a candidate.
+
+  `scripts/release-rehearsal.mjs` and `npm run release:rehearse` now run named,
+  isolated Node test cases and fail if any requested scenario has no matching
+  proof. The final report passed all ten checks: no-update (one assertion),
+  one-update (one), rapid-two-update (two), failed-Linux (two), failed-Windows
+  (two), stale-main (one), duplicate-run (one), retry (one), no-publication
+  (two), and exact-Shell-identity (three). In particular, two rapid candidates
+  from the same base cannot overwrite one Desktop patch; an outdated queued
+  candidate fails closed after `main` advances, while a fresh retry from the
+  new `main` can select the following patch. Any failed native leg blocks both
+  provenance and publication, duplicate delivery converges on the same state,
+  and manual dispatch cannot enter the publisher.
+
+  The implementation was committed only to the isolated public branch
+  `step-5-5-release-rehearsal`; `main` was not moved. Three non-publishing
+  `workflow_dispatch` runs then exercised GitHub's actual Windows and Linux
+  runners:
+
+  - [run 31765226537](https://github.com/mirafold/mirafold-desktop/actions/runs/31765226537)
+    proved failed-Windows gating. Windows exposed a test-only POSIX path
+    expectation at `test/packaged-smoke.test.js:78`; production
+    `packagedPaths()` had returned the correct Windows-native path. Linux still
+    completed because the matrix has `fail-fast: false`, while provenance and
+    publication stayed skipped. The correction uses `path.resolve()` and
+    `path.join()` in the test; no packaged-runtime behavior changed.
+  - [run 31765358019](https://github.com/mirafold/mirafold-desktop/actions/runs/31765358019)
+    then completed both native legs. Each packaged smoke reported Desktop
+    `0.1.1`, Shell `0.3.7`, the bundled daemon entry
+    `node_modules/mirafold/dist-server/index.js`, and successful loading of
+    both `node-pty` and `@parcel/watcher`; both platform artifact contracts and
+    SHA-256 manifests passed. GitHub stored Linux artifact `9206290890`
+    (`sha256:28d35f5a39d344b24496a8e4f72237f67d568f526c8baa9661794f02bc044756`)
+    and Windows artifact `9206155664`
+    (`sha256:87b5319fb0c44fac76aa58e2a3dad7acc516a46f4c5c155dbd8bd322509aae11`).
+    The provenance job validated their combined contract and created
+    [attestation 40648219](https://github.com/mirafold/mirafold-desktop/attestations/40648219)
+    for exactly nine subjects: both manifests, both updater metadata files,
+    AppImage, tarball, Debian package, NSIS installer, and NSIS blockmap. Its
+    subject digests were respectively
+    `01d02792b75bf48869844a461853d7b71cb1321bdda9a72f30a58df3920b2b9b`,
+    `89ac6385756aba27716fbca21cb306fb679285002d565d6b99e7c4dd33012228`,
+    `786e2cd6b109433163a029e8ccf8161f147c1c42e5147e70230f19ca73e829f5`,
+    `a0622e8595f93623be6dce746925014c80c1e77bb7aeb12c166f1491cc8bc062`,
+    `c688d51fb2ca554115791329657ce0b3561d6df4f315692717727fb1c2f9257c`,
+    `cb7cf74e1b726d43e943a09d04a8e67c3e124355ca672fa58b9e4a2077ecb03c`,
+    `c3580a2864bda7db34ddfb08b9e7918e2a4f220d89dde2a693ae959254a24e69`,
+    `a5013ce84ec02c48df654cb32aa096170c271e31c9b8008599d03bc0d57deeda`,
+    and
+    `36270e8ab477b228ebb0c1dc8c4cbd05305061c798ac381e1adcff7643faf0c6`.
+  - [run 31765808934](https://github.com/mirafold/mirafold-desktop/actions/runs/31765808934)
+    exercised the final committed workflow's explicit `fail_platform=linux`
+    input. Linux failed before dependency installation; Windows independently
+    passed tests, packaging, packaged smoke, contracts, and artifact upload.
+    GitHub stored Windows artifact `9206310136`
+    (`sha256:aec846e67f758e731256a2d59210b9470908ac41273518071511325a76b85406`),
+    while both provenance and publication were skipped.
+
+  **No-release proof:** a final live snapshot still found remote `main` at
+  `bee5bd51b127c086114a6833004b34d8c04faf39`, only tags `v0.1.0`/`v0.1.1`,
+  only release IDs `363923829`/`364215203` with their original eight assets and
+  digests, and zero repository variables. Therefore no tag, GitHub Release, or
+  installed-client update feed changed. The rehearsal intentionally did create
+  a public branch, Actions runs and temporary Actions artifacts, plus the
+  successful run's public provenance attestation; those are evidence, not
+  release publication.
+
+  **Actual change boundary:** executable tooling adds
+  `scripts/release-rehearsal.mjs`, exposes it as the dependency-free
+  `release:rehearse` package script, and adds a manual-only `fail_platform`
+  choice to `.github/workflows/release.yml`; push/tag behavior is unchanged.
+  Tests add the rehearsal mapping, rapid concurrency/retry and failed-leg
+  coverage, manual publisher/failure-injection contracts, and the native-path
+  expectation correction. Documentation changes explain the local and hosted
+  rehearsal in `README.md` and record this evidence here. Desktop runtime,
+  updater behavior, daemon behavior, packaging targets, the exact Shell
+  `0.3.7` dependency, and the lockfile are behaviorally unchanged by this
+  Step. `package.json` changed only by the new script and now hashes to
+  `102c68f5a05694a2f99a9c9263a4620bcc5f70a64841c0a1622160c95a28e089`;
+  `package-lock.json` remains
+  `2f9225219fdeac7b5bbc058a18b6b206ce411092f968225cfa2d1018e1b4028c`.
+  No package was added.
+
+  **Final verification and limits:** all 131 tests pass, the ten-check
+  rehearsal passes, all scripts parse, all four repository YAML files parse,
+  `npm ls --all` is valid apart from expected absent-platform optional
+  packages, `npm audit --audit-level=moderate` reports zero vulnerabilities,
+  all 376 installed packages have verified registry signatures, 56 have
+  verified attestations, and `git diff --check` passes. The automated
+  Shell-intake workflow itself could not run from this branch because GitHub
+  dispatches only workflows present on default `main`; no newer real Shell
+  publication existed to consume. The writer token/API path remains
+  deliberately unexercised because `MIRAFOLD_AUTOMATED_RELEASES` is absent.
+  No branch was merged, no repository setting was applied, no installed client
+  was updated, and no tag/draft/release was created. Step 6.1 owns deeper
+  Windows daemon and installer execution; Step 7.3 owns the explicitly
+  approved bridge release, and Step 7.4 owns the first real newer-Shell
+  production validation.
 
 ### Phase 6 — Windows proof and the free Microsoft Store channel
 
