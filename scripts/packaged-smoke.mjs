@@ -291,22 +291,11 @@ export function runPackagedNodeProbe({
 }
 
 function windowsExecutableProcessCount(executable, spawn) {
-  const script = [
-    "$target = [System.IO.Path]::GetFullPath($env:MIRAFOLD_PROBE_EXECUTABLE)",
-    "$count = 0",
-    "Get-Process -Name Mirafold -ErrorAction SilentlyContinue | ForEach-Object {",
-    "  try {",
-    "    if ([System.StringComparer]::OrdinalIgnoreCase.Equals([System.IO.Path]::GetFullPath($_.Path), $target)) { $count += 1 }",
-    "  } catch {}",
-    "}",
-    "[Console]::Out.Write($count)",
-  ].join("\n");
-  const env = minimalEnvironment(path.dirname(executable), {
-    MIRAFOLD_PROBE_EXECUTABLE: executable,
-  });
+  const imageName = path.basename(executable);
+  const env = minimalEnvironment(path.dirname(executable));
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.MIRAFOLD_PACKAGED_APP;
-  const result = spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
+  const result = spawn("tasklist.exe", ["/FI", `IMAGENAME eq ${imageName}`, "/FO", "CSV", "/NH"], {
     encoding: "utf8",
     env,
     maxBuffer: 1024 * 1024,
@@ -315,9 +304,12 @@ function windowsExecutableProcessCount(executable, spawn) {
     windowsHide: true,
   });
   spawnResult(result, "Windows packaged-process query");
-  const value = String(result.stdout).trim();
-  invariant(/^\d+$/.test(value), "Windows packaged-process query returned unexpected output");
-  return Number(value);
+  invariant(String(result.stderr).trim() === "", `Windows packaged-process query wrote stderr: ${String(result.stderr).slice(-4000)}`);
+  return String(result.stdout)
+    .split(/\r?\n/u)
+    .map((line) => line.match(/^"((?:[^"]|"")*)"/u)?.[1]?.replace(/""/gu, '"'))
+    .filter((name) => typeof name === "string" && name.toLowerCase() === imageName.toLowerCase())
+    .length;
 }
 
 export function runPackagedDaemonProbe({
