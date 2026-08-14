@@ -1139,12 +1139,108 @@ also bump the Desktop version without inventing a Shell version.
 
 ### Phase 6 — Windows proof and the free Microsoft Store channel
 
-- [ ] **Step 6.1 — add Windows packaged smoke coverage.** On the Windows CI
+- [x] **Step 6.1 — add Windows packaged smoke coverage.** On the Windows CI
   runner, verify the packaged application can resolve and load both native
   modules, start the real bundled daemon far enough to validate its URL
   contract, close it without descendants, and silently install/uninstall the
   per-user NSIS candidate where runner capabilities permit. Keep human-only
   behavior explicitly separate.
+
+  **Completed 2026-08-14 — the real Windows package and assisted NSIS lifecycle
+  are now runner-proven.** The verified starting point was narrower than this
+  Step requires. Existing `scripts/packaged-smoke.mjs` resolved the bundled
+  daemon entry and loaded `@lydell/node-pty` and `@parcel/watcher` through the
+  packaged Electron runtime, but it did not start the daemon, make an HTTP
+  request, prove process-tree shutdown, or touch an installer. The release and
+  Shell-intake workflows ran that check against `win-unpacked`; neither had an
+  NSIS install/uninstall step. The existing assisted NSIS configuration was
+  already per-user-capable (`oneClick: false`, `perMachine: false`, changeable
+  destination), so this Step changed validation rather than the shipped
+  installer configuration.
+
+  The existing packaged smoke now imports the packaged Desktop `Daemon`, starts
+  the exact bundled Shell entry from an empty isolated project, and validates
+  the private IPv4-loopback URL without printing its token. It proves the
+  Shell's real token-to-cookie handshake (`302` to `/`, token-bearing
+  `HttpOnly`, `SameSite=Strict`, root-scoped cookie), then proves a
+  cookie-authenticated `200` HTML response, clean `Daemon.stop()`, an
+  unreachable URL after shutdown, no crash callback, and zero remaining
+  `Mirafold.exe` images through native `tasklist.exe`. Both the manual release
+  workflow and every Windows Shell-intake candidate run this same check.
+
+  New `scripts/windows-installer-smoke.mjs` uses only Node's standard library.
+  On Windows it installs the real `Mirafold-Setup-VERSION.exe` silently with
+  explicit `/currentuser` mode into one unique runner-temp directory and keeps
+  NSIS `/D=` last. It requires the installed executable, packaged app tree, and
+  uninstaller; enumerates both 64- and 32-bit registry views; requires an HKCU
+  reference to the exact unique install directory and no HKLM reference; runs
+  the complete native-module and live-daemon smoke against the installed bytes;
+  then copies the uninstaller outside `$INSTDIR` and invokes it with the
+  electron-builder-compatible `_?=<install directory>` argument last. It waits
+  for removal and proves the install directory plus both user and machine
+  registration views are gone. A failure after installation still attempts the
+  same detached silent cleanup. No dependency, package pin, or lock entry was
+  added or changed.
+
+  **Diagnosed runner failures, without changing Desktop runtime code:** the
+  first native Windows run proved the unpacked daemon but exposed insufficient
+  installer diagnostics. Failure-only reporting then made three independent
+  harness defects observable. First, a legacy `powershell.exe` process-count
+  helper succeeded once and timed out twice on identical hosted runs; replacing
+  that redundant shell layer with native `tasklist.exe` made the same zero-image
+  assertion stable. Second, `reg.exe /f ... /e` returned the normal
+  `End of search: 0 match(es) found.` result because `/e` demanded a whole-value
+  match, while the allowlist did not recognize that wording. Unfiltered
+  enumeration then directly found the unique install path in both HKCU views
+  and none in HKLM. Third, running the in-place uninstaller returned zero but
+  left the directory after two 30-second waits. The installed
+  `electron-builder@26.15.3` template showed its own waited removal contract:
+  copy the uninstaller out of the application directory and execute that copy
+  with `_?=$INSTDIR` last. The probe now follows that exact contract; the next
+  hosted run removed the directory and registration cleanly.
+
+  **Exact hosted proof:** nonpublishing workflow run
+  `31770520381` at commit
+  `cb4747912254113fe95f5f762c32af9cdef16401` completed successfully. Windows
+  job `94675311684` and Linux job `94675311729` each installed dependencies,
+  passed the full suite, built native artifacts, passed their packaged-runtime
+  smoke, generated canonical SHA-256 manifests, verified the updater artifact
+  contract, and uploaded the candidates. The Windows lifecycle reported
+  current-user installation, HKCU registration in both registry views, no HKLM
+  registration, Desktop `0.1.1`, Shell `0.3.7`, both native modules loaded, the
+  hardened `302`/cookie/`200` daemon handshake, proven process-tree shutdown,
+  zero residual `Mirafold.exe` images, successful uninstall, removed install
+  directory, and removed registration. Windows artifact `9208092652` is bound
+  to digest
+  `sha256:227793df5732de460fef831a99ff021274fd29f5246f919a483c961333f066e1`;
+  Linux artifact `9208092475` is bound to
+  `sha256:33ddc6b06761b4cb26db79d2750a4648d9fcaaacf52f05f99ec0f61914e225ea`.
+  Provenance job `94676603742` verified and attested all nine release files;
+  the publication job was skipped.
+
+  **Local and boundary verification:** the final suite passes **141/141**;
+  focused packaged/NSIS/workflow tests pass; both changed scripts pass syntax
+  checks; workflow YAML parses; `git diff --check` passes; the existing real
+  Linux unpacked package independently repeats the `302`/hardened-cookie/`200`
+  handshake and clean shutdown; `npm audit --audit-level=moderate` reports zero
+  vulnerabilities; all 376 registry signatures and 56 attestations verify; and
+  `npm ls --all` is clean apart from expected absent-platform optional
+  packages. Remote `main` remains
+  `bee5bd51b127c086114a6833004b34d8c04faf39`; `v0.1.1`, the two existing
+  published releases, and an empty Actions-variable set remain unchanged. No
+  tag, draft, release, repository setting, writer activation, or merge was
+  created.
+
+  **Change boundary and limits:** executable changes in this Step are confined
+  to the two validation scripts and the two existing workflow call sites;
+  shipping `src/**`, the installer configuration, the Shell pin, and dependency
+  resolution are behaviorally unchanged. Tests add fake daemon authentication,
+  token-leak rejection, native Windows process enumeration, both registry views,
+  cleanup, and detached-uninstaller contracts. README changes document the
+  stronger automated proof and its limits. A hosted process cannot truthfully
+  observe SmartScreen, visible wizard/folder-selection behavior, real agent and
+  ConPTY interaction, filesystem watching, or a human-driven automatic update
+  and restart. Those remain explicitly unverified for Step 6.2.
 - [ ] **Step 6.2 — test direct-download Windows with a human.** Refresh
   `WINDOWS-TESTING.md` for the bridge/updater and walk Kyle through recruiting a
   Windows tester one action at a time. Observe SmartScreen, installation,
