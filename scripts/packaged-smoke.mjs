@@ -104,6 +104,7 @@ process.stdout.write(${JSON.stringify(MARKER)} + JSON.stringify({
 const DAEMON_CHILD_PROBE = String.raw`
 const fs = require("node:fs");
 const path = require("node:path");
+const { spawn, spawnSync } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 
 const app = process.env.MIRAFOLD_PACKAGED_APP;
@@ -128,17 +129,107 @@ async function request(url, timeout, headers = {}) {
   await response.arrayBuffer();
   return { status: response.status, contentType, location, setCookie };
 }
-async function stopWithLiveEventLoop(daemon) {
-  // Desktop's production shutdown polling timers are intentionally unref'ed so
-  // an ordinary app quit is never kept alive by cleanup alone. The GUI event
-  // loop supplies the other live work in production; this headless child must
-  // supply one equivalent referenced handle while it awaits the proof.
-  const hold = setInterval(() => {}, 1000);
+function stopDaemon(daemon) {
+  // The cleanup Promise must keep this otherwise-headless process alive through
+  // its bounded SIGTERM/SIGKILL polling, exactly as ordinary Electron quit does.
+  return daemon.stop();
+}
+
+function processExists(pid) {
   try {
-    return await daemon.stop();
-  } finally {
-    clearInterval(hold);
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error && error.code !== "ESRCH";
   }
+}
+
+async function verifyWindowsCrashOwnership(imported) {
+  const readyFile = path.join(project, "windows-crash-child.json");
+  const fakeDaemon = path.join(project, "windows-crash-daemon.cjs");
+  fs.writeFileSync(fakeDaemon, [
+    'const { spawn } = require("node:child_process");',
+    'const { writeFileSync } = require("node:fs");',
+    'const { createRequire } = require("node:module");',
+    'const path = require("node:path");',
+    'const powershell = path.join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");',
+    'const requireApp = createRequire(path.join(process.env.MIRAFOLD_PACKAGED_APP, "package.json"));',
+    'const pty = requireApp("@lydell/node-pty");',
+    'const terminal = pty.spawn(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "[Console]::WriteLine(\\"JOB_PTY_OK\\")"],',
+    '  { name: "xterm-256color", cols: 80, rows: 24, cwd: process.cwd(), env: process.env });',
+    'let ptyOutput = "";',
+    'terminal.onData((data) => { ptyOutput += data; });',
+    'terminal.onExit(({ exitCode }) => {',
+    '  if (exitCode !== 0 || !ptyOutput.includes("JOB_PTY_OK")) process.exit(72);',
+    '  const child = spawn(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "while ($true) { Start-Sleep -Seconds 60 }"],',
+    '    { stdio: "ignore", windowsHide: true });',
+    '  child.once("error", () => process.exit(73));',
+    '  child.once("spawn", () => {',
+    '    writeFileSync(process.env.MIRAFOLD_JOB_CRASH_READY, JSON.stringify({',
+    '      pid: child.pid,',
+    '      runAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null,',
+    '      conptyWorkedInsideJob: true,',
+    '    }));',
+    '    setTimeout(() => process.exit(23), 100);',
+    '  });',
+    '});',
+    '',
+  ].join("\n"));
+
+  const launch = imported.daemonLaunchSpec({
+    platform: "win32",
+    executable: process.execPath,
+    bootstrapEntry: path.join(app, "src", "daemon-bootstrap.cjs"),
+    daemonEntry: fakeDaemon,
+    windowsJobEntry: path.join(app, "src", "windows-daemon-job.ps1"),
+    env: { ...process.env, MIRAFOLD_JOB_CRASH_READY: readyFile },
+  });
+  const wrapper = spawn(launch.command, launch.args, {
+    cwd: project,
+    env: launch.env,
+    stdio: ["ignore", "ignore", "pipe"],
+    windowsHide: true,
+  });
+  let stderr = "";
+  wrapper.stderr.setEncoding("utf8");
+  wrapper.stderr.on("data", (chunk) => { stderr = (stderr + chunk).slice(-4000); });
+  let outcome = null;
+  const closed = new Promise((resolve) => {
+    wrapper.once("error", (error) => resolve({ error }));
+    wrapper.once("close", (code, signal) => resolve({ code, signal }));
+  }).then((value) => {
+    outcome = value;
+    return value;
+  });
+
+  const readyDeadline = Date.now() + 15000;
+  while (!fs.existsSync(readyFile) && outcome === null && Date.now() < readyDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  invariant(fs.existsSync(readyFile), "Windows crash child did not start: " + stderr);
+  const report = JSON.parse(fs.readFileSync(readyFile, "utf8"));
+  invariant(Number.isInteger(report.pid) && report.pid > 0, "Windows crash child reported no PID");
+  invariant(report.runAsNode === null, "Windows crash child inherited Electron Node mode");
+  invariant(report.conptyWorkedInsideJob === true, "Windows ConPTY failed inside the Job Object");
+
+  const wrapperResult = await closed;
+  invariant(!wrapperResult.error, "Windows Job Object wrapper failed: " + wrapperResult.error?.message);
+  invariant(wrapperResult.signal === null, "Windows Job Object wrapper ended from " + wrapperResult.signal);
+  invariant(wrapperResult.code === 23, "Windows Job Object wrapper exited " + wrapperResult.code + ": " + stderr);
+
+  const stoppedDeadline = Date.now() + 10000;
+  while (processExists(report.pid) && Date.now() < stoppedDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  const stopped = !processExists(report.pid);
+  if (!stopped) {
+    spawnSync("taskkill.exe", ["/PID", String(report.pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+  }
+  invariant(stopped, "Windows Job Object left crash descendant " + report.pid + " running");
+  return true;
 }
 
 (async () => {
@@ -153,7 +244,7 @@ async function stopWithLiveEventLoop(daemon) {
   let crash = null;
   const daemon = new imported.Daemon((info) => { crash = info; });
   const guard = setTimeout(() => {
-    void stopWithLiveEventLoop(daemon).finally(() => process.exit(70));
+    void stopDaemon(daemon).finally(() => process.exit(70));
   }, 75000);
 
   try {
@@ -190,7 +281,7 @@ async function stopWithLiveEventLoop(daemon) {
     invariant(response.contentType.toLowerCase().includes("text/html"), "cookie-authenticated daemon root is not HTML");
     invariant(crash === null, "daemon reported a crash after startup");
 
-    const clean = await stopWithLiveEventLoop(daemon);
+    const clean = await stopDaemon(daemon);
     invariant(clean === true, "Desktop could not prove complete daemon process-tree shutdown");
     let unreachableAfterStop = false;
     try {
@@ -200,6 +291,9 @@ async function stopWithLiveEventLoop(daemon) {
     }
     invariant(unreachableAfterStop, "daemon URL remained reachable after process-tree shutdown");
     invariant(crash === null, "intentional daemon shutdown was reported as a crash");
+    const windowsCrashTreeStopped = process.platform === "win32"
+      ? await verifyWindowsCrashOwnership(imported)
+      : null;
 
     process.stdout.write(${JSON.stringify(DAEMON_MARKER)} + JSON.stringify({
       urlContract: {
@@ -217,10 +311,11 @@ async function stopWithLiveEventLoop(daemon) {
       processTreeStopped: true,
       unreachableAfterStop: true,
       crashReported: false,
+      windowsCrashTreeStopped,
     }) + "\n");
   } finally {
     clearTimeout(guard);
-    if (daemon.running) await stopWithLiveEventLoop(daemon);
+    if (daemon.running) await stopDaemon(daemon);
   }
 })().catch((error) => {
   process.stderr.write(safeError(error) + "\n");
@@ -253,6 +348,13 @@ function spawnResult(result, label) {
   invariant(result.status === 0, `${label} exited ${result.status}: ${String(result.stderr).slice(-4000)}`);
 }
 
+function validatePackagedPaths(executable, appDirectory) {
+  invariant(typeof executable === "string" && path.isAbsolute(executable), "packaged executable path must be absolute");
+  invariant(lstatSync(executable).isFile(), "packaged executable must be a regular file");
+  invariant(typeof appDirectory === "string" && path.isAbsolute(appDirectory), "packaged app path must be absolute");
+  invariant(lstatSync(appDirectory).isDirectory(), "packaged app path must be a directory");
+}
+
 export function runPackagedNodeProbe({
   executable,
   appDirectory,
@@ -260,10 +362,7 @@ export function runPackagedNodeProbe({
   expectedShellVersion,
   spawn = spawnSync,
 } = {}) {
-  invariant(typeof executable === "string" && path.isAbsolute(executable), "packaged executable path must be absolute");
-  invariant(lstatSync(executable).isFile(), "packaged executable must be a regular file");
-  invariant(typeof appDirectory === "string" && path.isAbsolute(appDirectory), "packaged app path must be absolute");
-  invariant(lstatSync(appDirectory).isDirectory(), "packaged app path must be a directory");
+  validatePackagedPaths(executable, appDirectory);
   stableVersion(expectedDesktopVersion, "expected Desktop version");
   stableVersion(expectedShellVersion, "expected Shell version");
 
@@ -319,10 +418,7 @@ export function runPackagedDaemonProbe({
   platform = process.platform,
   temporaryDirectory = tmpdir(),
 } = {}) {
-  invariant(typeof executable === "string" && path.isAbsolute(executable), "packaged executable path must be absolute");
-  invariant(lstatSync(executable).isFile(), "packaged executable must be a regular file");
-  invariant(typeof appDirectory === "string" && path.isAbsolute(appDirectory), "packaged app path must be absolute");
-  invariant(lstatSync(appDirectory).isDirectory(), "packaged app path must be a directory");
+  validatePackagedPaths(executable, appDirectory);
   invariant(typeof temporaryDirectory === "string" && path.isAbsolute(temporaryDirectory), "probe temp path must be absolute");
   invariant(lstatSync(temporaryDirectory).isDirectory(), "probe temp path must be a directory");
 
@@ -372,6 +468,7 @@ export function runPackagedDaemonProbe({
     invariant(report.crashReported === false, "packaged daemon stop was reported as a crash");
 
     if ((platform === "win32" || platform === "windows") && path.basename(executable).toLowerCase() === "mirafold.exe") {
+      invariant(report.windowsCrashTreeStopped === true, "packaged Windows crash tree was not stopped");
       const executableProcessesAfterProbe = windowsExecutableProcessCount(executable, spawn);
       invariant(executableProcessesAfterProbe === 0, `${executableProcessesAfterProbe} packaged Mirafold processes remained`);
       return { ...report, executableProcessesAfterProbe };

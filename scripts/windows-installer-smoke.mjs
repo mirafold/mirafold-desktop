@@ -78,17 +78,20 @@ function checkedCommand(executable, args, label, spawn) {
   return result;
 }
 
+function validateNsisDirectory(installDirectory, operation) {
+  invariant(typeof installDirectory === "string" && path.isAbsolute(installDirectory), `${operation} path must be absolute`);
+  invariant(!/[\0\r\n"]/u.test(installDirectory), `${operation} path contains forbidden command-line characters`);
+}
+
 export function silentInstallArguments(installDirectory) {
-  invariant(typeof installDirectory === "string" && path.isAbsolute(installDirectory), "NSIS install path must be absolute");
-  invariant(!/[\0\r\n"]/u.test(installDirectory), "NSIS install path contains forbidden command-line characters");
+  validateNsisDirectory(installDirectory, "NSIS install");
   // electron-builder's assisted installer parses /D itself; it must remain the
   // final argument. /currentuser selects the non-elevated HKCU path explicitly.
   return ["/S", "/currentuser", "/no-desktop-shortcut", `/D=${installDirectory}`];
 }
 
 export function silentUninstallArguments(installDirectory) {
-  invariant(typeof installDirectory === "string" && path.isAbsolute(installDirectory), "NSIS uninstall path must be absolute");
-  invariant(!/[\0\r\n"]/u.test(installDirectory), "NSIS uninstall path contains forbidden command-line characters");
+  validateNsisDirectory(installDirectory, "NSIS uninstall");
   // electron-builder's own waited old-version removal copies the uninstaller
   // outside $INSTDIR and keeps this NSIS _?= override last. That makes the
   // observed process perform the removal instead of returning after a
@@ -108,18 +111,22 @@ export function windowsInstallerPaths(outputDirectory, version, installDirectory
   };
 }
 
+function registryQueryOptions() {
+  return {
+    encoding: "utf8",
+    env: windowsEnvironment(),
+    maxBuffer: 1024 * 1024,
+    shell: false,
+    timeout: 30_000,
+    windowsHide: true,
+  };
+}
+
 function registrationExists(hive, view, installDirectory, spawn) {
   const result = spawn(
     "reg.exe",
     ["query", `${hive}\\${UNINSTALL_ROOT}`, "/s", `/reg:${view}`],
-    {
-      encoding: "utf8",
-      env: windowsEnvironment(),
-      maxBuffer: 1024 * 1024,
-      shell: false,
-      timeout: 30_000,
-      windowsHide: true,
-    },
+    registryQueryOptions(),
   );
   if (result.error) throw new Error(`Windows ${hive} registration query could not run: ${result.error.message}`);
   invariant(result.signal === null, `Windows ${hive} registration query ended from signal ${result.signal}`);
@@ -139,14 +146,7 @@ function registrationDiagnostics(hive, view, spawn) {
   const result = spawn(
     "reg.exe",
     ["query", `${hive}\\${UNINSTALL_ROOT}`, "/s", "/f", "Mirafold", "/d", `/reg:${view}`],
-    {
-      encoding: "utf8",
-      env: windowsEnvironment(),
-      maxBuffer: 1024 * 1024,
-      shell: false,
-      timeout: 30_000,
-      windowsHide: true,
-    },
+    registryQueryOptions(),
   );
   if (result.error) return `query could not run: ${result.error.message}`;
   const detail = String(result.stdout || result.stderr).trim();

@@ -1,7 +1,8 @@
 # Mirafold Desktop — plan
 
-Started 2026-08-02. The goal is a download other people can install and run,
-on platforms where an unsigned build actually works.
+Started 2026-08-02. The goal is a download other people can install and run on
+the supported platforms, with the unsigned direct-download boundary stated
+accurately.
 
 ## Active program — continuous, hardened Desktop delivery
 
@@ -1288,11 +1289,39 @@ also bump the Desktop version without inventing a Shell version.
   behavior and tests are unchanged. The next action is the first human-only
   action: identify one consenting Windows 10/11 x64 tester with a working local
   Codex login and no existing Mirafold Desktop installation.
-- [ ] **Step 6.3 — establish the free Store identity.** Walk Kyle one action at
-  a time through Microsoft's free individual developer registration, identity
+- [ ] **Step 6.3 — establish the correct free Store identity.** Walk Kyle one
+  action at a time through the correct Microsoft developer account type,
   verification, name reservation, and retrieval of the real Partner Center
-  package identity. Government ID/selfie actions remain Kyle's; no identity or
-  secret is pasted into chat or stored in this repository.
+  package identity. Both account types are now free, but Store Policy 10.14
+  requires Company for business/trade publication and Partner Center cannot
+  convert Individual to Company. Identity/business evidence remains Kyle's; no
+  private evidence or secret is pasted into chat or stored in this repository.
+
+  **Preparation completed 2026-08-14; external identity evidence remains
+  pending and this Step stays open.** Microsoft's current enrollment page,
+  Store policies, signing guidance, name-reservation rules, and package-identity
+  reference were checked directly. The earlier Individual-account assumption
+  is superseded: Individual is documented for personal non-commercial work,
+  while Company is required for businesses and people publishing in relation
+  to a trade or profession. Mirafold is branded and has a planned paid tier, so
+  Company is the present recommendation, subject to Kyle's still-unverified
+  real legal/business status. Both routes have zero registration fee through
+  `storedeveloper.microsoft.com`; Store submission signs, hosts, and updates
+  AppX/MSIX packages for free. Store signing does not sign the direct NSIS
+  download, and the Store EXE/MSI route would require Mirafold to buy its own
+  CA-trusted signing first.
+
+  New `MICROSOFT-STORE.md` records the account consequences, verified repo
+  baseline, no-secret boundary, three exact Partner Center manifest values,
+  three-month name-reservation lifetime, future AppX build boundary, and
+  one-action-at-a-time evidence ledger. `electron-builder.yml` currently has no
+  Store target or identity; `electron-builder@26.15.3` already contains an
+  unconfigured Windows AppX target; and the existing `process.windowsStore`
+  runtime path plus unit tests suppress GitHub updating only at the policy
+  boundary. No account, reservation, package, external setting, or executable
+  file changed during this preparation. Store onboarding waits behind the one
+  Windows-tester action already assigned to Kyle; no second human action has
+  been issued.
 - [ ] **Step 6.4 — build and verify the Store package.** After Step 6.3 supplies
   non-secret identity strings, add a separate MSIX/AppX build that preserves
   the direct NSIS channel, disables the GitHub updater under Windows Store, and
@@ -1306,17 +1335,200 @@ also bump the Desktop version without inventing a Shell version.
 
 ### Phase 7 — truthful documentation, validation, and bridge release
 
-- [ ] **Step 7.1 — correct all distribution documentation.** Replace inaccurate
+- [x] **Step 7.1 — correct all distribution documentation.** Replace inaccurate
   SmartScreen/certificate and macOS Gatekeeper claims; document exact update
   behavior per package, Desktop-versus-Shell versions, the one-time bridge,
   unsigned direct-download trust, free Store signing, failure/recovery, and
   support boundaries. Keep executable, test, and documentation diffs reported
   separately.
-- [ ] **Step 7.2 — perform final ship-readiness verification.** Re-run unit,
+
+  **Completed 2026-08-14 — the documentation now matches the implemented and
+  observed boundaries.** The exact baseline was re-established before editing.
+  `src/updater.js` selects direct installation for packaged non-Store Windows,
+  AppImage, and Debian builds; selects notice-only behavior for extracted Linux
+  archives; never constructs `electron-updater` for Store packages; disables
+  install-on-quit and downgrade; asks before stopping the daemon tree; and
+  attempts session recovery after an installer-start failure. `src/main.js`
+  supplies Electron's real `process.windowsStore` signal and starts the
+  background check only after the working application boots. The public
+  `v0.1.1` no-updater boundary, hosted current-user Windows lifecycle proof,
+  and remaining human observations were already bound to exact release/run
+  evidence in Steps 4.4, 6.1, and 6.2.
+
+  Microsoft's current
+  [SmartScreen documentation](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)
+  directly contradicts the old claim that buying an OV certificate simply
+  removes the warning: unsigned hashes start without transferable reputation,
+  signed binaries can still be warned about while reputation accumulates,
+  enterprise policy can prevent continuation, and Store-installed apps receive
+  Microsoft's signature. Apple's current
+  [Gatekeeper guidance](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac)
+  directly contradicts the old “categorically useless” claim by documenting a
+  manual Privacy & Security override. Apple's
+  [Developer ID guidance](https://developer.apple.com/support/developer-id/)
+  still establishes Developer ID membership, signing, and notarization as the
+  normal direct-distribution path. The Store cost/account/package facts and
+  their official Microsoft sources remain centralized in
+  `MICROSOFT-STORE.md`; the README now links that record without implying that
+  a Store package or account exists.
+
+  `README.md` now gives one exact package-by-package update table, independent
+  Desktop/Shell versions, the one-time manual bridge, forward-only recovery,
+  nonfatal failure behavior, unsigned-download verification, and the human
+  Windows/Store limits. `SECURITY.md` now distinguishes release checksums,
+  updater hashes, provenance, and operating-system publisher signing.
+  `.github/RELEASE_NOTES.md` is now truthful bridge guidance for the manually
+  tagged release path that consumes it; the automated Shell writer continues
+  to generate separate source-bound notes in
+  `scripts/release-coordinator.mjs`. It no longer claims every Claude, Codex,
+  and Gemini subscription login works: the installed Shell `0.3.7` policy was
+  directly inspected and permits local subscription use only for Codex.
+  `CLAUDE.md`, the release-workflow comments, packaging comments, current plan
+  decisions/gaps, and one assumption in the Windows protocol now use the same
+  boundaries. The AppImage wording was narrowed from an unsupported
+  distribution-wide claim to the locally observed FUSE 2 requirement.
+
+  **Verification and change boundary:** the complete suite passes **141/141**;
+  48 focused updater, Windows-installer, direct-release, and Shell-intake
+  workflow tests pass independently; all five repository YAML files parse; the
+  stale-claim sweep returns only historical starting-state text and intentional
+  observation prompts; and `git diff --check` passes.
+  Executable behavior changed in **zero** files. Test behavior changed in
+  **zero** files. Documentation changed in `README.md`, `SECURITY.md`,
+  `.github/RELEASE_NOTES.md`, `CLAUDE.md`, `WINDOWS-TESTING.md`, and this plan;
+  comments only changed in `.github/workflows/release.yml` and
+  `electron-builder.yml`, leaving their parsed configuration behavior
+  unchanged. `MICROSOFT-STORE.md` remains the new documentation prepared for
+  pending Step 6.3. No Store account, package, identity, repository setting,
+  release, tag, installed client, or other external state changed. The only
+  currently assigned human action remains recruiting the Windows tester from
+  Step 6.2.
+- [x] **Step 7.2 — perform final ship-readiness verification.** Re-run unit,
   workflow, dependency, signature/provenance, packaged Linux, CI Windows, update
   transition, and security-boundary checks. Audit the final dependency and
   artifact contents, compare the implementation with this approved boundary,
   and list every remaining unverified real-world claim.
+
+  **Completed 2026-08-14 — verification is complete; the release verdict is
+  NOT READY.** No defect was found in the candidate behavior exercised here,
+  but the human Windows gate, public bridge, production automation, repository
+  protections, and Store work remain incomplete. Before Step 7.3, this work
+  must reach `main`, both required CI checks and the repository-hardening audit
+  must pass there, Windows Session A must finish, and Kyle must separately
+  approve publication. Store certification and the next real Shell intake are
+  later validations, not prerequisites to the one-time bridge.
+
+  **Source, dependency, and automated checks:** the inspected checkout is
+  branch `step-5-5-release-rehearsal` at
+  `e919620`, with Desktop `0.1.1`, exact Shell `0.3.7`,
+  `electron-updater` `6.8.9`, Electron `43.4.0`, electron-builder `26.15.3`,
+  and npm `12.0.2`. npm still reports `mirafold@0.3.7` as latest, and the
+  committed package and lock hashes did not move during verification. The
+  complete suite passes **141/141**; all ten release-rehearsal scenarios pass;
+  66 focused lifecycle, navigation, permission, updater, packaging, release,
+  and hardening tests pass independently; every source/script/test file parses;
+  and all five repository YAML files parse. `npm audit --audit-level=moderate`
+  reports zero vulnerabilities, `npm audit signatures` verifies all 376
+  installed registry signatures and 56 attestations, and `npm ls --all` exits
+  cleanly.
+
+  **Fresh Linux package and update proof:** a clean current-checkout build
+  produced the AppImage, Debian package, tar archive, stable update metadata,
+  and canonical SHA-256 manifest. The packaged smoke resolved the exact daemon,
+  loaded both native modules, completed the token-to-hardened-cookie HTTP
+  handshake, stopped the complete process tree, and left the URL unreachable.
+  Payload, manifest, and Linux platform contracts all passed. The exact
+  artifact SHA-256 values are
+  `5a38ddc550de4c4a0209606ebcf74003fe9e99e0d5e7a7a17b105f3349feb0d2`
+  (AppImage),
+  `8a5f43430aebc8bfb6a7bf3c3f01c704c25514ae0bdd56c76d38a09c963b32fd`
+  (Debian),
+  `d69047f339f6824d07550c5cd3aafb45196e138e54e815a20e3357860293bf04`
+  (tar), and
+  `1c28176ef65d165dc2c723ac024373ea95e608de1eafbd82e9ecd93769328764`
+  (`latest-linux.yml`). The three package forms embed Desktop `0.1.1`, exact
+  Shell `0.3.7`, and updater `6.8.9`, with no development scripts or
+  development dependencies. The packaged source hashes match the checkout;
+  only the expected Linux x64 `node-pty` and glibc watcher native binaries are
+  present. Debian alone carries the `deb` package marker, while AppImage and
+  tar do not.
+
+  A new isolated `0.1.1` to `0.1.2` local-feed probe repeated the real AppImage
+  stop/replace/relaunch path, selected the verified Debian payload and exact
+  `dpkg -i` command behind `pkexec` without executing privileged installation,
+  and proved that tar metadata opens the fixed Releases URL without stopping
+  the daemon or downloading a payload. The full bridge, lower-version refusal,
+  and forward-only `0.1.4` recovery remain independently observed in Step 4.4;
+  executable update source has not changed since that proof.
+
+  **Windows and provenance re-audit:** the retained candidate from successful
+  nonpublishing run `31770520381` still passes the Windows release contract.
+  Its installer SHA-256 is
+  `d16eba272b0fd186e5eccb967b0b71bca1ca6dbe64dda3f06451f7f868835939`;
+  both native build jobs and provenance job are green; publication was skipped.
+  GitHub's public attestation API returns one in-toto/SLSA provenance statement
+  whose installer subject matches that digest and whose builder, workflow,
+  branch, commit, and nine subjects match the run. The installed-candidate
+  daemon/native-module/current-user install/uninstall proof remains the exact
+  hosted evidence recorded in Step 6.1. The Windows artifact expires
+  2026-08-21; this audit did not publish or extend it.
+
+  **Approved-boundary comparison and live security state:** the branch diff and
+  current worktree were reviewed together. Executable changes modify only the
+  approved release workflow, packaging/package manifests, daemon/main/
+  navigation boundaries, and create the approved updater, permission, Shell
+  intake, release-validation, CI, Dependabot, and repository-hardening
+  components. Test changes cover those components. The current uncommitted
+  Step 7.1 work changes documentation and comments only; it changes no runtime
+  or test behavior. No Store package/identity, macOS target, preload/IPC bridge,
+  renderer Node access, provider credential handling, or upstream Shell source
+  was added. Local hardening validation passes every modeled human, Dependabot,
+  and writer flow. The read-only live audit correctly rejects the current
+  remote state: merge commits remain enabled, merged-branch deletion is off,
+  secret scanning and push protection are off, Dependabot security updates and
+  private vulnerability reporting differ from policy, and the named ruleset
+  plus both release environments are absent.
+
+  **Every remaining unverified real-world claim:**
+
+  1. Remote `main` is still `bee5bd51b127c086114a6833004b34d8c04faf39`;
+     this implementation is unmerged, the Step 7.1/7.2 documentation work is
+     uncommitted, and the two required CI identities have not succeeded on the
+     implementation at `main`. The repository hardening above therefore has
+     not been applied. `MIRAFOLD_AUTOMATED_RELEASES` is absent by design.
+  2. Session A in `WINDOWS-TESTING.md` still needs an ordinary Windows 10/11
+     x64 person to observe SmartScreen/Smart App Control, UAC, the visible
+     installer and destination, Start-menu launch, folder picker, a real Codex
+     turn, ConPTY, file watching, ordinary close, Task Manager, and uninstall.
+     Session B still needs the separately approved public bridge and a later
+     public release to observe anonymous acquisition, startup discovery,
+     **Later**, install/restart, version movement, and final process cleanup.
+  3. Public `v0.1.1` remains the four-payload updater-less release. No public
+     bridge, updater metadata, production-feed discovery, anonymous bridge
+     download, or installed-client production transition has been exercised.
+  4. No genuinely newer Shell exists for intake to consume. The scheduled
+     detection, verified writer commit/tag, cross-platform public release, and
+     installed-client delivery of a real future Shell publication therefore
+     remain unobserved; the writer's live mutation path stays deliberately
+     disabled.
+  5. The Debian authorization dialog, cancellation, actual privileged `dpkg`
+     replacement, and post-install relaunch remain unobserved on a real desktop.
+     AppImage host integration outside this Linux machine and tar behavior
+     across supported distributions are also not claimed.
+  6. No Microsoft developer account type has been established, no Store name
+     or Partner Center identity has been obtained, no AppX/MSIX target exists,
+     and no package has been submitted, signed, certified, privately installed,
+     or updated by the Store. Steps 6.3–6.5 own that work.
+  7. Kyle's private GitHub passkey/security-key, offline recovery-code,
+     recovery-email, and alert-notification readiness remain unverified and
+     must never be supplied to this repository or chat.
+
+  The unsigned direct-download status and the documented hard-kill orphan
+  limitation are verified constraints, not missing evidence disguised as
+  claims. macOS remains explicitly outside the supported target set. No tag,
+  draft, release, repository setting, installed client, Store account, or other
+  external state changed during this Step. The only currently assigned human
+  action remains recruiting the Session A Windows tester from Step 6.2.
 - [ ] **Step 7.3 — publish the manual bridge release.** Only after Kyle's
   explicit release approval, create the public higher Desktop release with the
   updater, current Shell, notes, hashes/provenance, and all update metadata.
@@ -1328,6 +1540,265 @@ also bump the Desktop version without inventing a Shell version.
   record measured timing, failures, and recovery. Complete the program only
   when routine Shell releases require no Desktop intervention.
 
+### Maintenance pass — behavior-preserving release-policy refactor
+
+- [x] **Refactor 1 — decompose Shell-intake validation without changing its
+  contract.** Completed 2026-08-14. The verified starting implementation at
+  `scripts/shell-intake.mjs` repeated the same schema/repository identity and
+  source-baseline checks between intake state and artifact manifests, while
+  `verifyMirafoldProvenance` performed npm-entry selection, SLSA-bundle
+  selection, DSSE decoding, subject verification, source binding, and builder
+  verification in one function.
+
+  The refactor creates only private helpers: `validateIntakeIdentity`,
+  `validateBaseRecord`, `verifiedShellEntry`,
+  `verifiedProvenanceStatement`, `validateProvenanceSubject`, and
+  `verifiedProvenanceSource`. The existing exported
+  `verifyMirafoldProvenance` now names the four policy stages in order. Every
+  condition, evaluation order, failure message, return value, export, CLI,
+  file format, and workflow call remains unchanged.
+
+  Cross-file deduplication of the small GitHub-output adapter was investigated
+  and deliberately not retained. The architecture test proved that Shell
+  intake's one repository-owned import is an explicit trust boundary; moving
+  the adapter to a second module would widen it, while exporting the helper
+  would expand an existing interface. The local duplicate in
+  `scripts/release-coordinator.mjs` therefore remains and both locations now
+  explain why.
+
+  **Verification and change boundary:** the focused intake/coordinator/workflow
+  suite passes **42/42**, the complete suite passes **141/141**, all ten local
+  release-rehearsal scenarios pass, both touched scripts pass Node syntax
+  checks, the before/after Shell-intake export lists are identical, and
+  `git diff --check` passes. Executable organization changed only in
+  `scripts/shell-intake.mjs`; no bug or behavior changed. Comments only changed
+  in `scripts/release-coordinator.mjs`. Test behavior changed in zero files,
+  documentation changed only in this plan, and no file, dependency, public
+  interface, installed package, workflow run, or external state was created or
+  changed. Stateful updater/main-process decomposition and the real Linux
+  package probe were held back because their timing and lifecycle coupling made
+  equivalence too weak to claim confidently.
+
+- [x] **Refactor 2 — centralize duplicated release-smoke preconditions.**
+  Completed 2026-08-14. Both target scripts were unchanged from `HEAD` at the
+  start of this pass. In `scripts/packaged-smoke.mjs`,
+  `runPackagedNodeProbe` and `runPackagedDaemonProbe` each repeated the same
+  four executable/app-directory checks. In
+  `scripts/windows-installer-smoke.mjs`, the silent install and uninstall
+  argument builders repeated the same two NSIS directory-safety checks, and
+  the two registry readers constructed the same six process options.
+
+  The refactor creates only the private `validatePackagedPaths`,
+  `validateNsisDirectory`, and `registryQueryOptions` helpers. Their call sites
+  preserve the original validation order, failure text, environment snapshot,
+  spawn arguments and options, return values, and error handling. The registry
+  result interpreters remain separate because a missing registration and a
+  diagnostic query failure deliberately produce different outcomes.
+
+  **Verification and change boundary:** the focused packaged-runtime and NSIS
+  suite passes **13/13**, the complete suite passes **141/141**, all ten local
+  release-rehearsal scenarios pass, both scripts pass Node syntax checks, their
+  before/after export declarations are identical, and `git diff --check`
+  passes. Executable organization changed only in the two named smoke scripts;
+  no bug or behavior changed. Test code changed in zero files, documentation
+  changed only in this plan entry, and no new file, dependency, export, CLI,
+  configuration, package, workflow run, or external state was created or
+  changed. Updater/main-process state handling, release-contract verification
+  sequencing, and registry result interpretation were held back because
+  consolidating them would weaken confidence in timing, failure-order, or
+  security-policy equivalence.
+
+### Phase 8 — repair the updater and process-lifecycle correctness gaps
+
+- [x] **Step 8.1 — make Desktop own every Linux daemon descendant.** Replace
+  the single-process-group proof with identity-checked descendant tracking that
+  includes the separate sessions/process groups created by the bundled
+  `node-pty`; use the retained identities to clean up after a daemon crash; and
+  make an ordinary Electron quit wait for bounded cleanup before completing.
+  Prove normal stop, forced escalation, separate-group PTY cleanup, crash
+  cleanup, and the exact ordinary-quit state transition.
+
+- [x] **Step 8.2 — make platform-installer failure non-destructive.** Prevent
+  AppImage installation from deleting the working executable before a verified
+  replacement is safely staged, and prevent an asynchronous NSIS launch error
+  from closing the recovered Windows session. Exercise the installed
+  `electron-updater` implementation rather than only a synchronous fake.
+
+- [x] **Step 8.3 — reconcile evidence and claims.** Extend the native Linux and
+  Windows probes where the host can establish the behavior, run the complete
+  test and release-rehearsal gates, and update runtime/release documentation to
+  describe only what the corrected implementation and tests prove.
+
+  **Verified starting state (2026-08-14):** the full suite passes 141/141 and
+  all ten release-rehearsal scenarios pass, but isolated probes established
+  four uncovered paths. The exact bundled Shell's active PTY occupied a
+  different Unix process group, `terminateProcessTree` returned `true`, and the
+  PTY remained in running state with its heartbeat advancing. The pinned
+  AppImage updater removed the current file before a missing replacement
+  failed to move. The pinned NSIS updater dispatched recovery after an
+  asynchronous launch error but still called `app.quit()`. Finally, the
+  ordinary quit hook ignored `Daemon.stop()` while its escalation timers were
+  unreferenced, so a same-group process ignoring `SIGTERM` survived a simulated
+  application event-loop exit. None of these repairs existed or was already
+  scheduled; the documented hard-`SIGKILL` limitation is separate.
+
+  **Completed 2026-08-14.** `src/daemon.js` now samples Linux ancestry while it
+  still exists, retains each active PID with its kernel start time, signals
+  separately grouped descendants as well as the daemon group, prunes dead
+  identities, and carries the retained set through crash cleanup. Its bounded
+  wait timers remain referenced. The new `src/app-lifecycle.js` prevents the
+  first Electron quit event, shares one asynchronous teardown across re-entrant
+  requests, and releases only the second event after cleanup. Folder changes
+  and boot-failure paths now await the same owner instead of discarding its
+  Promise.
+
+  The new `src/platform-updaters.js` subclasses the exact installed
+  `electron-updater` platform classes. Feed selection, SHA-512 checking,
+  differential download, cache handling, and NSIS signature verification stay
+  library-owned. Mirafold now stages an AppImage on the destination filesystem,
+  preserves the prior file until launch acknowledgment, rolls a same-name
+  replacement back after launch failure, and removes an old versioned name only
+  after the new path launches. The NSIS subclass awaits the direct, elevated,
+  or shell-open launch path before emitting `before-quit-for-update` and
+  quitting. An asynchronous failure resets retry state, emits the ordinary
+  updater error, restarts the daemon through the existing controller, and does
+  not call `app.quit()`.
+
+  **Measured verification:** the focused lifecycle/daemon/platform/controller
+  group passes 31/31. The complete suite reports 151 tests passing, all ten
+  local no-network release-rehearsal scenarios pass, every changed JavaScript
+  file passes Node syntax checking, and `git diff --check` passes. A real
+  loopback update probe moved the retained 0.1.0 AppImage to the retained 0.1.1
+  artifact and exercised the Debian path; both ran an active heartbeat through
+  Shell 0.3.7's actual node-pty, proved it stopped before installation, and
+  completed with verified download hashes and relaunch targets. A fresh
+  disposable package of the current checkout then loaded both native wrappers,
+  started Shell 0.3.7 under Electron 43.4.0, completed its authenticated
+  loopback handshake, and proved teardown; the package directory was removed
+  afterward.
+
+  The exact installed NSIS class was forced through a delayed `EIO` launch
+  rejection and recorded zero quit calls, but no native Windows installer or
+  human update was run for this uncommitted checkout. Those observations remain
+  in `WINDOWS-TESTING.md`; this pass does not upgrade them into Windows proof.
+  Executable changes are confined to the two new runtime helpers plus
+  `src/daemon.js`, `src/main.js`, `src/updater.js`, and the Linux/package probe
+  scripts. Tests changed in three existing suites and two new focused suites.
+  Documentation changed in this plan, the README, Security policy, and pending
+  release notes. No dependency, release artifact, tag, repository setting,
+  installed application, or external service changed. Electron-builder
+  downloaded the pinned Electron runtime into its ordinary local build cache;
+  every disposable package/probe directory was removed.
+
+### Phase 9 — close the second-pass ownership and release-contract gaps
+
+- [x] **Step 9.1 — make daemon ownership event-driven.** Serialize folder
+  changes, require every superseded successful boot to stop its own daemon,
+  remove Electron's Node-mode switch before Shell or an agent can inherit it,
+  register Linux pseudo-terminal identities synchronously at their creation,
+  and place the complete Windows daemon tree in a kill-on-close Job Object.
+- [x] **Step 9.2 — verify blockmap content, not merely shape.** Recompute every
+  release block's exact variable-length BLAKE2b digest from the payload bytes
+  in read-only build jobs while preserving the dependency-free release-writer
+  boundary. Reject a structurally valid blockmap whose checksum content is
+  false.
+- [x] **Step 9.3 — reconcile native proof and claims.** Add focused regression
+  tests and a Windows packaged crash probe, rerun the complete suite and
+  release rehearsal, refresh the Windows tester boundary, and record precisely
+  which behavior is locally proved versus awaiting the native Windows runner.
+
+  **Verified starting state (2026-08-14):** all 151 tests and all ten local
+  release-rehearsal scenarios pass, but direct probes established four gaps.
+  Two overlapping File → Open Folder callbacks can leave two live daemons
+  while the main process retains only one. The 25 ms Linux ancestry sampler
+  missed an immediately detached child in 28 of 40 runs and returned `true`
+  while that child was still running. `ELECTRON_RUN_AS_NODE=1` reaches Shell's
+  child environments and makes the bundled Electron 43.4.0 executable report
+  Node `24.18.1`. Finally, the release contract accepts arbitrary canonical
+  18-byte block checksums because it validates only their encoding. Windows
+  orderly shutdown is hosted-runner-proven, but the crash path currently calls
+  `taskkill /T` only after its root PID has disappeared and has no native proof.
+
+  **Completed 2026-08-14 — process ownership:** `src/main.js` now coalesces
+  rapid File → Open Folder commands into one window-owned picker and one
+  transition. Every superseded boot stops the exact `Daemon` it created;
+  identity-bound crash callbacks cannot clear a newer daemon; and an unproven
+  stop starts neither a replacement nor an installer, then closes the unsafe
+  disconnected application. Isolated main-process module probes reproduce the
+  rapid-command and stale-success schedules directly and prove one live owner,
+  one stop per prior daemon, no stale folder persistence, and no replacement
+  after a `false` cleanup proof.
+
+  New `src/daemon-bootstrap.cjs` is the only code entered under Electron's
+  Node-mode switch. It deletes both that switch and the private ownership-ledger
+  path before importing Shell. On Linux it wraps the exact shared
+  `@lydell/node-pty` export before Shell imports it and synchronously appends
+  each PTY's PID plus `/proc` start time. Desktop corroborates every record
+  against the current kernel identity before signalling it, continues reading
+  the private mode-0600 ledger during termination, and removes its random
+  mode-0700 temporary directory afterward. A first regression intentionally
+  disables the old sampler for 60 seconds, runs the bootstrap under the real
+  Electron 43.4.0 executable, crashes Shell immediately after its PTY is ready,
+  proves neither process inherited Node mode or the ledger path, and removes
+  the surviving separate-session child. A second appends a PTY record only
+  after termination's initial snapshot and proves the live loop still ingests
+  and kills it. This closes both the observed 25 ms gap and the final-snapshot
+  race found while reviewing the first correction.
+
+  New `src/windows-daemon-job.ps1` creates a Windows Job Object, sets
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, assigns itself before starting the
+  Electron/bootstrap/daemon chain, and refuses launch if any native call fails.
+  Windows 10/11 support nested jobs, and the exact node-pty 1.2.0-beta.14
+  ConPTY source uses `EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT`
+  without a breakaway flag. The existing native packaged smoke now contains a
+  probe that creates a real ConPTY inside the Job, crashes its fake daemon while
+  a separate long child is alive, requires wrapper exit code 23 and that
+  child's disappearance, cleans it defensively on failure, and finally requires
+  zero `Mirafold.exe` images. This probe is implemented but has **not run on
+  Windows from this checkout**; its first native result belongs to the next
+  non-publishing run.
+
+  **Completed 2026-08-14 — release contract:** read-only platform gates now
+  recompute every block from the declared variable-length chunk sizes with the
+  exact 18-byte BLAKE2b operation used by electron-builder, rejecting a
+  canonical false checksum in a later chunk. `@noble/hashes@2.2.0` is pinned as
+  a direct development dependency because BLAKE2 output length is algorithmic,
+  not equivalent to truncating Node's 64-byte digest. It was already the exact
+  deduplicated electron-builder dependency, so the lock gained only one root
+  reference: zero packages, transitive nodes, or installed bytes were added.
+  It is absent from the packaged application. The import remains lazy and is
+  reached only by read-only `payload`, `manifest`, and `platform` build gates.
+  A copied verifier in an isolated directory with no `node_modules` completes
+  the writer's full cross-platform contract, proving `complete`/draft/published
+  verification still runs no dependency code beside repository-write access.
+  The semantic gate also accepted electron-builder's real retained
+  340,178,742-byte AppImage and its embedded blockmap.
+
+  **Final verification and boundary:** the complete suite passes **160/160**;
+  all ten local release-rehearsal scenarios pass; focused daemon, main,
+  packaging, packaged-smoke, release-contract, and workflow suites pass; every
+  touched JavaScript file passes syntax checking; `npm audit` reports zero
+  vulnerabilities; `npm ls --all` exits cleanly; all 376 installed registry
+  signatures verify and 56 have attestations; and `git diff --check` passes.
+  A fresh unpacked Linux package from the final source contains byte-identical
+  daemon, main, bootstrap, and Windows Job files, embeds Desktop 0.1.1/Shell
+  0.3.7, loads both native modules, completes the authenticated loopback
+  handshake, proves the daemon tree stopped, and leaves its URL unreachable.
+
+  Executable changes modify `src/daemon.js`, `src/main.js`,
+  `scripts/release-contract.mjs`, `scripts/packaged-smoke.mjs`, `package.json`,
+  and `package-lock.json`, and create the bootstrap and Windows Job wrapper.
+  Tests modify five existing suites and create `test/main.test.js`.
+  Documentation/comments change the README, security policy, pending release
+  notes, Windows protocol, `CLAUDE.md`, and this plan. Updater behavior,
+  credential/pairing-code redaction, navigation/permission policy, package
+  targets, Shell source, and release-workflow YAML are behaviorally unchanged
+  in this Phase; the workflows' existing package-smoke and platform-contract
+  commands automatically exercise the stronger scripts. No account, tag,
+  release, repository setting, installed system package, or external service
+  changed. `WINDOWS-TESTING.md` now forbids the pre-Job candidate and awaits one
+  coherent fresh runner artifact before the parked human session resumes.
+
 ## Status
 
 **Phase 1 — the app itself: DONE (2026-08-02).**
@@ -1336,8 +1807,9 @@ Electron main process, folder picker, daemon lifecycle, crash recovery, menu,
 Linux packaging. Verified end to end on Linux in both a dev checkout and the
 packaged build:
 
-- daemon boots under `ELECTRON_RUN_AS_NODE` and reports Node 24.18.0 (above
-  `mirafold`'s Node ≥22 floor)
+- the bootstrap boots under `ELECTRON_RUN_AS_NODE` and reports a Node version
+  above `mirafold`'s Node ≥22 floor, then removes that switch before Shell or
+  agent commands inherit the environment
 - the real Mirafold UI loads in the window, in the picked folder
 - `node-pty` runs a real pseudo-terminal (a `!` bang command returned output)
 - `@parcel/watcher` fires (a file created externally appeared in the tree
@@ -1411,40 +1883,40 @@ archived in PLAN-ARCHIVE.md.*
 | Daemon is a **child process**, not imported | crash isolation, event-loop isolation, per-folder cwd (`src/daemon.js` header) |
 | **No preload / IPC / nodeIntegration** | keeps Mirafold's browser security model true as written |
 | **asar off** | a partially-unpacked archive resolves the daemon but not its dependencies; the failure would surface only when packaged, on Windows, where it can't be debugged |
-| **Linux + Windows only, unsigned** | both work unsigned; macOS does not |
-| **No macOS** | Gatekeeper refuses quarantined unsigned apps outright — an unsigned `.dmg` is useless to a downloader, not merely scary |
-| `.deb` + `.tar.gz` + `.AppImage` | AppImage alone is not enough: it needs `libfuse2`, absent by default on Ubuntu 22.04+ and most current distros (reproduced) |
+| **Linux + Windows direct targets remain unsigned** | Linux packages and the Windows NSIS installer are the existing direct targets. Windows may show a reputation warning or block under device policy; the separate planned Store package would receive Store signing. |
+| **No macOS target** | no Mac artifact, packaging path, signing identity, notarization, or real-package proof exists. Apple documents a manual unidentified-developer override, but a normal supported direct release requires Developer ID signing, notarization, packaging, and real-Mac validation. |
+| `.deb` + `.tar.gz` + `.AppImage` | AppImage alone is not enough: this target needs FUSE 2, and its missing-library failure was reproduced locally. The tar archive is the no-FUSE fallback. |
 | **Linux updater follows installed form** | AppImage can replace its user-owned file; Debian requests system authorization through the available elevation helper; a tar extraction has no safe universal self-replacement path and therefore receives a notice plus the fixed official download URL |
 | **npm**, not yarn | electron-builder assumes npm layouts; yarn 1 hoisting fights platform-specific optional deps, which is exactly how the native modules ship |
-| **Repo stays public** (considered private 2026-08-05, rejected) | a shipped Electron app is trivially unpacked, so repo privacy protects nothing; no credential can ever live client-side; any paid gating is server-side (accounts + credits), so private had no benefit left |
+| **Repo stays public** (considered private 2026-08-05, rejected) | a shipped Electron app is trivially unpacked, so repo privacy protects nothing; no credential can ever live client-side; any paid gating is server-side (accounts plus a flat subscription with a capped usage allowance), so private had no benefit left |
 
 ## Facts about the world that no repo can observe
 
-- **Kyle has a Mac** (stated 2026-08-02). This is the reason macOS is a
-  *deferred cost decision* rather than an untestable one: when the $99/yr Apple
-  Developer membership is bought, he can verify the real download-and-open
-  experience himself, including the launched-from-Finder `PATH` problem that
-  `src/login-env.js` exists to solve and that only reproduces on real hardware.
-- **Nobody on this project has a Windows machine.** The Windows artifact is
-  CI-built and inspected, never launched.
+- **Kyle has a Mac** (stated 2026-08-02). This makes a future macOS release
+  testable on real hardware if the project later takes on Apple Developer
+  membership, Developer ID signing, notarization, and packaging. The test must
+  include the launched-from-Finder `PATH` behavior that `src/login-env.js`
+  exists to handle.
+- **No maintainer-owned Windows machine has been established.** The current
+  package has now been installed, launched, smoke-tested, and uninstalled on a
+  hosted Windows runner. SmartScreen, the visible wizard, the folder picker,
+  a real agent, ConPTY, file watching, and human update/restart behavior still
+  require the tester protocol on an ordinary Windows machine.
 - **macOS is deferred until Mirafold "takes off"** (Kyle's words, 2026-08-02) —
   a revenue trigger, not a technical blocker.
 
 ## Next
 
-1. **Get the Windows build tested by a human — the top priority.** Until a real
-   person installs it, the Windows artifact is "CI produced a file," and nothing
-   should imply more. What to have them check, in order: installs past
-   SmartScreen · folder picker works · a prompt gets a response · a `!` command
-   works (ConPTY, the most platform-specific path) · the file tree updates on an
-   external edit · **after quitting, Task Manager shows no leftover `mirafold`
-   processes** (the `taskkill /T /F` path, written but never observed).
-   **Tester instructions exist: `WINDOWS-TESTING.md`** (added 2026-08-03, now
-   pointing at v0.1.1) — a self-contained checklist covering all of the above
-   plus the download-warning click-throughs and the API-key path; send a tester
-   that one file and nothing else is needed. Its download URL was verified
-   anonymous-accessible (HTTP 200, `MZ` header, no auth) after the v0.1.1
-   release published.
+1. **Complete `WINDOWS-TESTING.md` with a human — the top priority.** The hosted
+   runner has proved the silent per-user installer, real bundled daemon/native
+   modules, process-tree stop, and uninstall. Session A still needs a person to
+   observe the exact retained private candidate's Windows reputation response,
+   visible installer, folder picker, real Codex turn, ConPTY command, watcher,
+   ordinary quit, and uninstall. Session B later needs the separately approved
+   public bridge and a higher public release to prove anonymous acquisition and
+   the production update/restart path. The only action currently assigned to
+   Kyle is to identify one consenting Windows 10/11 x64 tester with a working
+   local Codex login and no existing Mirafold Desktop installation.
 2. **Then, and only then, announce — and the announcement is now a launch of
    its own (Kyle, 2026-08-05).** The desktop app launches separately from the
    core product's 2026-07-31 launch, and its launch waits on the paid
@@ -1460,22 +1932,21 @@ archived in PLAN-ARCHIVE.md.*
 
 ## Known gaps, not yet scheduled
 
-- **Credential entry has no GUI — PARKED (Kyle, 2026-08-03), not scheduled.**
-  The onboarding screen tells you to set `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`,
-  which assumes a terminal. Users who already have Claude Code, Codex, or Gemini
-  CLI logged in are fine — their existing config is picked up, and they are the
-  target audience — but a brand-new user with only an API key has to hand-write
-  a `.env` in the project folder, per folder, and creating a dotfile is worst on
-  Windows (which is why `WINDOWS-TESTING.md` walks a tester through Notepad's
-  quoted "Save As"). **Reasons it stays parked, so this isn't re-derived:** (1)
-  it is product behavior — a settings screen is UI plus storage plus how the
-  daemon gets its environment, so it belongs in `mirafold` upstream, and
-  building it here would break this repo's no-product rule; (2) accepting a
-  credential means owning it — storage, encryption at rest, log/crash-report
-  leakage, uninstall — and this repo currently handles **zero** credentials, a
-  property the audit verified and worth keeping; (3) zero users have hit it.
-  **Trigger to revisit is evidence, not a date:** a tester stalling on it, or
-  the marketing site starting to pitch people who have only an API key.
+- **Credential entry has no Desktop GUI — PARKED (Kyle, 2026-08-03), not
+  scheduled.** Provider policy belongs to the exact bundled Shell and must not
+  be summarized as “every existing login works.” Shell `0.3.7` accepts a local
+  Codex/ChatGPT subscription login; Claude Code and Gemini subscription logins
+  alone are deliberately blocked for this third-party application path, while
+  their API-key paths require the key to already be available in the user's
+  normal environment. The Desktop neither creates nor stores provider
+  credentials. **Reasons this remains upstream:** (1) a settings screen is
+  product UI, storage, and daemon-environment behavior, so it belongs in
+  `mirafold`; (2) accepting a credential means owning its storage, encryption,
+  log/crash-report leakage, and uninstall behavior, while this repo currently
+  handles **zero** credentials; (3) zero users have supplied evidence that the
+  missing GUI blocks them. **Trigger to revisit is evidence, not a date:** a
+  tester stalling on credential setup, or the marketing site targeting people
+  who have only an API key.
 - **Updater bridge and Shell-version boundary.** The public `v0.1.1` artifacts
   have no updater runtime or feed metadata, so those users still need one manual
   download of the first updater-capable release. Step 4.4 now proves the entire
@@ -1499,9 +1970,16 @@ archived in PLAN-ARCHIVE.md.*
   merging `desktop.entry`, so setting `Comment` there doesn't win — `Keywords`
   and `Name` do apply, `Comment` and `Categories` don't. Cosmetic only; the
   entry, icon and `StartupWMClass` are all correct.
-- **Windows process-tree teardown is written but untested.** `taskkill /T /F` is
-  the right call; nobody has watched it work. It is now reached from two paths
-  (normal quit and failed boot), both through one `killTree()`.
-- **A hard kill of the app orphans the daemon.** The daemon is spawned
-  `detached` so its process group can be signalled, which by construction means
-  it survives a `SIGKILL` of the app. Normal quit and window close are handled.
+- **The prior Windows orderly teardown is runner-proven; the Job crash path is
+  not yet.** The superseded installed-candidate smoke exercised Windows
+  `taskkill /T /F` and observed zero remaining `Mirafold.exe` images. The
+  current packaged probe additionally exercises real ConPTY and forced daemon
+  crash inside the new Job Object, but needs a fresh native Windows run. A
+  person's ordinary window close and Task Manager observation remain part of
+  `WINDOWS-TESTING.md` after that fresh artifact exists.
+- **A hard kill of the GUI app can orphan the daemon.** On Unix, the daemon is
+  detached so its process group can be signalled; on Windows, the Job handle is
+  deliberately owned by the child wrapper that must survive the GUI. Both
+  architectures therefore survive an uncatchable kill of Electron's main
+  process. Normal quit and window close are handled; daemon-crash cleanup is
+  locally proved on Linux, while the Windows Job path awaits its native run.

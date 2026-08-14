@@ -71,12 +71,12 @@ npmRebuild: false
 #            FUSE — extract it and run ./mirafold. This is what Fedora, Arch and
 #            everyone else gets, and it is the answer to the AppImage caveat.
 #   AppImage The portable single file people expect from Linux desktop apps.
-#            CAVEAT, and the reason tar.gz exists: the AppImage runtime needs
-#            libfuse2, which Ubuntu 22.04+ and most current distros no longer
-#            install by default. Without it a double-click fails with
-#            "dlopen(): error loading libfuse.so.2" — a message that reads as a
-#            broken download. Verified on this machine. `--appimage-extract-and-run`
-#            works around it; the README says so, and points at tar.gz instead.
+#            CAVEAT, and the reason tar.gz exists: this AppImage runtime needs
+#            FUSE 2 on the host. Where that compatibility library is absent, a
+#            double-click fails with "dlopen(): error loading libfuse.so.2" —
+#            a message that reads as a broken download. Verified on this
+#            machine. `--appimage-extract-and-run` works around it; the release
+#            guidance points at tar.gz instead.
 linux:
   target:
     - deb
@@ -120,16 +120,18 @@ win:
     - nsis
   icon: build/icon.png
 
-# This build is UNSIGNED, which shapes both settings below.
+# This direct-download build is UNSIGNED, which shapes both settings below.
 #
-# perMachine: false installs into the user's own profile, so Windows never
-# raises a UAC elevation prompt. An admin prompt on top of the SmartScreen
-# "unrecognized app" warning is where an ordinary person stops — one scary
-# dialog is survivable, two stacked is not.
+# perMachine: false selects a current-user installation. The Windows-runner
+# smoke has proved explicit silent /currentuser installation with HKCU and no
+# HKLM registration. It cannot prove that the visible wizard never elevates:
+# the chosen destination, device policy, and Windows security controls remain
+# human observations. Keeping the ordinary path user-scoped avoids requiring
+# machine-wide installation rights by design.
 #
 # oneClick: false gives a real installer with a visible destination and a Next
-# button. A silent one-click install of an unsigned binary reads as exactly the
-# thing people are told to be afraid of.
+# button. That visible direct-download path and any SmartScreen or Smart App
+# Control decision remain part of the real-Windows human protocol.
 nsis:
   oneClick: false
   perMachine: false

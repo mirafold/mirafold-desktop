@@ -34,7 +34,11 @@ destroys that and creates a second thing to keep in sync.
 
 ## Dependencies
 
-Three, total: `mirafold`, `electron`, `electron-builder`. Every one of them
+Five direct packages, each exact: runtime `mirafold` and `electron-updater`;
+development `electron`, `electron-builder`, and `@noble/hashes`.
+`@noble/hashes` is the same already-installed version electron-builder uses;
+the read-only release gate imports it directly to reproduce builder blockmap
+digests, while it is absent from the packaged application. Every direct package
 carries a real justification.
 
 A new dependency must earn its place. Prefer writing a small thing ourselves
@@ -67,7 +71,14 @@ without changing upstream. Don't re-derive this.
 
 ## Signing
 
-Windows ships unsigned by decision (SmartScreen warns; users click through).
-macOS is not built at all, because unsigned Mac builds are refused outright
-rather than warned about, which would make the download useless. Neither is an
-oversight; both are cost decisions with a stated price.
+Direct Windows downloads ship unsigned by decision. SmartScreen can warn about
+an unrecognized file or publisher; device policy determines whether a per-file
+continuation is offered. A conventional signature would establish the
+publisher but would not guarantee an immediate reputation-free launch. The
+planned Microsoft Store package is a separate, currently unimplemented target
+that would receive free Store signing and Store-managed updates.
+
+macOS is not built or supported. Apple documents a manual override for an app
+from an unidentified developer, so do not describe unsigned Mac software as
+categorically impossible to open. A normal supported direct Mac release would
+require Developer ID signing, notarization, packaging, and real-Mac testing.

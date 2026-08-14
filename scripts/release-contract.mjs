@@ -2,9 +2,10 @@
 
 // The release job is the only workflow job with a repository-write token. It
 // must be able to validate artifacts without `npm ci`, `npx`, or any other
-// dependency code running beside that credential. This verifier consequently
-// uses Node's standard library only and accepts the deliberately small YAML
-// subset electron-builder emits for Mirafold's update metadata.
+// dependency code running beside that credential. Every release-writer path
+// consequently uses Node's standard library only. Read-only platform build
+// jobs additionally load electron-builder's exact BLAKE2b implementation to
+// prove that each differential-update block checksum describes its payload.
 
 import { createHash } from "node:crypto";
 import {
@@ -222,6 +223,36 @@ function assertBlockMap(blockMap, payloadSize, label) {
     describedSize += size;
   }
   invariant(describedSize === payloadSize, `${label} describes ${describedSize} bytes, expected ${payloadSize}`);
+  return file;
+}
+
+async function verifyBlockMapContents(payloadFile, file, label) {
+  // Electron-builder/app-builder-lib uses @noble/hashes with an 18-byte output
+  // for these checksums. BLAKE2 output length is part of the algorithm, so a
+  // truncated 64-byte digest is not equivalent.
+  const { blake2b } = await import("@noble/hashes/blake2.js");
+  const descriptor = openSync(payloadFile, "r");
+  let position = 0;
+  try {
+    for (let index = 0; index < file.sizes.length; index += 1) {
+      const size = file.sizes[index];
+      const chunk = Buffer.allocUnsafe(size);
+      let offset = 0;
+      while (offset < size) {
+        const count = readSync(descriptor, chunk, offset, size - offset, position + offset);
+        invariant(count > 0, `unexpected end of ${path.basename(payloadFile)}`);
+        offset += count;
+      }
+      const actual = Buffer.from(blake2b(chunk, { dkLen: 18 })).toString("base64");
+      invariant(
+        actual === file.checksums[index],
+        `${label} chunk ${index} checksum does not match payload bytes`,
+      );
+      position += size;
+    }
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function readExactly(file, position, length) {
@@ -240,7 +271,7 @@ function readExactly(file, position, length) {
   return buffer;
 }
 
-function verifyEmbeddedAppImageBlockMap(file, declaredSize) {
+async function verifyEmbeddedAppImageBlockMap(file, declaredSize, verifyContents) {
   const fileSize = statSync(file).size;
   invariant(Number.isInteger(declaredSize) && declaredSize > 0 && declaredSize < fileSize - 4, "AppImage metadata has no valid embedded block-map size");
   const header = readExactly(file, fileSize - 4, 4).readUInt32BE(0);
@@ -252,20 +283,31 @@ function verifyEmbeddedAppImageBlockMap(file, declaredSize) {
   } catch {
     throw new Error("AppImage embedded block map is not valid deflated JSON");
   }
-  assertBlockMap(blockMap, fileSize - declaredSize - 4, "AppImage embedded block map");
+  const record = assertBlockMap(
+    blockMap,
+    fileSize - declaredSize - 4,
+    "AppImage embedded block map",
+  );
+  if (verifyContents) await verifyBlockMapContents(file, record, "AppImage embedded block map");
 }
 
-function verifyExternalWindowsBlockMap(file, installerSize) {
+async function verifyExternalWindowsBlockMap(file, installer, verifyContents) {
   let blockMap;
   try {
     blockMap = JSON.parse(gunzipSync(readFileSync(file)).toString("utf8"));
   } catch {
     throw new Error("Windows block map is not valid gzipped JSON");
   }
-  assertBlockMap(blockMap, installerSize, "Windows block map");
+  const record = assertBlockMap(blockMap, statSync(installer).size, "Windows block map");
+  if (verifyContents) await verifyBlockMapContents(installer, record, "Windows block map");
 }
 
-async function verifyUpdateMetadata(directory, version, platform) {
+async function verifyUpdateMetadata(
+  directory,
+  version,
+  platform,
+  { verifyBlockContents = false } = {},
+) {
   const metadataName = platform === "linux" ? "latest-linux.yml" : "latest.yml";
   const metadata = parseUpdateMetadata(readFileSync(path.join(directory, metadataName), "utf8"));
   invariant(metadata.version === version, `${metadataName} version ${metadata.version} != ${version}`);
@@ -290,7 +332,7 @@ async function verifyUpdateMetadata(directory, version, platform) {
     invariant(info.size === size, `${metadataName} payload ${info.url} size ${info.size} != ${size}`);
     invariant((await hashFile(artifact)) === info.sha512, `${metadataName} payload ${info.url} SHA-512 does not match`);
     if (info.url.endsWith(".AppImage")) {
-      verifyEmbeddedAppImageBlockMap(artifact, info.blockMapSize);
+      await verifyEmbeddedAppImageBlockMap(artifact, info.blockMapSize, verifyBlockContents);
     } else {
       invariant(info.blockMapSize === undefined, `${metadataName} unexpectedly embeds a block map for ${info.url}`);
     }
@@ -303,7 +345,7 @@ async function verifyUpdateMetadata(directory, version, platform) {
 
   if (platform === "windows") {
     const installer = path.join(directory, primary);
-    verifyExternalWindowsBlockMap(`${installer}.blockmap`, statSync(installer).size);
+    await verifyExternalWindowsBlockMap(`${installer}.blockmap`, installer, verifyBlockContents);
   }
 }
 
@@ -311,7 +353,7 @@ export async function verifyPlatformArtifacts(directory, version, platform) {
   assertStableVersion(version);
   const expected = expectedReleaseAssets(version, platform);
   assertExactAssetSet(directory, expected);
-  await verifyUpdateMetadata(directory, version, platform);
+  await verifyUpdateMetadata(directory, version, platform, { verifyBlockContents: true });
   await verifyPlatformManifest(directory, version, platform);
   return expected;
 }
@@ -320,7 +362,7 @@ export async function verifyPlatformPayloadArtifacts(directory, version, platfor
   assertStableVersion(version);
   const expected = expectedPlatformPayloads(version, platform);
   assertExactAssetSet(directory, expected);
-  await verifyUpdateMetadata(directory, version, platform);
+  await verifyUpdateMetadata(directory, version, platform, { verifyBlockContents: true });
   return expected;
 }
 

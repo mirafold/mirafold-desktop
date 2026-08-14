@@ -29,11 +29,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Daemon } from "../src/daemon.js";
+import { createSafeAppImageUpdater } from "../src/platform-updaters.js";
 import { DOWNLOAD_PAGE_URL, createDesktopUpdater } from "../src/updater.js";
 import { parseUpdateMetadata, verifyPlatformArtifacts } from "./release-contract.mjs";
 
 const require = createRequire(import.meta.url);
 const { AppImageUpdater, AppUpdater, DebUpdater } = require("electron-updater");
+const MirafoldAppImageUpdater = createSafeAppImageUpdater(AppImageUpdater);
 const { NodeHttpExecutor } = require("builder-util/out/nodeHttpExecutor.js");
 const { configureRequestOptions, configureRequestUrl } = require("builder-util-runtime");
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -59,6 +61,16 @@ function withTimeout(promise, label, milliseconds = 120_000) {
     timer = setTimeout(() => reject(new Error(`${label} timed out after ${milliseconds} ms`)), milliseconds);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitFor(predicate, label, milliseconds = 5000) {
+  const deadline = Date.now() + milliseconds;
+  while (!predicate() && Date.now() < deadline) await delay(25);
+  invariant(predicate(), `${label} timed out after ${milliseconds} ms`);
 }
 
 function fileHash(file) {
@@ -205,6 +217,79 @@ function localRequestSucceeds(url) {
   });
 }
 
+function shellQuote(value) {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function processIsRunning(pid) {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const state = stat.slice(stat.lastIndexOf(")") + 2).split(/\s+/)[0];
+    return state !== "Z" && state !== "X";
+  } catch {
+    return false;
+  }
+}
+
+async function startPtyHeartbeat(url, root, label) {
+  const pidFile = path.join(root, `${label}-pty-pid`);
+  const heartbeatFile = path.join(root, `${label}-pty-heartbeat`);
+  const endpoint = new URL(url);
+  endpoint.protocol = "ws:";
+  endpoint.pathname = "/ws";
+  endpoint.hash = "";
+  const socket = new WebSocket(endpoint);
+  const bangId = `${label}-update-probe`;
+  const started = deferred();
+
+  socket.addEventListener("open", () => {
+    socket.send(JSON.stringify({ type: "create", agent: "claude-code" }));
+  });
+  socket.addEventListener("message", (event) => {
+    let message;
+    try {
+      message = JSON.parse(String(event.data));
+    } catch {
+      return;
+    }
+    if (message.type === "session_created") {
+      const command = [
+        `printf '%s' "$$" > ${shellQuote(pidFile)}`,
+        `while :; do printf x >> ${shellQuote(heartbeatFile)}; sleep 0.05; done`,
+      ].join("; ");
+      socket.send(JSON.stringify({ type: "bang", id: bangId, command }));
+    }
+    if (message.type === "bang_start" && message.id === bangId) started.resolve();
+    if (message.type === "error") started.reject(new Error(`PTY probe failed: ${message.message}`));
+  });
+  socket.addEventListener("error", () => started.reject(new Error("PTY probe WebSocket failed")));
+
+  try {
+    await withTimeout(started.promise, `${label} PTY start`, 10_000);
+    await waitFor(
+      () => existsSync(pidFile) && existsSync(heartbeatFile) && statSync(heartbeatFile).size > 0,
+      `${label} PTY heartbeat`,
+    );
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    invariant(Number.isInteger(pid) && pid > 0 && processIsRunning(pid), `${label} PTY PID is not running`);
+    return { socket, pid, heartbeatFile };
+  } catch (error) {
+    socket.close();
+    throw error;
+  }
+}
+
+async function provePtyStopped(pty, label) {
+  const bytesAtStop = statSync(pty.heartbeatFile).size;
+  await delay(200);
+  invariant(!processIsRunning(pty.pid), `${label} PTY process survived daemon cleanup`);
+  invariant(
+    statSync(pty.heartbeatFile).size === bytesAtStop,
+    `${label} PTY heartbeat advanced after daemon cleanup`,
+  );
+  pty.socket.close();
+}
+
 async function startRealDaemon(root, label) {
   const project = path.join(root, `${label}-project`);
   mkdirSync(project, { recursive: true });
@@ -230,7 +315,13 @@ async function startRealDaemon(root, label) {
     else process.env.MIRAFOLD_SESSION_DIR = previousSessionDirectory;
   }
   invariant(await localRequestSucceeds(url), `${label} daemon URL was not reachable before update`);
-  return { daemon, url, get crash() { return crash; } };
+  try {
+    const pty = await startPtyHeartbeat(url, root, label);
+    return { daemon, url, pty, get crash() { return crash; } };
+  } catch (error) {
+    await daemon.stop();
+    throw error;
+  }
 }
 
 async function exerciseInstallController({ updater, daemonProbe, install }) {
@@ -244,9 +335,12 @@ async function exerciseInstallController({ updater, daemonProbe, install }) {
     try {
       lifecycle.push("install");
       assert.equal(daemonProbe.daemon.running, false, "platform installer ran before daemon.stop completed");
-      installed.resolve({ args, result: install(...args) });
+      const result = install(...args);
+      installed.resolve({ args, result });
+      return result;
     } catch (error) {
       installed.reject(error);
+      throw error;
     }
   };
   updater.on("error", (error) => installed.reject(error));
@@ -267,6 +361,7 @@ async function exerciseInstallController({ updater, daemonProbe, install }) {
       const clean = await daemonProbe.daemon.stop();
       assert.equal(clean, true, "daemon process tree shutdown was not proven");
       assert.equal(await localRequestSucceeds(daemonProbe.url), false, "daemon URL remained reachable after stop proof");
+      await provePtyStopped(daemonProbe.pty, "platform update");
       lifecycle.push("stopped");
       return true;
     },
@@ -281,7 +376,7 @@ async function exerciseInstallController({ updater, daemonProbe, install }) {
   const outcome = await withTimeout(installed.promise, "local update install");
   assert.deepEqual(lifecycle, ["prepare", "stopped", "install"]);
   assert.deepEqual(outcome.args, [false, true]);
-  assert.equal(outcome.result, true, "platform updater refused the downloaded artifact");
+  assert.equal(await outcome.result, true, "platform updater refused the downloaded artifact");
   assert.equal(daemonProbe.crash, null, "an intentional update shutdown was reported as a daemon crash");
   assert.ok(messages.some((message) => message.title === "Mirafold update ready"));
   return { lifecycle, messages };
@@ -296,7 +391,8 @@ async function exerciseAppImage({ root, oldAppImage, feedDirectory, feedUrl, old
   process.env.APPIMAGE = currentPath;
 
   const { adapter } = createAppAdapter(root, "appimage", oldVersion, feedUrl);
-  const updater = createLoopbackUpdater(AppImageUpdater, adapter, feedUrl);
+  const updater = createLoopbackUpdater(MirafoldAppImageUpdater, adapter, feedUrl);
+  const quitAndInstall = updater.quitAndInstall.bind(updater);
   let launch = null;
   updater.spawnLog = async (command, args, env) => {
     launch = { command, args, silentInstall: env?.APPIMAGE_SILENT_INSTALL };
@@ -307,7 +403,7 @@ async function exerciseAppImage({ root, oldAppImage, feedDirectory, feedUrl, old
     const controller = await exerciseInstallController({
       updater,
       daemonProbe,
-      install: (isSilent, isForceRunAfter) => updater.install(isSilent, isForceRunAfter),
+      install: quitAndInstall,
     });
     const newName = `Mirafold-${newVersion}.AppImage`;
     const destination = path.join(currentDirectory, newName);
@@ -510,7 +606,7 @@ async function exerciseChecksumRejection({ root, currentPath, currentRelease, ta
   try {
     return await withAppImagePath(currentPath, async () => {
       const { adapter } = createAppAdapter(root, "checksum-rejection", currentRelease.version, feed.url);
-      const updater = createLoopbackUpdater(AppImageUpdater, adapter, feed.url);
+      const updater = createLoopbackUpdater(MirafoldAppImageUpdater, adapter, feed.url);
       const failure = deferred();
       const messages = [];
       const lifecycle = [];
@@ -578,7 +674,7 @@ async function exerciseAppImageTransition({
   try {
     return await withAppImagePath(currentPath, async () => {
       const { adapter } = createAppAdapter(root, label, currentRelease.version, feed.url);
-      const updater = createLoopbackUpdater(AppImageUpdater, adapter, feed.url);
+      const updater = createLoopbackUpdater(MirafoldAppImageUpdater, adapter, feed.url);
       let launch = null;
       updater.spawnLog = async (command, args, env) => {
         launch = { command, args, silentInstall: env?.APPIMAGE_SILENT_INSTALL };
@@ -592,13 +688,17 @@ async function exerciseAppImageTransition({
       const firstReadyPrompt = deferred();
       let readyPrompts = 0;
       void installed.promise.catch(() => {});
+      const quitAndInstall = updater.quitAndInstall.bind(updater);
       updater.quitAndInstall = (...args) => {
         try {
           lifecycle.push("install");
           assert.equal(daemonProbe.daemon.running, false, "AppImage install ran before daemon shutdown");
-          installed.resolve({ args, result: updater.install(...args) });
+          const result = quitAndInstall(...args);
+          installed.resolve({ args, result });
+          return result;
         } catch (error) {
           installed.reject(error);
+          throw error;
         }
       };
       updater.on("error", (error) => installed.reject(error));
@@ -622,6 +722,7 @@ async function exerciseAppImageTransition({
           const clean = await daemonProbe.daemon.stop();
           assert.equal(clean, true, "daemon process tree shutdown was not proven");
           assert.equal(await localRequestSucceeds(daemonProbe.url), false, "daemon URL survived stop proof");
+          await provePtyStopped(daemonProbe.pty, label);
           lifecycle.push("stopped");
           return true;
         },
@@ -701,7 +802,7 @@ async function exerciseLowerVersionRefusal({ root, currentPath, currentRelease, 
   try {
     return await withAppImagePath(currentPath, async () => {
       const { adapter } = createAppAdapter(root, "lower-version-refusal", currentRelease.version, feed.url);
-      const updater = createLoopbackUpdater(AppImageUpdater, adapter, feed.url);
+      const updater = createLoopbackUpdater(MirafoldAppImageUpdater, adapter, feed.url);
       const lifecycle = [];
       const messages = [];
       const controller = createDesktopUpdater({

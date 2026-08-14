@@ -40,19 +40,33 @@ If you aren't sure, just report it and I'll route it.
 These are known and intentional. A report that one of them exists isn't a
 finding, but an argument that one of them is *worse than I think* is welcome.
 
-- **The builds are not code-signed.** Windows SmartScreen warns that the
-  publisher is unrecognized, and you click through it. A certificate is a
-  recurring cost this project hasn't taken on. macOS isn't built at all,
-  because an unsigned Mac app is refused outright rather than warned about.
-  This does mean you are trusting the download; `npm i -g mirafold` is the
-  same software through a channel you may trust more.
+- **The direct-download builds are not operating-system signed.** Windows
+  SmartScreen can report an unrecognized app or publisher; whether Windows
+  offers a per-file continuation depends on the device's security policy. A
+  conventional signature would establish the publisher and allow reputation
+  to accumulate across releases, but it would not guarantee that a newly
+  signed file avoids SmartScreen. Check the exact GitHub Release and published
+  SHA-256 before choosing whether to run an unsigned file. Release checksums,
+  updater SHA-512 metadata, and GitHub/Sigstore provenance establish byte and
+  build identity, but none makes Windows display a verified publisher. A
+  Microsoft Store package would receive free Store signing and Store-managed
+  updates, but that package has not been built or certified. macOS is not built
+  or supported; a normal direct Mac release would require Developer ID signing,
+  notarization, packaging, and real-Mac testing. `npm i -g mirafold` is the same
+  Shell software through a channel you may trust more.
 - **The window has no bridge into it.** There is no preload script, no IPC
   channel, and no Node access in the page — the window loads the daemon's
   local page the way a browser would. This is deliberate, so that the app
   inherits the web application's own security model instead of creating a
   second one.
-- **The daemon runs as a separate process** and is signalled as a process
-  group (Windows: `taskkill /T`) so agent processes don't survive quitting.
+- **The daemon runs as a separate process.** The packaged Electron binary
+  enters Node mode only for a bootstrap, which removes that environment switch
+  before Shell or an agent can inherit it. On Windows the bootstrap is hosted
+  by a kill-on-close Job Object and ordinary teardown also uses
+  `taskkill /T /F`. On Linux, pseudo-terminal identities are registered at
+  creation, corroborated by PID plus kernel start time, and combined with the
+  daemon process group. Ordinary quit waits for bounded graceful and forced
+  cleanup before Electron exits.
 - **The app is large (~300 MB)** because the agent SDKs bundle their own
   runtimes. That's the size of what it runs, not an unexamined dependency.
 

@@ -274,9 +274,10 @@ export function createDesktopUpdater(options) {
       // Non-silent installation keeps the operating system's installer UI
       // visible. autoRunAppAfterInstall remains true, so the new version opens
       // after a successful NSIS/AppImage update.
-      updater.quitAndInstall(false, true);
-      // Some platform failures emit `error` synchronously instead of throwing.
-      // The listener has already moved `installing` to false in that case.
+      const installResult = updater.quitAndInstall(false, true);
+      if (installResult && typeof installResult.then === "function") await installResult;
+      // Platform failures may emit `error` instead of throwing. Synchronous and
+      // awaited asynchronous paths both move `installing` to false here.
       if (!installing) {
         if (installFailurePromise) await installFailurePromise;
         return false;

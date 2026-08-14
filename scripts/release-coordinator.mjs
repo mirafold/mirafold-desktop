@@ -92,6 +92,8 @@ function writeExclusive(file, value, label) {
   writeFileSync(file, value, { flag: "wx", mode: 0o600 });
 }
 
+// Keep this small adapter local instead of expanding Shell intake's exported
+// interface solely to share it across two independently reviewed boundaries.
 function appendGithubOutputs(file, entries) {
   if (file === undefined || file === null) return;
   invariant(typeof file === "string" && file.length > 0, "GitHub output path is invalid");

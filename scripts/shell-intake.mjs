@@ -78,6 +78,25 @@ function exactKeys(value, expected, label) {
   );
 }
 
+function validateIntakeIdentity(value, label) {
+  invariant(value.schemaVersion === INTAKE_SCHEMA_VERSION, `${label} schema is unsupported`);
+  invariant(value.package === SHELL_PACKAGE, `${label} package differs`);
+  invariant(value.registry === PUBLIC_NPM_REGISTRY, `${label} registry differs`);
+  invariant(value.npmVersion === REQUIRED_NPM_VERSION, `${label} npm version differs`);
+}
+
+function validateBaseRecord(value, label) {
+  exactKeys(
+    value,
+    ["desktopVersion", "shellVersion", "packageJsonSha256", "packageLockSha256"],
+    label,
+  );
+  stableVersion(value.desktopVersion, `${label} Desktop version`);
+  stableVersion(value.shellVersion, `${label} Shell version`);
+  invariant(SHA256_HEX.test(value.packageJsonSha256), `${label} package hash is invalid`);
+  invariant(SHA256_HEX.test(value.packageLockSha256), `${label} lock hash is invalid`);
+}
+
 function readRegularText(file, label, maximumBytes) {
   const record = lstatSync(file);
   invariant(record.isFile(), `${label} must be a regular file`);
@@ -201,6 +220,8 @@ function writeExclusiveJson(file, value, label) {
   writeFileSync(file, jsonText(value), { flag: "wx", mode: 0o600 });
 }
 
+// Keep this small adapter local: Shell intake's one repository-owned import is
+// an explicit trust boundary, and sharing it does not justify widening that.
 function appendGithubOutputs(file, entries) {
   if (file === undefined || file === null) return;
   invariant(typeof file === "string" && file.length > 0, "GitHub output path is invalid");
@@ -262,21 +283,9 @@ function validateState(value, pair) {
     ["schemaVersion", "package", "registry", "npmVersion", "observed", "base", "preparation"],
     "intake state",
   );
-  invariant(value.schemaVersion === INTAKE_SCHEMA_VERSION, "intake state schema is unsupported");
-  invariant(value.package === SHELL_PACKAGE, "intake state package differs");
-  invariant(value.registry === PUBLIC_NPM_REGISTRY, "intake state registry differs");
-  invariant(value.npmVersion === REQUIRED_NPM_VERSION, "intake state npm version differs");
+  validateIntakeIdentity(value, "intake state");
   const observed = normalizeEvidence(value.observed, "intake state observation");
-
-  exactKeys(
-    value.base,
-    ["desktopVersion", "shellVersion", "packageJsonSha256", "packageLockSha256"],
-    "intake base",
-  );
-  stableVersion(value.base.desktopVersion, "intake base Desktop version");
-  stableVersion(value.base.shellVersion, "intake base Shell version");
-  invariant(SHA256_HEX.test(value.base.packageJsonSha256), "intake base package hash is invalid");
-  invariant(SHA256_HEX.test(value.base.packageLockSha256), "intake base lock hash is invalid");
+  validateBaseRecord(value.base, "intake base");
 
   exactKeys(
     value.preparation,
@@ -308,7 +317,7 @@ function decodeStatement(bundle) {
   return parseJsonText(payload, "Mirafold SLSA statement");
 }
 
-export function verifyMirafoldProvenance(audit, evidence) {
+function verifiedShellEntry(audit, evidence) {
   invariant(audit && typeof audit === "object" && !Array.isArray(audit), "npm signature report is missing");
   invariant(Array.isArray(audit.invalid) && audit.invalid.length === 0, "npm reported invalid package signatures or attestations");
   invariant(Array.isArray(audit.missing) && audit.missing.length === 0, "npm reported missing package signatures or attestations");
@@ -319,12 +328,18 @@ export function verifyMirafoldProvenance(audit, evidence) {
   invariant(entry.version === evidence.version, "verified Mirafold version differs from observed latest");
   invariant(entry.location === `node_modules/${SHELL_PACKAGE}`, "verified Mirafold install location differs");
   invariant(entry.registry === `${PUBLIC_NPM_REGISTRY}/`, "verified Mirafold registry differs");
+  return entry;
+}
+
+function verifiedProvenanceStatement(entry) {
   invariant(entry?.attestations?.provenance?.predicateType === SLSA_PROVENANCE_TYPE, "Mirafold has no verified SLSA v1 provenance");
   invariant(Array.isArray(entry.attestationBundles), "Mirafold has no verified attestation bundles");
   const bundles = entry.attestationBundles.filter((bundle) => bundle?.predicateType === SLSA_PROVENANCE_TYPE);
   invariant(bundles.length === 1, `Mirafold has ${bundles.length} SLSA v1 provenance bundles`);
-  const statement = decodeStatement(bundles[0]);
+  return decodeStatement(bundles[0]);
+}
 
+function validateProvenanceSubject(statement, evidence) {
   invariant(statement._type === "https://in-toto.io/Statement/v1", "Mirafold statement type differs");
   invariant(statement.predicateType === SLSA_PROVENANCE_TYPE, "Mirafold statement predicate type differs");
   invariant(Array.isArray(statement.subject) && statement.subject.length === 1, "Mirafold statement must have one subject");
@@ -333,7 +348,9 @@ export function verifyMirafoldProvenance(audit, evidence) {
   const expectedDigest = canonicalIntegrity(evidence.integrity, "observed Shell integrity")
     .slice("sha512-".length);
   invariant(subject?.digest?.sha512 === Buffer.from(expectedDigest, "base64").toString("hex"), "Mirafold statement digest differs");
+}
 
+function verifiedProvenanceSource(statement, evidence) {
   const build = statement?.predicate?.buildDefinition;
   invariant(build?.buildType === GITHUB_WORKFLOW_BUILD_TYPE, "Mirafold provenance build type differs");
   const workflow = build?.externalParameters?.workflow;
@@ -359,6 +376,13 @@ export function verifyMirafoldProvenance(audit, evidence) {
     workflow: SHELL_SOURCE_WORKFLOW,
     builder: GITHUB_HOSTED_BUILDER,
   };
+}
+
+export function verifyMirafoldProvenance(audit, evidence) {
+  const entry = verifiedShellEntry(audit, evidence);
+  const statement = verifiedProvenanceStatement(entry);
+  validateProvenanceSubject(statement, evidence);
+  return verifiedProvenanceSource(statement, evidence);
 }
 
 function manifestFrom(state, pair, source) {
@@ -429,18 +453,10 @@ function validateManifest(value, pair) {
     ["schemaVersion", "package", "registry", "npmVersion", "changed", "base", "desktopVersion", "shell", "source", "files"],
     "intake manifest",
   );
-  invariant(value.schemaVersion === INTAKE_SCHEMA_VERSION, "intake manifest schema is unsupported");
-  invariant(value.package === SHELL_PACKAGE, "intake manifest package differs");
-  invariant(value.registry === PUBLIC_NPM_REGISTRY, "intake manifest registry differs");
-  invariant(value.npmVersion === REQUIRED_NPM_VERSION, "intake manifest npm version differs");
+  validateIntakeIdentity(value, "intake manifest");
   invariant(value.changed === true, "downstream intake manifest must describe a change");
   stableVersion(value.desktopVersion, "intake manifest Desktop version");
-
-  exactKeys(value.base, ["desktopVersion", "shellVersion", "packageJsonSha256", "packageLockSha256"], "intake manifest base");
-  stableVersion(value.base.desktopVersion, "intake manifest base Desktop version");
-  stableVersion(value.base.shellVersion, "intake manifest base Shell version");
-  invariant(SHA256_HEX.test(value.base.packageJsonSha256), "intake manifest base package hash is invalid");
-  invariant(SHA256_HEX.test(value.base.packageLockSha256), "intake manifest base lock hash is invalid");
+  validateBaseRecord(value.base, "intake manifest base");
 
   exactKeys(value.shell, ["version", "tarball", "integrity"], "intake manifest Shell");
   const shell = normalizeEvidence(value.shell, "intake manifest Shell");

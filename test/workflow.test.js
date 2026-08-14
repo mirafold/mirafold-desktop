@@ -137,13 +137,18 @@ test("the write-capable release job runs no installed dependency code", () => {
   assert.doesNotMatch(executableLines, /\bnpx\b/);
 });
 
-test("the release verifier imports only Node standard-library modules", () => {
+test("the release verifier keeps dependency code out of its static writer path", () => {
   const imports = [...releaseContract.matchAll(/\bfrom\s+["']([^"']+)["']/g)].map((match) => match[1]);
   assert.ok(imports.length > 0, "release verifier import scan found nothing");
   assert.deepEqual(
     imports.filter((specifier) => !specifier.startsWith("node:")),
     [],
     "write-capable release verification must not load dependency code",
+  );
+  assert.match(
+    releaseContract,
+    /await import\(["']@noble\/hashes\/blake2\.js["']\)/,
+    "blockmap hashing must remain an explicit lazy import in read-only platform verification",
   );
 });
 

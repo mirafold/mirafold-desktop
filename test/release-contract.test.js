@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -12,9 +13,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deflateRawSync, gzipSync } from "node:zlib";
+import { deflateRawSync, gunzipSync, gzipSync } from "node:zlib";
+import { blake2b } from "@noble/hashes/blake2.js";
 import {
   assertReleaseIdentity,
   createPlatformManifest,
@@ -44,7 +47,7 @@ function blockMap(payload) {
       {
         name: "file",
         offset: 0,
-        checksums: [Buffer.alloc(18, 7).toString("base64")],
+        checksums: [Buffer.from(blake2b(payload, { dkLen: 18 })).toString("base64")],
         sizes: [payload.length],
       },
     ],
@@ -154,6 +157,45 @@ test("platform contracts verify every payload, checksum, and block map", async (
   await temporaryDirectory(async (windows) => {
     await writeWindows(windows);
     assert.deepEqual(await verifyPlatformArtifacts(windows, VERSION, "windows"), expectedReleaseAssets(VERSION, "windows"));
+  });
+});
+
+test("platform verification rejects a canonical but false block checksum", async () => {
+  await temporaryDirectory(async (directory) => {
+    await writeWindows(directory);
+    const installer = readFileSync(path.join(directory, `Mirafold-Setup-${VERSION}.exe`));
+    const blockMapFile = path.join(directory, `Mirafold-Setup-${VERSION}.exe.blockmap`);
+    const parsed = JSON.parse(gunzipSync(readFileSync(blockMapFile)).toString("utf8"));
+    parsed.files[0].sizes = [10, installer.length - 10];
+    parsed.files[0].checksums = [
+      Buffer.from(blake2b(installer.subarray(0, 10), { dkLen: 18 })).toString("base64"),
+      Buffer.alloc(18, 9).toString("base64"),
+    ];
+    writeFileSync(blockMapFile, gzipSync(Buffer.from(JSON.stringify(parsed))));
+
+    await assert.rejects(
+      verifyPlatformArtifacts(directory, VERSION, "windows"),
+      /Windows block map chunk 1 checksum does not match payload bytes/,
+    );
+  });
+});
+
+test("the complete release-writer contract runs without installed dependency code", async () => {
+  await temporaryDirectory(async (directory) => {
+    const assets = path.join(directory, "assets");
+    const isolatedScripts = path.join(directory, "isolated", "scripts");
+    mkdirSync(assets);
+    mkdirSync(isolatedScripts, { recursive: true });
+    await writeComplete(assets);
+    const isolatedContract = path.join(isolatedScripts, "release-contract.mjs");
+    copyFileSync(new URL("../scripts/release-contract.mjs", import.meta.url), isolatedContract);
+    assert.equal(existsSync(path.join(directory, "isolated", "node_modules")), false);
+
+    const writerContract = await import(pathToFileURL(isolatedContract).href);
+    assert.deepEqual(
+      await writerContract.verifyCompleteArtifacts(assets, VERSION),
+      expectedReleaseAssets(VERSION),
+    );
   });
 });
 

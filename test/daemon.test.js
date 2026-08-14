@@ -5,17 +5,24 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { once } from "node:events";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   CredentialSafeLineStream,
   Daemon,
+  LinuxProcessTreeTracker,
   appendStderr,
+  daemonLaunchSpec,
   findStartupUrl,
   redactCredentials,
   terminateProcessTree,
 } from "../src/daemon.js";
+
+const require = createRequire(import.meta.url);
 
 function sanitizeChunks(chunks) {
   const stream = new CredentialSafeLineStream();
@@ -153,6 +160,30 @@ function processExists(pid) {
   }
 }
 
+function processIsRunning(pid) {
+  if (process.platform !== "linux") return processExists(pid);
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const state = stat.slice(stat.lastIndexOf(")") + 2).split(/\s+/)[0];
+    return state !== "Z" && state !== "X";
+  } catch {
+    return false;
+  }
+}
+
+function linuxStartTime(pid) {
+  const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+  return stat.slice(stat.lastIndexOf(")") + 2).split(/\s+/)[19];
+}
+
+async function waitFor(predicate, message, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.ok(predicate(), message);
+}
+
 test("process-tree termination resolves only after the leader and its child are gone", async () => {
   const testDirectory = mkdtempSync(path.join(tmpdir(), "mirafold-process-tree-test-"));
   const readyFile = path.join(testDirectory, "ready");
@@ -205,3 +236,286 @@ test("process-tree termination resolves only after the leader and its child are 
     rmSync(testDirectory, { recursive: true, force: true });
   }
 });
+
+test(
+  "process-tree termination escalates against a descendant in its own Linux session",
+  { skip: process.platform !== "linux" },
+  async () => {
+    const testDirectory = mkdtempSync(path.join(tmpdir(), "mirafold-separate-session-test-"));
+    const readyFile = path.join(testDirectory, "ready");
+    const leader = spawn(
+      process.execPath,
+      [
+        "-e",
+        [
+          'const { spawn } = require("node:child_process");',
+          'const code = `const { writeFileSync } = require("node:fs");',
+          '  process.on("SIGTERM", () => {});',
+          '  writeFileSync(process.argv[1], String(process.pid));',
+          "  setInterval(() => {}, 1000);`;",
+          'spawn(process.execPath, ["-e", code, process.argv[1]],',
+          '  { detached: true, stdio: "ignore" });',
+          "setInterval(() => {}, 1000);",
+        ].join(""),
+        readyFile,
+      ],
+      { detached: true, stdio: "ignore" },
+    );
+
+    let descendantPid = null;
+    try {
+      await waitFor(() => existsSync(readyFile), "separate-session child did not report readiness");
+      descendantPid = Number(readFileSync(readyFile, "utf8"));
+      assert.ok(processExists(descendantPid));
+
+      const startedAt = Date.now();
+      assert.equal(
+        await terminateProcessTree(leader.pid, [], { termTimeoutMs: 150, killTimeoutMs: 2000 }),
+        true,
+      );
+      assert.ok(Date.now() - startedAt >= 125, "SIGKILL escalation was not exercised");
+      assert.equal(processExists(leader.pid), false);
+      assert.equal(processIsRunning(descendantPid), false, "separate-session descendant survived cleanup");
+    } finally {
+      if (processExists(leader.pid)) process.kill(leader.pid, "SIGKILL");
+      if (descendantPid && processExists(descendantPid)) process.kill(descendantPid, "SIGKILL");
+      rmSync(testDirectory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "retained Linux identities clean up a separate-session descendant after its leader crashes",
+  { skip: process.platform !== "linux" },
+  async () => {
+    const testDirectory = mkdtempSync(path.join(tmpdir(), "mirafold-crashed-tree-test-"));
+    const readyFile = path.join(testDirectory, "ready");
+    const leader = spawn(
+      process.execPath,
+      [
+        "-e",
+        [
+          'const { writeFileSync } = require("node:fs");',
+          'const { spawn } = require("node:child_process");',
+          'const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"],',
+          '  { detached: true, stdio: "ignore" });',
+          'writeFileSync(process.argv[1], String(child.pid));',
+          "setInterval(() => {}, 1000);",
+        ].join(""),
+        readyFile,
+      ],
+      { detached: true, stdio: "ignore" },
+    );
+    const tracker = new LinuxProcessTreeTracker(leader.pid, 10);
+
+    let descendantPid = null;
+    try {
+      await waitFor(() => existsSync(readyFile), "tracked child did not report readiness");
+      descendantPid = Number(readFileSync(readyFile, "utf8"));
+      await waitFor(
+        () => tracker.snapshot().some((identity) => identity.pid === descendantPid),
+        "tracker did not retain the separate-session child",
+      );
+
+      process.kill(leader.pid, "SIGKILL");
+      await once(leader, "close");
+      assert.equal(processExists(descendantPid), true, "probe child did not survive its leader");
+
+      assert.equal(
+        await terminateProcessTree(leader.pid, tracker.stop(), {
+          termTimeoutMs: 250,
+          killTimeoutMs: 2000,
+        }),
+        true,
+      );
+      assert.equal(processIsRunning(descendantPid), false, "retained descendant survived crash cleanup");
+    } finally {
+      tracker.stop();
+      if (processExists(leader.pid)) process.kill(leader.pid, "SIGKILL");
+      if (descendantPid && processExists(descendantPid)) process.kill(descendantPid, "SIGKILL");
+      rmSync(testDirectory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "Linux termination ingests PTYs recorded after its initial snapshot",
+  { skip: process.platform !== "linux" },
+  async () => {
+    const testDirectory = mkdtempSync(path.join(tmpdir(), "mirafold-live-ledger-test-"));
+    const readyFile = path.join(testDirectory, "ready");
+    const ledgerFile = path.join(testDirectory, "owned-processes");
+    writeFileSync(ledgerFile, "", { mode: 0o600 });
+    const leader = spawn(
+      process.execPath,
+      [
+        "-e",
+        [
+          'const { spawn } = require("node:child_process");',
+          'const { writeFileSync } = require("node:fs");',
+          'process.on("SIGTERM", () => {});',
+          'const child = spawn(process.execPath, ["-e",',
+          '  "process.on(\\"SIGTERM\\", () => {}); setInterval(() => {}, 1000)"],',
+          '  { detached: true, stdio: "ignore" });',
+          'writeFileSync(process.argv[1], String(child.pid));',
+          'setInterval(() => {}, 1000);',
+        ].join(""),
+        readyFile,
+      ],
+      { detached: true, stdio: "ignore" },
+    );
+
+    let descendantPid = null;
+    let recordTimer = null;
+    try {
+      await waitFor(() => existsSync(readyFile), "late-ledger child did not report readiness");
+      descendantPid = Number(readFileSync(readyFile, "utf8"));
+      const startTime = linuxStartTime(descendantPid);
+      const startedAt = Date.now();
+      const termination = terminateProcessTree(leader.pid, [], {
+        termTimeoutMs: 200,
+        killTimeoutMs: 2000,
+        ledgerFile,
+      });
+      recordTimer = setTimeout(() => {
+        writeFileSync(ledgerFile, `${descendantPid}:${startTime}\n`);
+      }, 50);
+
+      assert.equal(await termination, true);
+      assert.ok(Date.now() - startedAt >= 175, "forced escalation was not exercised");
+      assert.equal(processIsRunning(leader.pid), false);
+      assert.equal(processIsRunning(descendantPid), false, "late ledger descendant survived cleanup");
+    } finally {
+      if (recordTimer) clearTimeout(recordTimer);
+      if (processExists(leader.pid)) process.kill(leader.pid, "SIGKILL");
+      if (descendantPid && processExists(descendantPid)) process.kill(descendantPid, "SIGKILL");
+      rmSync(testDirectory, { recursive: true, force: true });
+    }
+  },
+);
+
+test("Windows daemon launches inside the packaged kill-on-close Job Object wrapper", () => {
+  const spec = daemonLaunchSpec({
+    platform: "win32",
+    executable: "C:\\Program Files\\Mirafold\\Mirafold.exe",
+    bootstrapEntry: "C:\\Program Files\\Mirafold\\resources\\app\\src\\daemon-bootstrap.cjs",
+    daemonEntry: "C:\\Program Files\\Mirafold\\resources\\app\\node_modules\\mirafold\\dist-server\\index.js",
+    windowsJobEntry: "C:\\Program Files\\Mirafold\\resources\\app\\src\\windows-daemon-job.ps1",
+    env: { SystemRoot: "C:\\Windows", PATH: "fixture-path" },
+  });
+
+  assert.equal(
+    spec.command,
+    "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+  );
+  assert.deepEqual(spec.args, [
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    "C:\\Program Files\\Mirafold\\resources\\app\\src\\windows-daemon-job.ps1",
+    "C:\\Program Files\\Mirafold\\Mirafold.exe",
+    "C:\\Program Files\\Mirafold\\resources\\app\\src\\daemon-bootstrap.cjs",
+    "C:\\Program Files\\Mirafold\\resources\\app\\node_modules\\mirafold\\dist-server\\index.js",
+  ]);
+  assert.equal(spec.env.ELECTRON_RUN_AS_NODE, "1");
+  assert.equal(spec.detached, false);
+});
+
+test(
+  "the bootstrap synchronously owns an immediate Linux PTY and scrubs Electron Node mode",
+  { skip: process.platform !== "linux" },
+  async () => {
+    const testDirectory = mkdtempSync(path.join(tmpdir(), "mirafold-bootstrap-ownership-test-"));
+    const ledgerFile = path.join(testDirectory, "owned-processes");
+    const daemonReady = path.join(testDirectory, "daemon-ready.json");
+    const ptyReady = path.join(testDirectory, "pty-ready.json");
+    const fakeDaemon = path.join(testDirectory, "crashing-daemon.mjs");
+    const ptyEntry = pathToFileURL(require.resolve("@lydell/node-pty")).href;
+    const electronExecutable = require("electron");
+    const childCode = [
+      'const { writeFileSync } = require("node:fs");',
+      'process.on("SIGHUP", () => {});',
+      'process.on("SIGTERM", () => {});',
+      'writeFileSync(process.argv[1], JSON.stringify({',
+      '  pid: process.pid,',
+      '  runAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null,',
+      '  ledger: process.env.MIRAFOLD_DESKTOP_PID_LEDGER ?? null,',
+      '}));',
+      'setInterval(() => {}, 1000);',
+    ].join("");
+    writeFileSync(fakeDaemon, [
+      `import { spawn } from ${JSON.stringify(ptyEntry)};`,
+      'import { existsSync, writeFileSync } from "node:fs";',
+      `const child = spawn(process.env.PROBE_NODE_EXECUTABLE, ["-e", ${JSON.stringify(childCode)}, process.env.PROBE_PTY_READY], {`,
+      '  name: "xterm-256color", cols: 80, rows: 24, cwd: process.cwd(), env: process.env,',
+      '});',
+      'writeFileSync(process.env.PROBE_DAEMON_READY, JSON.stringify({',
+      '  ptyPid: child.pid,',
+      '  runAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null,',
+      '  ledger: process.env.MIRAFOLD_DESKTOP_PID_LEDGER ?? null,',
+      '  electron: process.versions.electron ?? null,',
+      '}));',
+      'const deadline = Date.now() + 5000;',
+      'while (!existsSync(process.env.PROBE_PTY_READY) && Date.now() < deadline) {',
+      '  await new Promise((resolve) => setTimeout(resolve, 5));',
+      '}',
+      'if (!existsSync(process.env.PROBE_PTY_READY)) throw new Error("PTY child did not start");',
+      'process.exit(23);',
+      '',
+    ].join("\n"));
+    writeFileSync(ledgerFile, "", { mode: 0o600 });
+
+    const leader = spawn(electronExecutable, [path.resolve("src/daemon-bootstrap.cjs"), fakeDaemon], {
+      cwd: testDirectory,
+      detached: true,
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: "1",
+        MIRAFOLD_DESKTOP_PID_LEDGER: ledgerFile,
+        PROBE_DAEMON_READY: daemonReady,
+        PROBE_NODE_EXECUTABLE: process.execPath,
+        PROBE_PTY_READY: ptyReady,
+      },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    const closed = once(leader, "close");
+    const tracker = new LinuxProcessTreeTracker(leader.pid, 60_000, ledgerFile);
+    let ptyPid = null;
+    let stderr = "";
+    leader.stderr.setEncoding("utf8");
+    leader.stderr.on("data", (chunk) => { stderr += chunk; });
+
+    try {
+      await waitFor(() => existsSync(daemonReady), `bootstrap daemon did not report readiness: ${stderr}`);
+      await waitFor(() => existsSync(ptyReady), `bootstrap PTY did not report readiness: ${stderr}`);
+      const daemonReport = JSON.parse(readFileSync(daemonReady, "utf8"));
+      const ptyReport = JSON.parse(readFileSync(ptyReady, "utf8"));
+      ptyPid = daemonReport.ptyPid;
+      assert.equal(ptyReport.pid, ptyPid);
+      assert.equal(daemonReport.runAsNode, null);
+      assert.equal(daemonReport.ledger, null);
+      assert.equal(daemonReport.electron, "43.4.0");
+      assert.equal(ptyReport.runAsNode, null);
+      assert.equal(ptyReport.ledger, null);
+
+      const [code] = await closed;
+      assert.equal(code, 23, stderr);
+      assert.equal(processIsRunning(ptyPid), true, "probe PTY did not survive the daemon crash");
+      const identities = tracker.stop();
+      assert.ok(identities.some((identity) => identity.pid === ptyPid), "ledger omitted the immediate PTY");
+      assert.equal(
+        await terminateProcessTree(leader.pid, identities, { termTimeoutMs: 100, killTimeoutMs: 2000 }),
+        true,
+      );
+      assert.equal(processIsRunning(ptyPid), false, "ledger-owned PTY survived cleanup");
+    } finally {
+      tracker.stop();
+      if (processExists(leader.pid)) process.kill(leader.pid, "SIGKILL");
+      if (ptyPid && processExists(ptyPid)) process.kill(ptyPid, "SIGKILL");
+      rmSync(testDirectory, { recursive: true, force: true });
+    }
+  },
+);
