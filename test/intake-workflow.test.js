@@ -92,6 +92,11 @@ test("the workflow uses package.json's exact npm toolchain with scripts disabled
   assert.equal(workflow.match(/test "\$\(npm --version\)" = "12\.0\.2"/g)?.length, 3);
   assert.equal(workflow.match(/NPM_CONFIG_IGNORE_SCRIPTS: "true"/g)?.length, 3);
   assert.equal(workflow.match(/NPM_CONFIG_REGISTRY: https:\/\/registry\.npmjs\.org/g)?.length, 3);
+  assert.equal(
+    workflow.match(/export NPM_CONFIG_USERCONFIG="\$RUNNER_TEMP\/mirafold-empty-npmrc"/g)?.length,
+    3,
+    "each npm job must create its isolated user config at step level",
+  );
 });
 
 test("unverified package bytes cannot cross the intake boundary", () => {
