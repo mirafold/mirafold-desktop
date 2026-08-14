@@ -258,10 +258,16 @@ jobs:
           node node_modules/electron-builder/cli.js
           ${{ matrix.args }} --publish never
 
-      # Electron's packaged runtime resolves the real daemon entry and loads
-      # both platform wrappers. It opens no GUI and contacts no model/relay.
+      # Electron's packaged runtime resolves and loads both native wrappers,
+      # starts the real daemon through Desktop's process owner, reaches only
+      # its authenticated loopback URL, and proves the process tree stops. It
+      # opens no GUI and contacts no model or relay service.
       - name: Smoke-check the packaged runtime
         run: node scripts/packaged-smoke.mjs "${{ matrix.name }}" dist
+
+      - name: Smoke-check the Windows NSIS install lifecycle
+        if: matrix.name == 'windows'
+        run: node scripts/windows-installer-smoke.mjs dist
 
       - name: Generate SHA-256 manifest
         run: >-

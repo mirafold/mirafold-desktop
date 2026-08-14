@@ -164,13 +164,22 @@ test("native Linux and Windows builds consume, test, smoke, and retain one revie
   const tests = value.indexOf("npm test");
   const packageApp = value.indexOf("node_modules/electron-builder/cli.js");
   const smoke = value.indexOf("packaged-smoke.mjs");
+  const installedSmoke = value.indexOf("windows-installer-smoke.mjs");
   const manifest = value.indexOf("release-contract.mjs manifest");
   const contract = value.indexOf("release-contract.mjs platform");
   const check = value.indexOf("shell-intake.mjs check");
   const upload = value.indexOf("uses: actions/upload-artifact@");
   assert.ok(download !== -1 && download < apply);
   assert.ok(apply < install && install < signatures && signatures < tests && tests < packageApp);
-  assert.ok(packageApp < smoke && smoke < manifest && manifest < contract && contract < check && check < upload);
+  assert.ok(
+    packageApp < smoke
+      && smoke < installedSmoke
+      && installedSmoke < manifest
+      && manifest < contract
+      && contract < check
+      && check < upload,
+  );
+  assert.match(value, /if: matrix\.name == 'windows'\s*\n\s+run: node scripts\/windows-installer-smoke\.mjs dist/);
   assert.doesNotMatch(value, /\bnpx\b/);
   assert.match(value, /name: mirafold-release-\$\{\{ matrix\.name \}\}/);
   for (const pattern of ["dist/SHA256SUMS-*.txt", "dist/latest*.yml", "dist/*.blockmap", "dist/*.deb", "dist/*.tar.gz", "dist/*.AppImage", "dist/*.exe"]) {
