@@ -102,6 +102,16 @@ jobs:
       - name: Smoke-check the packaged runtime
         run: node scripts/packaged-smoke.mjs "${{ matrix.name }}" dist
 
+      # The unpacked Windows package above proves the exact native modules and
+      # daemon lifecycle. This second gate exercises the bytes users actually
+      # download: silent /currentuser install, installed-runtime smoke, HKCU
+      # (not HKLM) registration, and silent uninstall with no files or registry
+      # entry left behind. SmartScreen and visible wizard behavior remain human
+      # checks because a runner process cannot observe those interfaces.
+      - name: Smoke-check the Windows NSIS install lifecycle
+        if: matrix.name == 'windows'
+        run: node scripts/windows-installer-smoke.mjs dist
+
       # This is stronger than upload-artifact's if-no-files-found check, which
       # succeeds when one glob matches even if another required file is absent.
       # It also checks metadata versions, payload SHA-512s/sizes, the AppImage's

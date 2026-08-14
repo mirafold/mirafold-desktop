@@ -35,8 +35,15 @@ test("the build job does not leave a credential on disk", () => {
 test("the build job verifies every updater asset before retaining it", () => {
   const build = job("build");
   assert.match(build, /packaged-smoke\.mjs "\$\{\{ matrix\.name \}\}" dist/);
+  assert.match(build, /if: matrix\.name == 'windows'\s*\n\s+run: node scripts\/windows-installer-smoke\.mjs dist/);
+  const packaged = build.indexOf("packaged-smoke.mjs");
+  const installed = build.indexOf("windows-installer-smoke.mjs");
   const manifest = build.indexOf("release-contract.mjs manifest");
   const contract = build.indexOf("release-contract.mjs platform");
+  assert.ok(
+    packaged !== -1 && packaged < installed && installed < manifest,
+    "packaged and installed Windows runtime proofs must precede retained artifacts",
+  );
   assert.ok(manifest !== -1 && manifest < contract, "SHA-256 manifest must precede final verification");
   assert.match(build, /release-contract\.mjs platform "\$\{\{ matrix\.name \}\}" dist/);
   assert.match(build, /node node_modules\/electron-builder\/cli\.js \$\{\{ matrix\.args \}\}/);

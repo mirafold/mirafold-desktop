@@ -146,8 +146,14 @@ cross into fresh read-only test and build jobs. The native Linux and Windows
 runners independently apply that exact pair, install with lifecycle scripts
 disabled, validate the dependency tree, advisories, registry signatures, and
 attestations, run the full suite, and build their native installers. Each
-packaged Electron runtime must then resolve the real bundled daemon and load
-both native wrappers before its complete updater artifact set is retained.
+packaged Electron runtime must then resolve the real bundled daemon, load both
+native wrappers, start the daemon through Desktop's production process owner,
+reach its authenticated IPv4-loopback URL, and prove the complete process tree
+is gone afterward before its updater artifacts are retained. The Windows leg
+also silently installs the actual NSIS candidate in explicit current-user mode,
+proves it registered only under that user, repeats the runtime/daemon smoke from
+the installed bytes, silently uninstalls it, and proves its files and registry
+entry are gone.
 
 After every read-only gate succeeds, a separate job reconstructs the same
 candidate without installing dependencies. It permits only the reviewed
@@ -183,6 +189,12 @@ keeps its only `contents: write` publication job skipped. Its manual form also
 accepts `fail_platform=linux` or `fail_platform=windows`; the selected native
 leg fails before dependency code, proving that either platform failure prevents
 provenance and publication while the other matrix leg is still allowed to run.
+
+The Windows runner cannot truthfully stand in for a person. Its silent NSIS
+probe does not claim anything about SmartScreen, the visible install wizard,
+interactive destination selection, Start-menu launch, folder selection, or the
+full agent/ConPTY/file-watching experience. Those remain the real-Windows human
+checks in [WINDOWS-TESTING.md](WINDOWS-TESTING.md).
 
 Every workflow action is pinned to a reviewed commit SHA. Normal pushes and
 pull requests run stable `test (linux)` and `test (windows)` checks, while

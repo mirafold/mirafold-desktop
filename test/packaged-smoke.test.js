@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import {
   packagedPaths,
+  runPackagedDaemonProbe,
   runPackagedNodeProbe,
 } from "../scripts/packaged-smoke.mjs";
 
@@ -24,8 +25,58 @@ function fixture(t, { shellVersion = "0.3.7" } = {}) {
     name: "mirafold-desktop-fixture",
     version: "1.2.3",
     main: "src/main.js",
+    type: "module",
   }));
   writeFileSync(path.join(app, "src", "main.js"), "// fixture\n");
+  writeFileSync(path.join(app, "src", "daemon.js"), `
+import http from "node:http";
+
+export class Daemon {
+  #server = null;
+
+  constructor(onCrash) {
+    this.onCrash = onCrash;
+  }
+
+  get running() {
+    return this.#server !== null;
+  }
+
+  start() {
+    return new Promise((resolve, reject) => {
+      this.#server = http.createServer((request, response) => {
+        const url = new URL(request.url, "http://127.0.0.1");
+        if (url.searchParams.get("token") === "fixture-secret") {
+          response.statusCode = 302;
+          response.setHeader("location", "/");
+          response.setHeader("set-cookie", "mirafold_token=fixture-secret; Path=/; HttpOnly; SameSite=Strict");
+          response.end("Found");
+          return;
+        }
+        if (request.headers.cookie !== "mirafold_token=fixture-secret") {
+          response.statusCode = 403;
+          response.end("Forbidden");
+          return;
+        }
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end("<!doctype html><title>fixture</title>");
+      });
+      this.#server.once("error", reject);
+      this.#server.listen(0, "127.0.0.1", () => {
+        const address = this.#server.address();
+        resolve("http://127.0.0.1:" + address.port + "/?token=fixture-secret");
+      });
+    });
+  }
+
+  stop() {
+    const server = this.#server;
+    this.#server = null;
+    if (!server) return Promise.resolve(true);
+    return new Promise((resolve) => server.close((error) => resolve(!error)));
+  }
+}
+`);
   writeFileSync(path.join(app, "node_modules", "mirafold", "package.json"), jsonText({
     name: "mirafold",
     version: shellVersion,
@@ -72,6 +123,47 @@ test("the smoke check refuses a packaged Shell other than the reviewed pin", (t)
       expectedShellVersion: "0.3.7",
     }),
     /packaged Shell 0\.3\.8 != 0\.3\.7/,
+  );
+});
+
+test("the packaged runtime starts, reaches, and completely stops its daemon", (t) => {
+  const { root, app } = fixture(t);
+  const report = runPackagedDaemonProbe({
+    executable: process.execPath,
+    appDirectory: app,
+    temporaryDirectory: root,
+  });
+  assert.equal(report.urlContract.protocol, "http:");
+  assert.equal(report.urlContract.hostname, "127.0.0.1");
+  assert.ok(Number.isInteger(report.urlContract.port) && report.urlContract.port > 0);
+  assert.equal(report.urlContract.pathname, "/");
+  assert.deepEqual(report.urlContract.queryKeys, ["token"]);
+  assert.equal(report.urlContract.tokenPresent, true);
+  assert.equal(report.authenticationRedirectStatus, 302);
+  assert.equal(report.authenticationCookieHardened, true);
+  assert.equal(report.reachableStatus, 200);
+  assert.equal(report.htmlServed, true);
+  assert.equal(report.processTreeStopped, true);
+  assert.equal(report.unreachableAfterStop, true);
+  assert.equal(report.crashReported, false);
+});
+
+test("the packaged daemon smoke rejects credential-bearing diagnostics", (t) => {
+  const { root, app } = fixture(t);
+  assert.throws(
+    () => runPackagedDaemonProbe({
+      executable: process.execPath,
+      appDirectory: app,
+      temporaryDirectory: root,
+      spawn: () => ({
+        error: null,
+        signal: null,
+        status: 0,
+        stderr: "",
+        stdout: "[mirafold] server on http://127.0.0.1:3000/?token=not-redacted\n",
+      }),
+    }),
+    /exposed a daemon auth token/,
   );
 });
 

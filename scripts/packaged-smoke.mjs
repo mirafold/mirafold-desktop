@@ -6,12 +6,14 @@
 // load" class without opening a GUI or reaching any model/relay service.
 
 import { spawnSync } from "node:child_process";
-import { lstatSync, readFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const MARKER = "MIRAFOLD_PACKAGED_SMOKE=";
+const DAEMON_MARKER = "MIRAFOLD_PACKAGED_DAEMON_SMOKE=";
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 function invariant(condition, message) {
@@ -34,7 +36,7 @@ function stableVersion(value, label) {
   return value;
 }
 
-function minimalEnvironment(appDirectory) {
+function minimalEnvironment(appDirectory, additions = {}) {
   const env = {
     ELECTRON_RUN_AS_NODE: "1",
     MIRAFOLD_PACKAGED_APP: appDirectory,
@@ -48,12 +50,21 @@ function minimalEnvironment(appDirectory) {
     "TEMP",
     "TMP",
     "TMPDIR",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "HOME",
+    "SHELL",
+    "XDG_CONFIG_HOME",
+    "XDG_STATE_HOME",
     "LD_LIBRARY_PATH",
     "LANG",
   ]) {
     if (process.env[name] !== undefined) env[name] = process.env[name];
   }
-  return env;
+  return { ...env, ...additions };
 }
 
 const CHILD_PROBE = String.raw`
@@ -86,6 +97,162 @@ process.stdout.write(${JSON.stringify(MARKER)} + JSON.stringify({
 }) + "\n");
 `;
 
+// Runs inside the packaged Electron executable under ELECTRON_RUN_AS_NODE.
+// Importing Desktop's own Daemon class is deliberate: the hosted proof must
+// exercise the exact spawn, URL parsing, credential redaction, and process-tree
+// shutdown code the GUI uses, not a second approximation of that lifecycle.
+const DAEMON_CHILD_PROBE = String.raw`
+const fs = require("node:fs");
+const path = require("node:path");
+const { pathToFileURL } = require("node:url");
+
+const app = process.env.MIRAFOLD_PACKAGED_APP;
+const project = process.env.MIRAFOLD_PROBE_PROJECT;
+function invariant(condition, message) {
+  if (!condition) throw new Error(message);
+}
+function safeError(error) {
+  return String(error && (error.stack || error.message) || error)
+    .replace(/([?&]token=)[^\s&"'<>]+/gi, "$1<redacted>")
+    .replace(/(\bpairing code\s*:\s*)[A-Za-z0-9_-]+/gi, "$1<redacted>");
+}
+async function request(url, timeout, headers = {}) {
+  const response = await fetch(url, {
+    headers,
+    redirect: "manual",
+    signal: AbortSignal.timeout(timeout),
+  });
+  const contentType = response.headers.get("content-type") || "";
+  const location = response.headers.get("location");
+  const setCookie = response.headers.get("set-cookie");
+  await response.arrayBuffer();
+  return { status: response.status, contentType, location, setCookie };
+}
+async function stopWithLiveEventLoop(daemon) {
+  // Desktop's production shutdown polling timers are intentionally unref'ed so
+  // an ordinary app quit is never kept alive by cleanup alone. The GUI event
+  // loop supplies the other live work in production; this headless child must
+  // supply one equivalent referenced handle while it awaits the proof.
+  const hold = setInterval(() => {}, 1000);
+  try {
+    return await daemon.stop();
+  } finally {
+    clearInterval(hold);
+  }
+}
+
+(async () => {
+  invariant(app && path.isAbsolute(app), "packaged app path is not absolute");
+  invariant(project && path.isAbsolute(project), "probe project path is not absolute");
+  invariant(fs.statSync(project).isDirectory(), "probe project is not a directory");
+  const daemonModule = path.join(app, "src", "daemon.js");
+  invariant(fs.statSync(daemonModule).isFile(), "packaged Desktop daemon module is missing");
+  const imported = await import(pathToFileURL(daemonModule).href);
+  invariant(typeof imported.Daemon === "function", "packaged Desktop daemon class is missing");
+
+  let crash = null;
+  const daemon = new imported.Daemon((info) => { crash = info; });
+  const guard = setTimeout(() => {
+    void stopWithLiveEventLoop(daemon).finally(() => process.exit(70));
+  }, 75000);
+
+  try {
+    const rawUrl = await daemon.start(project);
+    const parsed = new URL(rawUrl);
+    const queryKeys = [...parsed.searchParams.keys()];
+    const token = parsed.searchParams.get("token");
+    invariant(parsed.protocol === "http:", "daemon startup URL is not HTTP");
+    invariant(parsed.hostname === "127.0.0.1", "daemon startup URL is not IPv4 loopback");
+    invariant(/^\d+$/.test(parsed.port) && Number(parsed.port) > 0 && Number(parsed.port) <= 65535,
+      "daemon startup URL has an invalid port");
+    invariant(parsed.pathname === "/", "daemon startup URL path differs");
+    invariant(parsed.username === "" && parsed.password === "" && parsed.hash === "",
+      "daemon startup URL contains forbidden authority or fragment data");
+    invariant(queryKeys.length === 1 && queryKeys[0] === "token" && typeof token === "string" && token.length > 0,
+      "daemon startup URL does not carry exactly one non-empty token");
+
+    const authentication = await request(rawUrl, 10000);
+    invariant(authentication.status === 302, "daemon token handshake did not redirect");
+    invariant(authentication.location === "/", "daemon token handshake redirected outside the root");
+    invariant(typeof authentication.setCookie === "string", "daemon token handshake set no cookie");
+    const cookieParts = authentication.setCookie.split(";").map((part) => part.trim());
+    const cookiePair = cookieParts[0];
+    const cookieSeparator = cookiePair.indexOf("=");
+    invariant(cookieSeparator > 0 && cookiePair.slice(cookieSeparator + 1) === token,
+      "daemon token cookie does not carry the startup token");
+    const cookieAttributes = cookieParts.slice(1).map((part) => part.toLowerCase());
+    invariant(cookieAttributes.includes("httponly"), "daemon token cookie is not HttpOnly");
+    invariant(cookieAttributes.includes("samesite=strict"), "daemon token cookie is not SameSite=Strict");
+    invariant(cookieAttributes.includes("path=/"), "daemon token cookie is not root-scoped");
+
+    const response = await request(parsed.origin + authentication.location, 10000, { cookie: cookiePair });
+    invariant(response.status === 200, "cookie-authenticated daemon root request did not succeed");
+    invariant(response.contentType.toLowerCase().includes("text/html"), "cookie-authenticated daemon root is not HTML");
+    invariant(crash === null, "daemon reported a crash after startup");
+
+    const clean = await stopWithLiveEventLoop(daemon);
+    invariant(clean === true, "Desktop could not prove complete daemon process-tree shutdown");
+    let unreachableAfterStop = false;
+    try {
+      await request(rawUrl, 1500);
+    } catch {
+      unreachableAfterStop = true;
+    }
+    invariant(unreachableAfterStop, "daemon URL remained reachable after process-tree shutdown");
+    invariant(crash === null, "intentional daemon shutdown was reported as a crash");
+
+    process.stdout.write(${JSON.stringify(DAEMON_MARKER)} + JSON.stringify({
+      urlContract: {
+        protocol: parsed.protocol,
+        hostname: parsed.hostname,
+        port: Number(parsed.port),
+        pathname: parsed.pathname,
+        queryKeys,
+        tokenPresent: true,
+      },
+      authenticationRedirectStatus: authentication.status,
+      authenticationCookieHardened: true,
+      reachableStatus: response.status,
+      htmlServed: true,
+      processTreeStopped: true,
+      unreachableAfterStop: true,
+      crashReported: false,
+    }) + "\n");
+  } finally {
+    clearTimeout(guard);
+    if (daemon.running) await stopWithLiveEventLoop(daemon);
+  }
+})().catch((error) => {
+  process.stderr.write(safeError(error) + "\n");
+  process.exitCode = 1;
+});
+`;
+
+function assertCredentialSafe(text, label) {
+  invariant(!/[?&]token=(?!<redacted>)[^\s&"'<>]+/i.test(text), `${label} exposed a daemon auth token`);
+  invariant(
+    !/\bpairing code\s*:\s*(?!<redacted>)[A-Za-z0-9_-]+/i.test(text),
+    `${label} exposed a relay pairing code`,
+  );
+}
+
+function parseMarkedReport(stdout, marker, label) {
+  const lines = String(stdout).trim().split(/\r?\n/).filter(Boolean);
+  const reports = lines.filter((line) => line.startsWith(marker));
+  invariant(reports.length === 1, `${label} returned ${reports.length} reports instead of one`);
+  try {
+    return JSON.parse(reports[0].slice(marker.length));
+  } catch (error) {
+    throw new Error(`${label} report is invalid JSON: ${error.message}`);
+  }
+}
+
+function spawnResult(result, label) {
+  if (result.error) throw new Error(`${label} could not run: ${result.error.message}`);
+  invariant(result.signal === null, `${label} ended from signal ${result.signal}`);
+  invariant(result.status === 0, `${label} exited ${result.status}: ${String(result.stderr).slice(-4000)}`);
+}
+
 export function runPackagedNodeProbe({
   executable,
   appDirectory,
@@ -109,18 +276,9 @@ export function runPackagedNodeProbe({
     timeout: 30_000,
     windowsHide: true,
   });
-  if (result.error) throw new Error(`packaged executable could not run: ${result.error.message}`);
-  invariant(result.signal === null, `packaged executable ended from signal ${result.signal}`);
-  invariant(result.status === 0, `packaged executable exited ${result.status}: ${String(result.stderr).slice(-4000)}`);
+  spawnResult(result, "packaged executable");
   invariant(String(result.stderr).trim() === "", `packaged executable wrote stderr: ${String(result.stderr).slice(-4000)}`);
-  const lines = String(result.stdout).trim().split(/\r?\n/).filter(Boolean);
-  invariant(lines.length === 1 && lines[0].startsWith(MARKER), "packaged executable returned unexpected output");
-  let report;
-  try {
-    report = JSON.parse(lines[0].slice(MARKER.length));
-  } catch (error) {
-    throw new Error(`packaged executable report is invalid JSON: ${error.message}`);
-  }
+  const report = parseMarkedReport(result.stdout, MARKER, "packaged executable");
   invariant(report.desktopVersion === expectedDesktopVersion, `packaged Desktop ${report.desktopVersion} != ${expectedDesktopVersion}`);
   invariant(report.shellVersion === expectedShellVersion, `packaged Shell ${report.shellVersion} != ${expectedShellVersion}`);
   invariant(
@@ -132,6 +290,132 @@ export function runPackagedNodeProbe({
   return report;
 }
 
+function windowsExecutableProcessCount(executable, spawn) {
+  const script = [
+    "$target = [System.IO.Path]::GetFullPath($env:MIRAFOLD_PROBE_EXECUTABLE)",
+    "$count = 0",
+    "Get-Process -Name Mirafold -ErrorAction SilentlyContinue | ForEach-Object {",
+    "  try {",
+    "    if ([System.StringComparer]::OrdinalIgnoreCase.Equals([System.IO.Path]::GetFullPath($_.Path), $target)) { $count += 1 }",
+    "  } catch {}",
+    "}",
+    "[Console]::Out.Write($count)",
+  ].join("\n");
+  const env = minimalEnvironment(path.dirname(executable), {
+    MIRAFOLD_PROBE_EXECUTABLE: executable,
+  });
+  delete env.ELECTRON_RUN_AS_NODE;
+  delete env.MIRAFOLD_PACKAGED_APP;
+  const result = spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf8",
+    env,
+    maxBuffer: 1024 * 1024,
+    shell: false,
+    timeout: 30_000,
+    windowsHide: true,
+  });
+  spawnResult(result, "Windows packaged-process query");
+  const value = String(result.stdout).trim();
+  invariant(/^\d+$/.test(value), "Windows packaged-process query returned unexpected output");
+  return Number(value);
+}
+
+export function runPackagedDaemonProbe({
+  executable,
+  appDirectory,
+  spawn = spawnSync,
+  platform = process.platform,
+  temporaryDirectory = tmpdir(),
+} = {}) {
+  invariant(typeof executable === "string" && path.isAbsolute(executable), "packaged executable path must be absolute");
+  invariant(lstatSync(executable).isFile(), "packaged executable must be a regular file");
+  invariant(typeof appDirectory === "string" && path.isAbsolute(appDirectory), "packaged app path must be absolute");
+  invariant(lstatSync(appDirectory).isDirectory(), "packaged app path must be a directory");
+  invariant(typeof temporaryDirectory === "string" && path.isAbsolute(temporaryDirectory), "probe temp path must be absolute");
+  invariant(lstatSync(temporaryDirectory).isDirectory(), "probe temp path must be a directory");
+
+  const probeRoot = mkdtempSync(path.join(temporaryDirectory, "mirafold-packaged-daemon-"));
+  const project = path.join(probeRoot, "project");
+  mkdirSync(project);
+  try {
+    const result = spawn(executable, ["--eval", DAEMON_CHILD_PROBE], {
+      cwd: project,
+      encoding: "utf8",
+      env: minimalEnvironment(appDirectory, {
+        MIRAFOLD_PROBE_PROJECT: project,
+        MIRAFOLD_LOG_FILE: "",
+        MIRAFOLD_LOCAL_DISCOVERY: "off",
+        MIRAFOLD_RELAY_URL: "off",
+        MIRAFOLD_SESSION_DIR: path.join(probeRoot, "sessions"),
+        MIRAFOLD_TRUST_FILE: "",
+        MIRAFOLD_WORKSPACE_TRUST_FILE: "",
+      }),
+      maxBuffer: 4 * 1024 * 1024,
+      shell: false,
+      timeout: 90_000,
+      windowsHide: true,
+    });
+    assertCredentialSafe(String(result.stdout), "packaged daemon stdout");
+    assertCredentialSafe(String(result.stderr), "packaged daemon stderr");
+    spawnResult(result, "packaged daemon probe");
+    invariant(String(result.stderr).trim() === "", `packaged daemon wrote stderr: ${String(result.stderr).slice(-4000)}`);
+    const report = parseMarkedReport(result.stdout, DAEMON_MARKER, "packaged daemon probe");
+    invariant(report?.urlContract?.protocol === "http:", "packaged daemon protocol differs");
+    invariant(report?.urlContract?.hostname === "127.0.0.1", "packaged daemon host differs");
+    invariant(Number.isInteger(report?.urlContract?.port) && report.urlContract.port > 0, "packaged daemon port differs");
+    invariant(report?.urlContract?.pathname === "/", "packaged daemon path differs");
+    invariant(
+      Array.isArray(report?.urlContract?.queryKeys)
+        && report.urlContract.queryKeys.length === 1
+        && report.urlContract.queryKeys[0] === "token"
+        && report.urlContract.tokenPresent === true,
+      "packaged daemon token contract differs",
+    );
+    invariant(report.authenticationRedirectStatus === 302, "packaged daemon authentication redirect differs");
+    invariant(report.authenticationCookieHardened === true, "packaged daemon authentication cookie differs");
+    invariant(report.reachableStatus >= 200 && report.reachableStatus < 400, "packaged daemon was not reachable");
+    invariant(report.htmlServed === true, "packaged daemon did not serve HTML");
+    invariant(report.processTreeStopped === true, "packaged daemon process-tree stop was not proven");
+    invariant(report.unreachableAfterStop === true, "packaged daemon remained reachable after stop");
+    invariant(report.crashReported === false, "packaged daemon stop was reported as a crash");
+
+    if ((platform === "win32" || platform === "windows") && path.basename(executable).toLowerCase() === "mirafold.exe") {
+      const executableProcessesAfterProbe = windowsExecutableProcessCount(executable, spawn);
+      invariant(executableProcessesAfterProbe === 0, `${executableProcessesAfterProbe} packaged Mirafold processes remained`);
+      return { ...report, executableProcessesAfterProbe };
+    }
+    return report;
+  } finally {
+    rmSync(probeRoot, { recursive: true, force: true });
+  }
+}
+
+export function verifyPackagedPaths({
+  platform,
+  executable,
+  appDirectory,
+  expectedDesktopVersion,
+  expectedShellVersion,
+  spawn = spawnSync,
+  temporaryDirectory = tmpdir(),
+} = {}) {
+  const identity = runPackagedNodeProbe({
+    executable,
+    appDirectory,
+    expectedDesktopVersion,
+    expectedShellVersion,
+    spawn,
+  });
+  const daemonLifecycle = runPackagedDaemonProbe({
+    executable,
+    appDirectory,
+    spawn,
+    platform,
+    temporaryDirectory,
+  });
+  return { ...identity, daemonLifecycle };
+}
+
 export function packagedPaths(platform, outputDirectory) {
   invariant(platform === "linux" || platform === "windows", `unsupported smoke platform ${platform}`);
   const unpacked = path.join(outputDirectory, platform === "linux" ? "linux-unpacked" : "win-unpacked");
@@ -141,16 +425,22 @@ export function packagedPaths(platform, outputDirectory) {
   };
 }
 
-export function verifyPackagedApplication(platform, outputDirectory, { root = ROOT, spawn = spawnSync } = {}) {
+export function verifyPackagedApplication(
+  platform,
+  outputDirectory,
+  { root = ROOT, spawn = spawnSync, temporaryDirectory = tmpdir() } = {},
+) {
   const packageMetadata = readJson(path.join(root, "package.json"), "source package.json");
   const expectedDesktopVersion = stableVersion(packageMetadata.version, "source Desktop version");
   const expectedShellVersion = stableVersion(packageMetadata?.dependencies?.mirafold, "source Shell version");
   const paths = packagedPaths(platform, path.resolve(outputDirectory));
-  return runPackagedNodeProbe({
+  return verifyPackagedPaths({
+    platform,
     ...paths,
     expectedDesktopVersion,
     expectedShellVersion,
     spawn,
+    temporaryDirectory,
   });
 }
 
