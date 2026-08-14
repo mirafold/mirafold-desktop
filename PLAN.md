@@ -1247,6 +1247,47 @@ also bump the Desktop version without inventing a Shell version.
   folder selection, agent response, ConPTY command, filesystem watching,
   automatic update, restart, and zero leftover processes. No public launch
   claim precedes this evidence.
+
+  **Preparation completed 2026-08-14; human evidence remains pending and this
+  Step stays open.** The verified starting guide existed at
+  `WINDOWS-TESTING.md`, but it still directed a tester to the updater-less
+  public `v0.1.1`, predicted warning behavior instead of recording it, claimed
+  every supported agent's existing login would work, and instructed a tester
+  to create a secret-bearing project dotenv file. Mirafold Shell `0.3.7`'s
+  documented provider policy instead supports a local Codex/ChatGPT login,
+  while Claude and Gemini subscription logins alone are blocked for this
+  third-party application path. The guide now prefers an already-working local
+  Codex login, discloses that the two expected live turns use the tester's own
+  provider account, forbids credential sharing and project credential setup,
+  and uses an empty disposable folder.
+
+  The human gate is now split at the real release boundary. Session A tests the
+  exact current private candidate's visible installer, folder picker, live
+  provider, Windows ConPTY, watcher, Help versions, ordinary shutdown, and
+  uninstall. Session B remains blocked on the separately approved public bridge
+  and a later higher release; it proves anonymous direct download, startup
+  discovery, cached **Later**, explicit installation/restart, version movement,
+  and final process cleanup. This is necessary rather than optional wording:
+  the existing public `v0.1.1` Release was directly inspected and contains only
+  four install payloads, with no `latest.yml`, block map, checksum manifest, or
+  updater runtime in the package. It cannot discover a successor. The private
+  rehearsal candidate contains the updater but is also numbered `0.1.1`, so it
+  has no higher public target. Candidate evidence therefore cannot be relabeled
+  as a production update pass.
+
+  Candidate acquisition is bound to source commit
+  `cb4747912254113fe95f5f762c32af9cdef16401`, non-publishing
+  [run 31770520381](https://github.com/mirafold/mirafold-desktop/actions/runs/31770520381),
+  artifact `9208092652`, its 2026-08-21 retention deadline, the GitHub archive
+  digest, exact installer size `250098162`, and installer SHA-256
+  `d16eba272b0fd186e5eccb967b0b71bca1ca6dbe64dda3f06451f7f868835939`.
+  The downloaded four-file set passed the Windows platform release-contract
+  verifier again and its manifest's installer digest matched an independent
+  `sha256sum`. No release, tag, repository setting, or public asset was changed.
+  This preparation modifies only `WINDOWS-TESTING.md` and this plan; executable
+  behavior and tests are unchanged. The next action is the first human-only
+  action: identify one consenting Windows 10/11 x64 tester with a working local
+  Codex login and no existing Mirafold Desktop installation.
 - [ ] **Step 6.3 — establish the free Store identity.** Walk Kyle one action at
   a time through Microsoft's free individual developer registration, identity
   verification, name reservation, and retrieval of the real Partner Center
