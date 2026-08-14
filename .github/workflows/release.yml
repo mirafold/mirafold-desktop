@@ -1,6 +1,7 @@
 name: Release
 
-# Builds the downloadable installers and attaches them to a GitHub Release.
+# Builds the downloadable installers plus their updater metadata, verifies the
+# complete cross-platform set, and makes it visible as one GitHub Release.
 #
 # Windows is built on a WINDOWS RUNNER, and that is not a preference — it is
 # forced. Both native modules the daemon needs ship as platform-specific
@@ -17,8 +18,9 @@ name: Release
 #     outright rather than warning, so an unsigned .dmg would be useless to a
 #     downloader. Needs Apple Developer Program ($99/yr) + notarization first.
 #
-# No third-party actions and no stored secrets: the release is created with the
-# preinstalled `gh` CLI using the automatic GITHUB_TOKEN.
+# Every GitHub-authored action is pinned to one reviewed commit. There are no
+# stored release secrets: publication uses the automatic GITHUB_TOKEN, while
+# provenance uses GitHub's short-lived OIDC identity.
 
 on:
   push:
@@ -56,26 +58,20 @@ jobs:
     steps:
       # Nothing in this job pushes, so don't leave a credential on disk for the
       # dependency code that runs a few steps below.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
 
-      # A tag that doesn't match package.json is a mis-cut release. Fail here,
-      # before spending ten minutes packaging the wrong version.
-      - name: Tag ↔ version check
+      # A tag that doesn't match package.json is a mis-cut release. The stable
+      # feed also refuses prerelease versions outright: a beta must never become
+      # `latest` merely because gh defaults to a normal release.
+      - name: Stable tag ↔ version check
         if: github.event_name == 'push'
-        shell: bash
-        run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          PKG="$(node -p "require('./package.json').version")"
-          if [ "$TAG" != "$PKG" ]; then
-            echo "tag v$TAG != package.json $PKG — refusing to build a release" >&2
-            exit 1
-          fi
+        run: node scripts/release-contract.mjs identity "${{ github.ref_name }}"
 
       - run: npm ci
       - run: npm test
@@ -85,38 +81,148 @@ jobs:
       # beside it, which npm ci provides. (Electron 43 has no postinstall
       # script; a dev checkout fetches the runtime with `install-electron`.)
       - name: Build installers
-        run: npx electron-builder ${{ matrix.args }} --publish never
+        run: node node_modules/electron-builder/cli.js ${{ matrix.args }} --publish never
 
-      - uses: actions/upload-artifact@v4
+      - name: Smoke-check the packaged runtime
+        run: node scripts/packaged-smoke.mjs "${{ matrix.name }}" dist
+
+      # This is stronger than upload-artifact's if-no-files-found check, which
+      # succeeds when one glob matches even if another required file is absent.
+      # It also checks metadata versions, payload SHA-512s/sizes, the AppImage's
+      # embedded block map, and Windows' external NSIS blockmap.
+      - name: Generate SHA-256 manifest
+        run: node scripts/release-contract.mjs manifest "${{ matrix.name }}" dist
+
+      - name: Verify updater artifact set and manifest
+        run: node scripts/release-contract.mjs platform "${{ matrix.name }}" dist
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.name }}
           path: |
+            dist/SHA256SUMS-*.txt
+            dist/latest*.yml
+            dist/*.blockmap
             dist/*.deb
             dist/*.tar.gz
             dist/*.AppImage
             dist/*.exe
           if-no-files-found: error
+          # Installers are already compressed. Recompressing ~1 GB of binaries
+          # costs runner time without materially reducing artifact storage.
+          compression-level: 0
+          retention-days: 7
+
+  attest:
+    name: attest release provenance
+    needs: build
+    runs-on: ubuntu-latest
+    # OIDC and attestation writes exist only here, after dependency code and
+    # native packaging have finished in separate read-only jobs.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: ${{ runner.temp }}/mirafold-release-assets
+          merge-multiple: true
+
+      - name: Verify exact subjects before attesting
+        run: >-
+          node scripts/release-contract.mjs artifacts
+          "${{ runner.temp }}/mirafold-release-assets"
+
+      - name: Generate SLSA build provenance for all nine release files
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/mirafold-release-assets/*
 
   release:
     name: publish release
-    needs: build
+    needs: [build, attest]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    environment: manual-release
     permissions:
       contents: write # create the Release and upload assets — the only job that needs it
+    concurrency:
+      group: mirafold-desktop-publication
+      cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # gh receives its token through GH_TOKEN below; a persistent Git
+          # credential is unnecessary even in the write-capable job.
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
           merge-multiple: true
 
-      - name: Create the GitHub Release
+      # No npm install occurs in this job. The verifier is Node-standard-library
+      # only, so dependency code never runs beside the repository-write token.
+      - name: Verify complete release set
+        run: node scripts/release-contract.mjs complete "${{ github.ref_name }}" artifacts
+
+      - name: Publish complete GitHub Release atomically
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          ls -lh artifacts
-          gh release create "$GITHUB_REF_NAME" \
-            --title "Mirafold Desktop $GITHUB_REF_NAME" \
-            --notes-file .github/RELEASE_NOTES.md \
-            artifacts/*
+          set -euo pipefail
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "release $RELEASE_TAG already exists — refusing to replace it" >&2
+            exit 1
+          fi
+
+          created=false
+          cleanup_draft() {
+            if [ "$created" = true ]; then
+              gh release delete "$RELEASE_TAG" --yes || true
+            fi
+          }
+          trap cleanup_draft EXIT
+
+          gh release create "$RELEASE_TAG" \
+            --draft \
+            --latest=false \
+            --verify-tag \
+            --title "Mirafold Desktop $RELEASE_TAG" \
+            --notes-file .github/RELEASE_NOTES.md
+          created=true
+
+          gh release upload "$RELEASE_TAG" artifacts/*
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            --jq '{tagName:.tag_name,isDraft:.draft,isPrerelease:.prerelease,assets:[.assets[]|{name,size,digest}]}' \
+            > "$RUNNER_TEMP/mirafold-release.json"
+          node scripts/release-contract.mjs \
+            draft "$RELEASE_TAG" artifacts "$RUNNER_TEMP/mirafold-release.json"
+
+          # From here an uncertain network response must not trigger cleanup:
+          # the draft is already complete, and this request may have published
+          # it even if the runner does not receive the success response.
+          created=false
+          gh release edit "$RELEASE_TAG" \
+            --draft=false \
+            --prerelease=false \
+            --latest
+          trap - EXIT
+
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            --jq '{tagName:.tag_name,isDraft:.draft,isPrerelease:.prerelease,assets:[.assets[]|{name,size,digest}]}' \
+            > "$RUNNER_TEMP/mirafold-release-public.json"
+          gh api "repos/$GITHUB_REPOSITORY/releases/latest" \
+            --jq '{tagName:.tag_name,isDraft:.draft,isPrerelease:.prerelease}' \
+            > "$RUNNER_TEMP/mirafold-release-latest.json"
+          node scripts/release-contract.mjs published \
+            "$RELEASE_TAG" artifacts \
+            "$RUNNER_TEMP/mirafold-release-public.json" \
+            "$RUNNER_TEMP/mirafold-release-latest.json"

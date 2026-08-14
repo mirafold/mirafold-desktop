@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+          - name: windows
+            os: windows-latest
+    env:
+      NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+      NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/mirafold-empty-npmrc
+      NPM_CONFIG_IGNORE_SCRIPTS: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Use the declared npm test toolchain
+        run: |
+          set -euo pipefail
+          touch "$NPM_CONFIG_USERCONFIG"
+          chmod 600 "$NPM_CONFIG_USERCONFIG"
+          npm install --global npm@12.0.2 \
+            --ignore-scripts \
+            --audit=false \
+            --fund=false \
+            --registry=https://registry.npmjs.org
+          test "$(npm --version)" = "12.0.2"
+
+      - name: Verify dependencies and run tests
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --audit=false --fund=false \
+            --registry=https://registry.npmjs.org
+          npm ls --all
+          npm audit --audit-level=moderate
+          npm audit signatures --include-attestations
+          npm test

@@ -31,6 +31,17 @@ Reliability and hardening. No feature changes.
 | `.tar.gz` | everything else (Fedora, Arch, openSUSE…). Extract and run `./mirafold`. No dependencies. |
 | `.AppImage` | portable single file — **needs `libfuse2`**, which most current distros no longer install by default. If it fails with `dlopen(): error loading libfuse.so.2`, either install libfuse2 or use the `.tar.gz` instead. |
 
+Once an updater-capable release is installed, AppImage and Debian-package
+users receive verified in-app downloads and an explicit restart choice. Debian
+installation requests administrator authorization through the operating
+system's available elevation helper; an AppImage replaces its user-owned file
+without it. The extracted `.tar.gz`
+checks for new versions but changes no files: its notice opens the official
+Releases page for a manual replacement. The older public `v0.1.1` build cannot
+discover its successor, so moving from that build still requires one manual
+download. The updater refuses lower Desktop versions; a recovery release uses
+a new, higher Desktop version containing the restored known-good source.
+
 **Windows** — `Mirafold-Setup-*.exe`. Installs into your user profile, so there's
 no administrator prompt.
 

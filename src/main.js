@@ -16,21 +16,29 @@
 // out here in the main process, where they need no bridge at all.
 
 import { app, BrowserWindow, dialog, Menu, shell } from "electron";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Daemon } from "./daemon.js";
-import { navigationVerdict } from "./navigation.js";
+import { daemonOriginFromUrl, navigationVerdict } from "./navigation.js";
+import { installPermissionGuards } from "./permissions.js";
 import { lastFolder, setLastFolder } from "./state.js";
+import { createDesktopUpdater, desktopUpdateStrategy } from "./updater.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const LOADING = path.join(HERE, "loading.html");
 const ICON = path.join(HERE, "..", "build", "icon.png");
+const require = createRequire(import.meta.url);
+const SHELL_VERSION = require("mirafold/package.json").version;
 
 let win = null;
 let folder = null;
 let daemon = null;
+let daemonOrigin = null;
 let quitting = false;
 let bootSeq = 0;
+let desktopUpdater = null;
 
 /**
  * Ask for a project folder. Mirafold sessions run in the daemon's working
@@ -66,6 +74,10 @@ function createWindow() {
     },
   });
 
+  // The shell needs no Chromium permission grants. Install both halves of
+  // Electron's permission policy before this session loads any content.
+  installPermissionGuards(win.webContents.session);
+
   // Links in agent output belong in the user's real browser, not in a second
   // window of this app with no address bar and no way to see where it went.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -73,17 +85,21 @@ function createWindow() {
     return { action: "deny" };
   });
 
-  // Same rule for in-page navigation: this window shows the daemon and nothing
-  // else. Anything else is either a mistake or something that should have been
-  // an external link. See navigation.js for what each verdict means.
-  win.webContents.on("will-navigate", (event, url) => {
-    const verdict = navigationVerdict(url, LOADING);
+  // Apply the same rule to every frame and to server-side redirects. Electron
+  // exposes redirects separately from page/user navigation; guarding only one
+  // event would let the other leave the daemon origin. External main-frame
+  // pages belong in the real browser. External subframes are simply refused.
+  const guardNavigation = (event) => {
+    const verdict = navigationVerdict(event.url, LOADING, daemonOrigin);
     if (verdict === "allow") return;
     event.preventDefault();
-    if (verdict === "external") void shell.openExternal(url);
-  });
+    if (event.isMainFrame && verdict === "external") void shell.openExternal(event.url);
+  };
+  win.webContents.on("will-frame-navigate", guardNavigation);
+  win.webContents.on("will-redirect", guardNavigation);
 
   win.on("closed", () => {
+    daemonOrigin = null;
     win = null;
   });
 
@@ -108,6 +124,7 @@ async function boot() {
   const dir = folder;
   const current = () => seq === bootSeq && !quitting && win !== null;
 
+  daemonOrigin = null;
   await win.loadFile(LOADING);
   if (!current()) return;
 
@@ -124,7 +141,15 @@ async function boot() {
   }
   if (!current()) return;
 
+  const origin = daemonOriginFromUrl(url);
+  if (origin === null) {
+    void booting.stop();
+    daemon = null;
+    return onBootFailure(new Error("The daemon reported an invalid local URL."));
+  }
+
   setLastFolder(dir);
+  daemonOrigin = origin;
   try {
     await win.loadURL(url);
   } catch (err) {
@@ -134,7 +159,8 @@ async function boot() {
     // load failure with the daemon still alive is boot's news; stopping it
     // then also suppresses the crash callback, so exactly one dialog shows.
     if (!current() || !booting.running) return;
-    booting.stop();
+    daemonOrigin = null;
+    void booting.stop();
     daemon = null;
     return onBootFailure(err);
   }
@@ -145,13 +171,75 @@ async function boot() {
 async function openFolder() {
   const chosen = await pickFolder("Open another project folder");
   if (!chosen) return;
-  daemon?.stop();
+  daemonOrigin = null;
+  void daemon?.stop();
   daemon = null;
   folder = chosen;
   await boot();
 }
 
+async function loadAutoUpdater(updateStrategy) {
+  // electron-updater is CommonJS. Read either Node's detected named export or
+  // the default object so this remains correct across Node/Electron interop
+  // changes. Tar archives need AppUpdater's version/feed comparison without a
+  // platform installer; every directly installable form uses autoUpdater.
+  const updaterModule = await import("electron-updater");
+  if (updateStrategy === "manual-download") {
+    const AppUpdater = updaterModule.AppUpdater ?? updaterModule.default?.AppUpdater;
+    if (!AppUpdater) throw new Error("electron-updater did not export AppUpdater");
+    return new AppUpdater();
+  }
+  const autoUpdater = updaterModule.autoUpdater ?? updaterModule.default?.autoUpdater;
+  if (!autoUpdater) throw new Error("electron-updater did not export autoUpdater");
+  return autoUpdater;
+}
+
+/** electron-builder writes this marker only into system-package targets. */
+function installedLinuxPackageType() {
+  if (process.platform !== "linux" || !app.isPackaged) return null;
+  try {
+    return readFileSync(path.join(process.resourcesPath, "package-type"), "utf8").trim();
+  } catch {
+    // AppImage and tar packages deliberately have no marker. Unknown or
+    // unreadable forms fail safe to a release notice rather than replacement.
+    return null;
+  }
+}
+
+function showUpdaterMessage(options) {
+  return win && !win.isDestroyed()
+    ? dialog.showMessageBox(win, options)
+    : dialog.showMessageBox(options);
+}
+
+/**
+ * Freeze boots, stop the daemon tree, and prove it is gone before an updater
+ * gets permission to open an installer. A failed proof restarts the local
+ * daemon and returns false; the updater then keeps the download for later.
+ */
+async function prepareForUpdateInstall() {
+  ++bootSeq;
+  daemonOrigin = null;
+  const stopping = daemon;
+  daemon = null;
+  const clean = stopping ? await stopping.stop() : true;
+  if (!clean) {
+    if (win && folder && !quitting) await boot();
+    return false;
+  }
+  quitting = true;
+  return true;
+}
+
+/** Restore a working daemon if the platform installer fails before app quit. */
+async function recoverFromUpdateInstallFailure() {
+  if (!win || !folder) return;
+  quitting = false;
+  if (!daemon) await boot();
+}
+
 async function onBootFailure(err) {
+  daemonOrigin = null;
   // Same guard as onDaemonCrash: during quit (or with the window gone) there
   // is no one to ask — a dialog would race app teardown, parentless.
   if (quitting || !win) return;
@@ -184,6 +272,7 @@ async function onBootFailure(err) {
  */
 async function onDaemonCrash({ code, signal, stderr }) {
   daemon = null;
+  daemonOrigin = null;
   if (quitting || !win) return;
   const how = signal ? `was killed (${signal})` : `exited with code ${code}`;
   const { response } = await dialog.showMessageBox(win, {
@@ -244,6 +333,10 @@ function buildMenu() {
           { role: "toggleDevTools" },
         ],
       },
+      {
+        label: "Help",
+        submenu: desktopUpdater.helpMenuItems(),
+      },
     ]),
   );
 }
@@ -261,6 +354,28 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(async () => {
+    const updateStrategy = desktopUpdateStrategy({
+      isPackaged: app.isPackaged,
+      isWindowsStore: process.windowsStore === true,
+      platform: process.platform,
+      isAppImage: typeof process.env.APPIMAGE === "string",
+      linuxPackageType: installedLinuxPackageType(),
+    });
+    desktopUpdater = createDesktopUpdater({
+      isPackaged: app.isPackaged,
+      // Electron exposes this only after ready. MSIX/AppX packages belong to
+      // the Microsoft Store update channel and must never contact ours.
+      isWindowsStore: process.windowsStore === true,
+      desktopVersion: app.getVersion(),
+      shellVersion: SHELL_VERSION,
+      updateStrategy,
+      loadUpdater: () => loadAutoUpdater(updateStrategy),
+      showMessage: showUpdaterMessage,
+      openDownloadPage: (url) => shell.openExternal(url),
+      prepareInstall: prepareForUpdateInstall,
+      recoverInstall: recoverFromUpdateInstallFailure,
+      logger: console,
+    });
     buildMenu();
     folder = lastFolder() ?? (await pickFolder());
     // Nothing to open and nothing chosen — the user cancelled the only question
@@ -268,6 +383,9 @@ if (!app.requestSingleInstanceLock()) {
     if (!folder) return app.quit();
     createWindow();
     await boot();
+    // Updating is background work. A missing feed or network failure is logged
+    // and never delays or tears down a working Mirafold session.
+    void desktopUpdater.start();
   });
 
   // We target Linux and Windows, where closing the last window means quitting.
@@ -283,7 +401,8 @@ if (!app.requestSingleInstanceLock()) {
   // user quits the app and leaves processes running that they cannot see.
   app.on("before-quit", () => {
     quitting = true;
-    daemon?.stop();
+    daemonOrigin = null;
+    void daemon?.stop();
     daemon = null;
   });
 }
