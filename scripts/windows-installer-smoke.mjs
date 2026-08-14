@@ -105,7 +105,7 @@ export function windowsInstallerPaths(outputDirectory, version, installDirectory
 function registrationExists(hive, view, installDirectory, spawn) {
   const result = spawn(
     "reg.exe",
-    ["query", `${hive}\\${UNINSTALL_ROOT}`, "/s", "/f", installDirectory, "/d", "/e", `/reg:${view}`],
+    ["query", `${hive}\\${UNINSTALL_ROOT}`, "/s", `/reg:${view}`],
     {
       encoding: "utf8",
       env: windowsEnvironment(),
@@ -120,17 +120,13 @@ function registrationExists(hive, view, installDirectory, spawn) {
   if (result.status === 1) {
     const detail = String(result.stderr || result.stdout).trim();
     invariant(
-      /unable to find the specified registry key or value|no matches found/i.test(detail),
+      /unable to find the specified registry key or value/i.test(detail),
       `Windows ${hive} ${view}-bit registration query failed: ${detail || "no diagnostic"}`,
     );
     return false;
   }
   invariant(result.status === 0, `Windows ${hive} registration query exited ${result.status}`);
-  invariant(
-    String(result.stdout).toLowerCase().includes(installDirectory.toLowerCase()),
-    `Windows ${hive} registration query did not return the exact install path`,
-  );
-  return true;
+  return String(result.stdout).toLowerCase().includes(installDirectory.toLowerCase());
 }
 
 function registrationDiagnostics(hive, view, spawn) {
@@ -170,6 +166,32 @@ function defaultTemporaryDirectory() {
     return runner;
   }
   return tmpdir();
+}
+
+const SLEEP_WORD = new Int32Array(new SharedArrayBuffer(4));
+
+function blockingPause(milliseconds) {
+  Atomics.wait(SLEEP_WORD, 0, 0, milliseconds);
+}
+
+export function waitForPathRemoval(
+  target,
+  {
+    timeoutMs = 30_000,
+    exists = existsSync,
+    now = Date.now,
+    pause = blockingPause,
+  } = {},
+) {
+  invariant(typeof target === "string" && path.isAbsolute(target), "NSIS removal path must be absolute");
+  invariant(Number.isInteger(timeoutMs) && timeoutMs >= 0, "NSIS removal timeout must be a non-negative integer");
+  const deadline = now() + timeoutMs;
+  while (exists(target)) {
+    const remaining = deadline - now();
+    if (remaining <= 0) return false;
+    pause(Math.min(100, remaining));
+  }
+  return true;
 }
 
 export function verifyWindowsInstaller(
@@ -234,8 +256,9 @@ export function verifyWindowsInstaller(
 
     checkedCommand(paths.uninstaller, silentUninstallArguments(), "silent current-user NSIS uninstall", spawn);
     progress("silent current-user uninstaller exited successfully");
+    invariant(waitForPathRemoval(installDirectory), "NSIS uninstall left the installation directory behind");
+    progress("uninstaller removed the installation directory");
     uninstalled = true;
-    invariant(!existsSync(installDirectory), "NSIS uninstall left the installation directory behind");
     const userAfter = registrationViews("HKCU", installDirectory, spawn);
     const machineAfter = registrationViews("HKLM", installDirectory, spawn);
     invariant(!anyRegistration(userAfter), "NSIS uninstall left current-user registration behind");
@@ -262,6 +285,9 @@ export function verifyWindowsInstaller(
       progress("attempting cleanup uninstall after a failed proof");
       checkedCommand(paths.uninstaller, silentUninstallArguments(), "cleanup NSIS uninstall", spawn);
       progress("cleanup uninstall exited successfully");
+      invariant(waitForPathRemoval(installDirectory), "cleanup NSIS uninstall left the installation directory behind");
+      progress("cleanup uninstall removed the installation directory");
+      uninstalled = true;
     } catch (error) {
       cleanupFailure = error;
     }
