@@ -13,6 +13,26 @@ function jsonText(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
+function daemonSmokeText() {
+  return `MIRAFOLD_PACKAGED_DAEMON_SMOKE=${JSON.stringify({
+    urlContract: {
+      protocol: "http:",
+      hostname: "127.0.0.1",
+      port: 3000,
+      pathname: "/",
+      queryKeys: ["token"],
+      tokenPresent: true,
+    },
+    authenticationRedirectStatus: 302,
+    authenticationCookieHardened: true,
+    reachableStatus: 200,
+    htmlServed: true,
+    processTreeStopped: true,
+    unreachableAfterStop: true,
+    crashReported: false,
+  })}\n`;
+}
+
 function fixture(t, { shellVersion = "0.3.7" } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "mirafold-packaged-smoke-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -164,6 +184,66 @@ test("the packaged daemon smoke rejects credential-bearing diagnostics", (t) => 
       }),
     }),
     /exposed a daemon auth token/,
+  );
+});
+
+test("the Windows packaged daemon smoke uses native tasklist and proves no Mirafold image remains", (t) => {
+  const { root, app } = fixture(t);
+  const executable = path.join(root, "Mirafold.exe");
+  writeFileSync(executable, "fixture\n");
+  const calls = [];
+  const result = runPackagedDaemonProbe({
+    executable,
+    appDirectory: app,
+    platform: "windows",
+    temporaryDirectory: root,
+    spawn(command, args) {
+      calls.push({ command, args });
+      if (calls.length === 1) {
+        return { error: null, signal: null, status: 0, stderr: "", stdout: daemonSmokeText() };
+      }
+      return {
+        error: null,
+        signal: null,
+        status: 0,
+        stderr: "",
+        stdout: "INFO: No tasks are running which match the specified criteria.\r\n",
+      };
+    },
+  });
+
+  assert.equal(result.executableProcessesAfterProbe, 0);
+  assert.deepEqual(calls[1], {
+    command: "tasklist.exe",
+    args: ["/FI", "IMAGENAME eq Mirafold.exe", "/FO", "CSV", "/NH"],
+  });
+});
+
+test("the Windows packaged daemon smoke rejects a remaining Mirafold image", (t) => {
+  const { root, app } = fixture(t);
+  const executable = path.join(root, "Mirafold.exe");
+  writeFileSync(executable, "fixture\n");
+  let call = 0;
+  assert.throws(
+    () => runPackagedDaemonProbe({
+      executable,
+      appDirectory: app,
+      platform: "windows",
+      temporaryDirectory: root,
+      spawn() {
+        call += 1;
+        return call === 1
+          ? { error: null, signal: null, status: 0, stderr: "", stdout: daemonSmokeText() }
+          : {
+              error: null,
+              signal: null,
+              status: 0,
+              stderr: "",
+              stdout: '"Mirafold.exe","123","Console","1","42,000 K"\r\n',
+            };
+      },
+    }),
+    /1 packaged Mirafold processes remained/,
   );
 });
 
