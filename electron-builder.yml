@@ -5,6 +5,19 @@
 appId: com.mirafold.desktop
 productName: Mirafold
 
+# One public stable update channel, named explicitly rather than inferred from
+# package.json's repository URL. The build jobs always pass `--publish never`:
+# they generate checksummed metadata but hold no write credential. A separate
+# release job verifies the complete cross-platform set before publishing it.
+publish:
+  - provider: github
+    owner: mirafold
+    repo: mirafold-desktop
+    channel: latest
+    private: false
+    publishAutoUpdate: true
+generateUpdatesFilesForAllChannels: false
+
 directories:
   output: dist
   buildResources: build
@@ -39,6 +52,17 @@ files:
 # startup measurably drags.
 asar: false
 
+# Both native dependencies are N-API wrappers around platform-specific
+# optional packages selected by npm (`@lydell/node-pty-<platform>` and
+# `@parcel/watcher-<platform>`). Those shipped binaries are the artifacts the
+# application must use. electron-builder's default @electron/rebuild pass does
+# not recognize @parcel/watcher's wrapper/optional-package layout: it sees the
+# wrapper's binding.gyp and attempts a source rebuild instead, which both
+# defeats the platform package selection and makes packaging fail before the
+# known-good binary can be copied. CI installs on each target operating system,
+# so npm has already selected the correct N-API binary before this point.
+npmRebuild: false
+
 # Three Linux artifacts, because no single one covers the desktop.
 #
 #   deb      The primary. Double-click installs on Debian, Ubuntu, Mint and Pop,
@@ -63,9 +87,10 @@ linux:
   # Without these the running window is not linked to the installed .desktop
   # entry: the taskbar shows a generic icon, "pin to dock" doesn't stick, and
   # the window looks like it belongs to no application. syncDesktopName makes
-  # the installed .desktop filename match Electron's app_id / StartupWMClass,
-  # which is what the window manager pairs on. With no `desktopName` in
-  # package.json it derives that from executableName — hence `mirafold.desktop`.
+  # the installed .desktop filename match the explicit `desktopName` in
+  # package.json and sets StartupWMClass to the same basename Electron uses as
+  # its app_id. `mirafold.desktop` deliberately preserves the existing
+  # installed filename while making all three identities agree.
   executableName: mirafold
   syncDesktopName: true
   synopsis: A browser re-skin of your terminal coding agent
@@ -81,6 +106,14 @@ linux:
       Comment: A browser re-skin of your terminal coding agent
       Categories: Development;IDE;
       Keywords: claude;codex;gemini;agent;coding;
+
+# electron-builder's legacy FUSE2 AppImage target otherwise hard-codes
+# `--no-sandbox` into the desktop entry. AppRun already performs a runtime
+# user-namespace capability check and adds that flag only when the host cannot
+# provide Chromium's user-namespace sandbox. An empty explicit list removes the
+# unconditional desktop-entry downgrade without breaking that fallback.
+appImage:
+  executableArgs: []
 
 win:
   target:

@@ -1,0 +1,495 @@
+name: Shell intake
+
+# Observe npm's public `mirafold` latest tag twice an hour, prove its source,
+# build and smoke-check native Linux/Windows packages from the reviewed bytes,
+# then hand only those bytes to a separately isolated release writer.
+#
+# The writer remains deliberately dormant until the repository variable
+# MIRAFOLD_AUTOMATED_RELEASES is exactly `enabled`. That variable must stay
+# unset through the one-time updater bridge release and the non-publishing
+# rehearsal; merging this workflow alone therefore cannot publish anything.
+on:
+  schedule:
+    # Avoid the start of the hour, when GitHub documents the highest schedule
+    # load and possible delay. Scheduled workflows use the default branch's
+    # current commit, so every job in a run checks out one immutable github.sha.
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+
+# Read-only is the workflow default. npm installation, project dependencies,
+# tests, and native packaging never run with a repository-write token; only the
+# final isolated job opts up, and that job never installs dependencies.
+permissions:
+  contents: read
+
+# Keep one run active. GitHub's default single pending slot intentionally
+# replaces an older pending run with the newest observation, coalescing rapid
+# Shell releases while never cancelling the run already validating bytes.
+concurrency:
+  group: mirafold-shell-intake
+  cancel-in-progress: false
+
+jobs:
+  intake:
+    name: verify and prepare latest Shell
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+      NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/mirafold-empty-npmrc
+      NPM_CONFIG_IGNORE_SCRIPTS: "true"
+    outputs:
+      changed: ${{ steps.prepare.outputs.changed }}
+      desktop-version: ${{ steps.prepare.outputs.desktop-version }}
+      shell-version: ${{ steps.prepare.outputs.shell-version }}
+      source-commit: ${{ steps.verify.outputs.source-commit }}
+      artifact-digest: ${{ steps.upload.outputs.artifact-digest }}
+    steps:
+      # workflow_dispatch lets a person select a branch. Future release jobs
+      # must never consume a manually selected fork/feature branch, so fail
+      # before checkout, npm installation, or any project-controlled code.
+      - name: Require canonical main source
+        shell: bash
+        env:
+          INTAKE_REPOSITORY: ${{ github.repository }}
+          INTAKE_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          test "$INTAKE_REPOSITORY" = "mirafold/mirafold-desktop"
+          test "$INTAKE_REF" = "refs/heads/main"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # No dependency process should find even a read-only Git credential
+          # in the checkout. GitHub expressions still provide github.sha.
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Use the declared npm release toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          touch "$NPM_CONFIG_USERCONFIG"
+          chmod 600 "$NPM_CONFIG_USERCONFIG"
+          npm install --global npm@12.0.2 \
+            --ignore-scripts \
+            --audit=false \
+            --fund=false \
+            --registry=https://registry.npmjs.org
+          test "$(npm --version)" = "12.0.2"
+
+      # This step runs only repository-owned standard-library code. It observes
+      # latest without shell interpolation, prepares package/lock in place, and
+      # emits `changed=false` without rewriting either file when already current.
+      - name: Observe and prepare npm latest
+        id: prepare
+        run: >-
+          node scripts/shell-intake.mjs prepare
+          "$RUNNER_TEMP/mirafold-shell-intake-state.json"
+          "$GITHUB_OUTPUT"
+
+      # npm must materialize the exact lock before it can verify every registry
+      # signature and provenance bundle. Lifecycle scripts remain disabled; no
+      # installed project dependency is executed in this job.
+      - name: Materialize exact packages without lifecycle scripts
+        if: steps.prepare.outputs.changed == 'true'
+        run: >-
+          npm ci --ignore-scripts --audit=false --fund=false
+          --registry=https://registry.npmjs.org
+
+      - name: Verify signatures, provenance, and source identity
+        id: verify
+        if: steps.prepare.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm audit signatures --json --include-attestations \
+            > "$RUNNER_TEMP/mirafold-npm-signatures.json"
+          node scripts/shell-intake.mjs verify \
+            "$RUNNER_TEMP/mirafold-shell-intake-state.json" \
+            "$RUNNER_TEMP/mirafold-npm-signatures.json" \
+            "$RUNNER_TEMP/mirafold-shell-intake-artifact" \
+            "$GITHUB_OUTPUT"
+
+      # upload-artifact v4 artifacts are immutable. Only these three files cross
+      # the job boundary; node_modules and raw Sigstore bundles never do.
+      - name: Retain reviewed package/version source
+        id: upload
+        if: steps.prepare.outputs.changed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mirafold-shell-intake
+          path: |
+            ${{ runner.temp }}/mirafold-shell-intake-artifact/package.json
+            ${{ runner.temp }}/mirafold-shell-intake-artifact/package-lock.json
+            ${{ runner.temp }}/mirafold-shell-intake-artifact/shell-intake.json
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 7
+
+  test:
+    name: test exact prepared source
+    needs: intake
+    if: needs.intake.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+      NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/mirafold-empty-npmrc
+      NPM_CONFIG_IGNORE_SCRIPTS: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Use the declared npm release toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          touch "$NPM_CONFIG_USERCONFIG"
+          chmod 600 "$NPM_CONFIG_USERCONFIG"
+          npm install --global npm@12.0.2 \
+            --ignore-scripts \
+            --audit=false \
+            --fund=false \
+            --registry=https://registry.npmjs.org
+          test "$(npm --version)" = "12.0.2"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mirafold-shell-intake
+          path: ${{ runner.temp }}/mirafold-shell-intake-artifact
+
+      # `apply` refuses an artifact unless its recorded package/lock base hashes
+      # equal those files in this run's fixed github.sha checkout. No floating
+      # version or registry value enters a shell command.
+      - name: Apply reviewed package/version source
+        run: >-
+          node scripts/shell-intake.mjs apply
+          "$RUNNER_TEMP/mirafold-shell-intake-artifact"
+
+      - name: Install and test exact prepared source
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --audit=false --fund=false \
+            --registry=https://registry.npmjs.org
+          npm ls --all
+          npm audit --audit-level=moderate
+          npm test
+          node scripts/shell-intake.mjs check \
+            "$RUNNER_TEMP/mirafold-shell-intake-artifact"
+
+  build:
+    name: build reviewed source (${{ matrix.name }})
+    needs: [intake, test]
+    if: needs.intake.outputs.changed == 'true'
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+            args: --linux
+          - name: windows
+            os: windows-latest
+            args: --win
+    env:
+      NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+      NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/mirafold-empty-npmrc
+      NPM_CONFIG_IGNORE_SCRIPTS: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Use the declared npm release toolchain
+        run: |
+          set -euo pipefail
+          touch "$NPM_CONFIG_USERCONFIG"
+          chmod 600 "$NPM_CONFIG_USERCONFIG"
+          npm install --global npm@12.0.2 \
+            --ignore-scripts \
+            --audit=false \
+            --fund=false \
+            --registry=https://registry.npmjs.org
+          test "$(npm --version)" = "12.0.2"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mirafold-shell-intake
+          path: ${{ runner.temp }}/mirafold-shell-intake-artifact
+
+      - name: Apply reviewed package/version source
+        run: >-
+          node scripts/shell-intake.mjs apply
+          "$RUNNER_TEMP/mirafold-shell-intake-artifact"
+
+      - name: Install and test exact prepared source
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --audit=false --fund=false \
+            --registry=https://registry.npmjs.org
+          npm ls --all
+          npm audit --audit-level=moderate
+          npm audit signatures --include-attestations
+          npm test
+
+      # Use the reviewed local CLI path. npx is unnecessary here and must not
+      # be allowed to acquire a different package if installation is damaged.
+      - name: Build native installers and updater metadata
+        run: >-
+          node node_modules/electron-builder/cli.js
+          ${{ matrix.args }} --publish never
+
+      # Electron's packaged runtime resolves the real daemon entry and loads
+      # both platform wrappers. It opens no GUI and contacts no model/relay.
+      - name: Smoke-check the packaged runtime
+        run: node scripts/packaged-smoke.mjs "${{ matrix.name }}" dist
+
+      - name: Generate SHA-256 manifest
+        run: >-
+          node scripts/release-contract.mjs manifest
+          "${{ matrix.name }}" dist
+
+      - name: Verify exact native updater artifact set and manifest
+        run: node scripts/release-contract.mjs platform "${{ matrix.name }}" dist
+
+      - name: Recheck reviewed source after dependency and build code
+        run: >-
+          node scripts/shell-intake.mjs check
+          "$RUNNER_TEMP/mirafold-shell-intake-artifact"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mirafold-release-${{ matrix.name }}
+          path: |
+            dist/SHA256SUMS-*.txt
+            dist/latest*.yml
+            dist/*.blockmap
+            dist/*.deb
+            dist/*.tar.gz
+            dist/*.AppImage
+            dist/*.exe
+          if-no-files-found: error
+          include-hidden-files: false
+          compression-level: 0
+          retention-days: 7
+
+  attest:
+    name: attest reviewed release provenance
+    needs: [intake, test, build]
+    if: >-
+      needs.intake.outputs.changed == 'true' &&
+      (vars.MIRAFOLD_AUTOMATED_RELEASES == 'enabled' ||
+       github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mirafold-shell-intake
+          path: ${{ runner.temp }}/mirafold-shell-intake-artifact
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: mirafold-release-*
+          path: ${{ runner.temp }}/mirafold-release-assets
+          merge-multiple: true
+
+      - name: Apply reviewed version source without installing dependencies
+        run: >-
+          node scripts/shell-intake.mjs apply
+          "$RUNNER_TEMP/mirafold-shell-intake-artifact"
+
+      - name: Verify exact subjects before attesting
+        run: >-
+          node scripts/release-contract.mjs complete
+          "v${{ needs.intake.outputs.desktop-version }}"
+          "$RUNNER_TEMP/mirafold-release-assets"
+
+      - name: Generate SLSA build provenance for all nine release files
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/mirafold-release-assets/*
+
+  release:
+    name: commit, tag, and publish reviewed release
+    needs: [intake, test, build, attest]
+    if: >-
+      needs.intake.outputs.changed == 'true' &&
+      vars.MIRAFOLD_AUTOMATED_RELEASES == 'enabled'
+    runs-on: ubuntu-latest
+    environment: automated-release
+    permissions:
+      contents: write
+    # Serialize publication with the manual/tag workflow. An automated tag
+    # pushed with GITHUB_TOKEN does not start that workflow, but a maintainer's
+    # simultaneous manual release still cannot overlap this writer.
+    concurrency:
+      group: mirafold-desktop-publication
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          # This is the one job that must push. It runs no dependency install,
+          # npm command, project test, builder, or downloaded executable.
+          persist-credentials: true
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mirafold-shell-intake
+          path: ${{ runner.temp }}/mirafold-shell-intake-artifact
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: mirafold-release-*
+          path: ${{ runner.temp }}/mirafold-release-assets
+          merge-multiple: true
+
+      - name: Reconstruct and verify the exact release candidate
+        id: prepare
+        env:
+          RELEASE_BASE_COMMIT: ${{ github.sha }}
+        run: >-
+          node scripts/release-coordinator.mjs prepare
+          "$RUNNER_TEMP/mirafold-shell-intake-artifact"
+          "$RUNNER_TEMP/mirafold-release-assets"
+          "$RELEASE_BASE_COMMIT"
+          "$RUNNER_TEMP/mirafold-release-plan.json"
+          "$RUNNER_TEMP/mirafold-release-notes.md"
+          "$GITHUB_OUTPUT"
+
+      - name: Refuse stale main or classify a safe retry
+        id: preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/release-coordinator.mjs remote
+          "$RUNNER_TEMP/mirafold-release-plan.json"
+          "$RUNNER_TEMP/mirafold-remote-before.json"
+          "$GITHUB_OUTPUT"
+
+      - name: Create and atomically push the reviewed commit and tag
+        if: steps.preflight.outputs.mode == 'create'
+        env:
+          RELEASE_COMMIT_MESSAGE: ${{ steps.prepare.outputs.commit-message }}
+          RELEASE_TAG: ${{ steps.prepare.outputs.tag }}
+          RELEASE_TAG_MESSAGE: ${{ steps.prepare.outputs.tag-message }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -c commit.gpgsign=false -c core.hooksPath=/dev/null \
+            commit -m "$RELEASE_COMMIT_MESSAGE"
+          git -c tag.gpgSign=false tag -a "$RELEASE_TAG" \
+            -m "$RELEASE_TAG_MESSAGE"
+          node scripts/release-coordinator.mjs local \
+            "$RUNNER_TEMP/mirafold-release-plan.json" \
+            "$GITHUB_OUTPUT"
+          git push --atomic origin \
+            "HEAD:refs/heads/main" \
+            "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+
+      - name: Recheck remote identity after the possible push
+        id: remote
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/release-coordinator.mjs remote
+          "$RUNNER_TEMP/mirafold-release-plan.json"
+          "$RUNNER_TEMP/mirafold-remote-after.json"
+          "$GITHUB_OUTPUT"
+
+      - name: Create, verify, and publish one complete release
+        if: steps.remote.outputs.mode != 'complete'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ASSETS: ${{ runner.temp }}/mirafold-release-assets
+          RELEASE_MODE: ${{ steps.remote.outputs.mode }}
+          RELEASE_NOTES: ${{ runner.temp }}/mirafold-release-notes.md
+          RELEASE_TAG: ${{ steps.prepare.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.prepare.outputs.release-title }}
+        run: |
+          set -euo pipefail
+
+          node scripts/release-coordinator.mjs notes \
+            "$RUNNER_TEMP/mirafold-release-plan.json" \
+            "$RELEASE_NOTES"
+          mode="$RELEASE_MODE"
+          if [ "$mode" = "draft-replace" ]; then
+            gh release delete "$RELEASE_TAG" --yes
+            mode="release-create"
+          fi
+
+          created=false
+          cleanup_draft() {
+            if [ "$created" = true ]; then
+              gh release delete "$RELEASE_TAG" --yes || true
+            fi
+          }
+          trap cleanup_draft EXIT
+
+          if [ "$mode" = "release-create" ]; then
+            gh release create "$RELEASE_TAG" \
+              --draft \
+              --latest=false \
+              --verify-tag \
+              --title "$RELEASE_TITLE" \
+              --notes-file "$RELEASE_NOTES"
+            created=true
+            gh release upload "$RELEASE_TAG" "$RELEASE_ASSETS"/*
+          elif [ "$mode" != "draft-complete" ]; then
+            echo "unsafe release state: $mode" >&2
+            exit 1
+          fi
+
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            --jq '{tagName:.tag_name,isDraft:.draft,isPrerelease:.prerelease,assets:[.assets[]|{name,size,digest}]}' \
+            > "$RUNNER_TEMP/mirafold-release-draft.json"
+          node scripts/release-contract.mjs draft \
+            "$RELEASE_TAG" "$RELEASE_ASSETS" \
+            "$RUNNER_TEMP/mirafold-release-draft.json"
+
+          # From here an uncertain response preserves the complete draft/public
+          # release. A rerun can safely resume either observable state.
+          created=false
+          gh release edit "$RELEASE_TAG" \
+            --draft=false \
+            --prerelease=false \
+            --latest
+          trap - EXIT
+
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            --jq '{tagName:.tag_name,isDraft:.draft,isPrerelease:.prerelease,assets:[.assets[]|{name,size,digest}]}' \
+            > "$RUNNER_TEMP/mirafold-release-public.json"
+          gh api "repos/$GITHUB_REPOSITORY/releases/latest" \
+            --jq '{tagName:.tag_name,isDraft:.draft,isPrerelease:.prerelease}' \
+            > "$RUNNER_TEMP/mirafold-release-latest.json"
+          node scripts/release-contract.mjs published \
+            "$RELEASE_TAG" "$RELEASE_ASSETS" \
+            "$RUNNER_TEMP/mirafold-release-public.json" \
+            "$RUNNER_TEMP/mirafold-release-latest.json"

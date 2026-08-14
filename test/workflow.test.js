@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 const workflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8")
   .split("\r\n")
   .join("\n");
+const releaseContract = readFileSync(new URL("../scripts/release-contract.mjs", import.meta.url), "utf8");
 
 /** The text of one top-level job block, by name. */
 function job(name) {
@@ -31,8 +32,113 @@ test("the build job does not leave a credential on disk", () => {
   assert.match(job("build"), /persist-credentials: false/);
 });
 
-test("only the release job may write", () => {
-  assert.match(job("release"), /permissions:\s*\n\s+contents: write/);
+test("the build job verifies every updater asset before retaining it", () => {
+  const build = job("build");
+  assert.match(build, /packaged-smoke\.mjs "\$\{\{ matrix\.name \}\}" dist/);
+  const manifest = build.indexOf("release-contract.mjs manifest");
+  const contract = build.indexOf("release-contract.mjs platform");
+  assert.ok(manifest !== -1 && manifest < contract, "SHA-256 manifest must precede final verification");
+  assert.match(build, /release-contract\.mjs platform "\$\{\{ matrix\.name \}\}" dist/);
+  assert.match(build, /node node_modules\/electron-builder\/cli\.js \$\{\{ matrix\.args \}\}/);
+  assert.doesNotMatch(build, /\bnpx\b/);
+  for (const pattern of [
+    "dist/SHA256SUMS-*.txt",
+    "dist/latest*.yml",
+    "dist/*.blockmap",
+    "dist/*.deb",
+    "dist/*.tar.gz",
+    "dist/*.AppImage",
+    "dist/*.exe",
+  ]) {
+    assert.ok(build.includes(pattern), `artifact upload omits ${pattern}`);
+  }
+  assert.match(build, /if-no-files-found: error/);
+});
+
+test("tag identity and stable-channel policy are checked before dependency code", () => {
+  const build = job("build");
+  const identity = build.indexOf("release-contract.mjs identity");
+  const install = build.indexOf("npm ci");
+  assert.ok(identity !== -1 && install !== -1 && identity < install);
+});
+
+test("only the release job may write repository contents", () => {
+  const release = job("release");
+  assert.match(release, /permissions:\s*\n\s+contents: write/);
+  assert.match(release, /needs: \[build, attest\]/);
+  assert.match(release, /environment: manual-release/);
+  assert.match(release, /concurrency:\s*\n\s+group: mirafold-desktop-publication\s*\n\s+cancel-in-progress: false/);
+  assert.equal(workflow.match(/contents: write/g)?.length, 1);
+});
+
+test("a manual release rehearsal cannot enter the publishing job", () => {
+  const header = workflow.slice(0, workflow.indexOf("\njobs:"));
+  const release = job("release");
+  assert.match(header, /workflow_dispatch:/);
+  assert.match(release, /if: github\.event_name == 'push'/);
+  assert.equal(workflow.match(/contents: write/g)?.length, 1);
+  for (const name of ["build", "attest"]) {
+    const value = job(name);
+    assert.doesNotMatch(value, /\bgh release\b/);
+    assert.doesNotMatch(value, /\bgit push\b/);
+  }
+});
+
+test("provenance receives OIDC only after both native builds and cannot publish", () => {
+  const attest = job("attest");
+  assert.match(attest, /needs: build/);
+  assert.match(attest, /contents: read/);
+  assert.match(attest, /id-token: write/);
+  assert.match(attest, /attestations: write/);
+  assert.match(attest, /artifact-metadata: write/);
+  assert.doesNotMatch(attest, /contents: write/);
+  assert.match(attest, /persist-credentials: false/);
+  const download = attest.indexOf("uses: actions/download-artifact@");
+  const verify = attest.indexOf("release-contract.mjs artifacts");
+  const provenance = attest.indexOf("uses: actions/attest@");
+  assert.ok(download !== -1 && download < verify && verify < provenance);
+  assert.match(attest, /subject-path: \$\{\{ runner\.temp \}\}\/mirafold-release-assets\/\*/);
+  assert.doesNotMatch(attest, /\bnpm\s+(?:ci|install|test|run)\b/);
+  assert.doesNotMatch(attest, /\bnpx\b/);
+});
+
+test("the write-capable release job runs no installed dependency code", () => {
+  const release = job("release");
+  const executableLines = release
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n");
+  assert.match(release, /persist-credentials: false/);
+  assert.doesNotMatch(executableLines, /\bnpm\s+(?:ci|install)\b/);
+  assert.doesNotMatch(executableLines, /\bnpx\b/);
+});
+
+test("the release verifier imports only Node standard-library modules", () => {
+  const imports = [...releaseContract.matchAll(/\bfrom\s+["']([^"']+)["']/g)].map((match) => match[1]);
+  assert.ok(imports.length > 0, "release verifier import scan found nothing");
+  assert.deepEqual(
+    imports.filter((specifier) => !specifier.startsWith("node:")),
+    [],
+    "write-capable release verification must not load dependency code",
+  );
+});
+
+test("a release stays draft until its complete remote asset set is verified", () => {
+  const release = job("release");
+  const complete = release.indexOf("release-contract.mjs complete");
+  const create = release.indexOf('gh release create "$RELEASE_TAG"');
+  const upload = release.indexOf('gh release upload "$RELEASE_TAG"');
+  const remote = release.indexOf('draft "$RELEASE_TAG" artifacts');
+  const publish = release.indexOf('gh release edit "$RELEASE_TAG"');
+  const published = release.indexOf("release-contract.mjs published");
+  assert.ok(complete !== -1 && complete < create, "local complete-set verification must precede draft creation");
+  assert.ok(create < upload && upload < remote && remote < publish, "draft upload/verification/publication order changed");
+  assert.match(release.slice(create, upload), /--draft/);
+  assert.match(release.slice(publish), /--draft=false/);
+  assert.match(release.slice(publish), /--prerelease=false/);
+  assert.match(release.slice(publish), /--latest/);
+  assert.ok(publish < published, "public/latest verification must follow publication");
+  assert.equal(release.match(/\{name,size,digest\}/g)?.length, 2, "draft and public assets must expose GitHub SHA-256 digests");
 });
 
 test("the workflow default is read-only", () => {

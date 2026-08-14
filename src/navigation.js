@@ -19,11 +19,35 @@
 import { fileURLToPath } from "node:url";
 
 /**
+ * Reduce the private URL reported by the daemon to the one web origin this
+ * window may trust. Require the explicit IPv4-loopback-and-port form emitted
+ * by the daemon before letting URL canonicalization reduce it to an origin;
+ * accepting anything broader here would turn a child-process startup message
+ * into a general navigation allowlist.
+ *
+ * @param {string} rawUrl URL reported by the daemon
+ * @returns {string|null} canonical origin, or null when the URL is not a
+ *   Mirafold loopback URL
+ */
+export function daemonOriginFromUrl(rawUrl) {
+  if (typeof rawUrl !== "string" || !/^http:\/\/127\.0\.0\.1:\d+\//.test(rawUrl)) return null;
+  try {
+    const target = new URL(rawUrl);
+    if (target.protocol !== "http:" || target.hostname !== "127.0.0.1") return null;
+    return target.origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * @param {string} rawUrl the navigation target
  * @param {string} loadingFile absolute path of the loading screen
+ * @param {string|null} daemonOrigin canonical origin returned by
+ *   daemonOriginFromUrl for the current daemon
  * @returns {"allow"|"external"|"block"}
  */
-export function navigationVerdict(rawUrl, loadingFile) {
+export function navigationVerdict(rawUrl, loadingFile, daemonOrigin = null) {
   let target;
   try {
     target = new URL(rawUrl);
@@ -31,8 +55,9 @@ export function navigationVerdict(rawUrl, loadingFile) {
     return "block"; // unparseable: not something to hand onwards
   }
 
-  // The daemon. It serves plain HTTP on loopback and nothing else does.
-  if (target.protocol === "http:" && target.hostname === "127.0.0.1") return "allow";
+  // This launch's daemon — not every process that happens to listen on the
+  // machine's loopback interface.
+  if (daemonOrigin !== null && target.origin === daemonOrigin) return "allow";
 
   // A real web page — the user's browser owns it.
   if (target.protocol === "http:" || target.protocol === "https:") return "external";

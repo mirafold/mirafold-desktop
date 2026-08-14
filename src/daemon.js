@@ -46,25 +46,89 @@ const BOOT_TIMEOUT_MS = 60_000;
 const STDERR_LINES = 100;
 const STDERR_LINE_CHARS = 1000;
 
-// The daemon mints a fresh auth token per launch and puts it in the URL it
-// prints. Anything that leaves this process — the mirrored output below, and
-// the crash dialog's text — gets it stripped: the app's own stdout is captured
-// by the system journal when it is launched from a desktop menu, and a crash
-// dialog is exactly the thing a user screenshots and sends to someone.
-const TOKEN_RE = /([?&]token=)[^\s&"'<>]+/gi;
+// A child stream can split anywhere — including between `tok` and `en=`, or
+// between the pairing-code label and its value. Sanitizing each `data` chunk is
+// therefore not sanitizing the stream. Hold one logical line until its newline,
+// redact it as a whole, and elide rather than accumulate an attacker-sized line.
+// The limit is deliberately larger than any legitimate Mirafold diagnostic;
+// stderr is bounded more tightly again before it reaches a crash dialog.
+const OUTPUT_LINE_CHARS = 16_384;
+const OUTPUT_LINE_ELISION = "[mirafold desktop] overlong daemon output line elided";
 
-/** Replace any `token=…` value with a placeholder. */
-export function redactTokens(text) {
-  return text.replace(TOKEN_RE, "$1<redacted>");
+// The daemon mints both values. The auth token grants local daemon access; the
+// relay pairing code grants remote session access. Anything that leaves this
+// process — mirrored child output or crash text — must strip both. The app's
+// stdout/stderr is captured by the system journal when launched from a desktop
+// menu, and a crash dialog is exactly what a user screenshots and shares.
+const TOKEN_RE = /([?&]token=)[^\s&"'<>]+/gi;
+const PAIRING_CODE_RE = /(\bpairing code\s*:\s*)[A-Za-z0-9_-]+/gi;
+
+/** Replace complete credential values in one logical piece of text. */
+export function redactCredentials(text) {
+  return text.replace(TOKEN_RE, "$1<redacted>").replace(PAIRING_CODE_RE, "$1<redacted>");
+}
+
+/**
+ * Turn arbitrarily chunked child output into credential-safe logical lines.
+ *
+ * `push()` returns only complete lines. `end()` safely releases a final line
+ * without a newline. Once a logical line crosses the memory bound, none of its
+ * prefix is released: the whole line becomes one fixed, non-secret marker.
+ */
+export class CredentialSafeLineStream {
+  #pending = "";
+  #dropping = false;
+  #ended = false;
+
+  push(text) {
+    if (this.#ended || !text) return "";
+
+    let safe = "";
+    let start = 0;
+    while (start < text.length) {
+      const newline = text.indexOf("\n", start);
+      const complete = newline !== -1;
+      const end = complete ? newline : text.length;
+      const part = text.slice(start, end);
+
+      if (!this.#dropping) {
+        if (this.#pending.length + part.length > OUTPUT_LINE_CHARS) {
+          this.#pending = "";
+          this.#dropping = true;
+        } else {
+          this.#pending += part;
+        }
+      }
+
+      if (!complete) break;
+      safe += this.#dropping
+        ? `${OUTPUT_LINE_ELISION}\n`
+        : `${redactCredentials(this.#pending)}\n`;
+      this.#pending = "";
+      this.#dropping = false;
+      start = newline + 1;
+    }
+    return safe;
+  }
+
+  end() {
+    if (this.#ended) return "";
+    this.#ended = true;
+    const safe = this.#dropping ? OUTPUT_LINE_ELISION : redactCredentials(this.#pending);
+    this.#pending = "";
+    this.#dropping = false;
+    return safe;
+  }
 }
 
 /**
  * Append `text`'s non-blank lines to `lines`, bounded by line count and line
- * length, with tokens stripped. Pure so the bound is testable.
+ * length. The live path passes stream-sanitized text; redacting again keeps
+ * this helper safe for complete standalone diagnostics and future callers.
  */
 export function appendStderr(lines, text) {
   const next = lines.slice();
-  for (const line of redactTokens(text).split("\n")) {
+  for (const line of redactCredentials(text).split("\n")) {
     if (line.trim()) next.push(line.slice(0, STDERR_LINE_CHARS));
   }
   return next.length > STDERR_LINES ? next.slice(-STDERR_LINES) : next;
@@ -100,6 +164,11 @@ function daemonPath() {
  */
 const URL_RE = /http:\/\/127\.0\.0\.1:\d+\/\S*(?=\s)/;
 
+/** Return the daemon's complete private startup URL, or null while incomplete. */
+export function findStartupUrl(text) {
+  return text.match(URL_RE)?.[0] ?? null;
+}
+
 /**
  * Kill `pid` and everything it spawned. The daemon starts the agent CLIs as
  * its own children, so signalling only the daemon leaves those running —
@@ -113,19 +182,104 @@ const URL_RE = /http:\/\/127\.0\.0\.1:\d+\/\S*(?=\s)/;
  */
 function killTree(pid, signal) {
   if (process.platform === "win32") {
-    spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
-    return;
+    const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+    // Fire-and-forget callers (a failed boot and ordinary app quit) must not
+    // turn a missing taskkill executable into an unhandled EventEmitter error.
+    killer.once("error", () => {});
+    return killer;
   }
   try {
     process.kill(-pid, signal);
   } catch {
     /* group already gone */
   }
+  return null;
+}
+
+function unixProcessGroupExists(pid) {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code !== "ESRCH";
+  }
+}
+
+function processExists(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code !== "ESRCH";
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    // A normal app quit may ignore stop()'s returned promise. Preserve the old
+    // behavior in that path: a cleanup poll alone must not hold Electron open.
+    timer.unref?.();
+  });
+}
+
+async function waitUntil(predicate, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (predicate()) {
+    if (Date.now() >= deadline) return false;
+    await delay(25);
+  }
+  return true;
+}
+
+/**
+ * Stop a complete daemon/agent process tree and report whether it is gone.
+ *
+ * This is stricter than merely signalling the tree. The updater must not start
+ * an installer while any process still has the old application files open.
+ * Ordinary lifecycle callers may ignore the Promise and retain the existing
+ * immediate-shutdown behavior; the update path awaits and checks it.
+ *
+ * @param {number} pid daemon/process-group leader
+ * @returns {Promise<boolean>} true only after clean tree termination is proven
+ */
+export async function terminateProcessTree(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return true;
+
+  if (process.platform === "win32") {
+    const killer = killTree(pid, "SIGTERM");
+    if (!killer) return !processExists(pid);
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (clean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolve(clean);
+      };
+      const timeout = setTimeout(() => {
+        killer.kill();
+        finish(false);
+      }, 10_000);
+      timeout.unref?.();
+      // Only taskkill's successful /T completion proves the descendants were
+      // included. A vanished leader after a taskkill error says nothing about
+      // children that may already have been re-parented, so fail closed.
+      killer.once("error", () => finish(false));
+      killer.once("close", (code) => finish(code === 0));
+    });
+  }
+
+  killTree(pid, "SIGTERM");
+  if (await waitUntil(() => unixProcessGroupExists(pid), 4000)) return true;
+  killTree(pid, "SIGKILL");
+  return waitUntil(() => unixProcessGroupExists(pid), 2000);
 }
 
 export class Daemon {
   #child = null;
   #stopping = false;
+  #stopPromise = null;
   #stderr = [];
 
   /** @param {(info: {code: number|null, signal: string|null, stderr: string}) => void} onCrash */
@@ -146,6 +300,7 @@ export class Daemon {
     if (this.#child) throw new Error("daemon already running");
     this.#stderr = [];
     this.#stopping = false;
+    this.#stopPromise = null;
 
     const env = await daemonEnv();
     // stop() may have landed while we awaited the login shell — the window
@@ -163,11 +318,26 @@ export class Daemon {
     });
     this.#child = child;
 
+    const safeStdout = new CredentialSafeLineStream();
+    const safeStderr = new CredentialSafeLineStream();
+    const forwardStdout = (text) => {
+      if (text) process.stdout.write(text);
+    };
+    const forwardStderr = (text) => {
+      if (!text) return;
+      process.stderr.write(text);
+      this.#stderr = appendStderr(this.#stderr, text);
+    };
+    const flushOutput = () => {
+      forwardStdout(safeStdout.end());
+      forwardStderr(safeStderr.end());
+    };
+
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (text) => {
-      process.stderr.write(redactTokens(text)); // still useful from a terminal
-      this.#stderr = appendStderr(this.#stderr, text);
+      forwardStderr(safeStderr.push(text));
     });
+    child.stderr.once("end", () => forwardStderr(safeStderr.end()));
 
     const url = await new Promise((resolve, reject) => {
       let tail = "";
@@ -186,20 +356,27 @@ export class Daemon {
 
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", (text) => {
-        // Mirrored redacted; `tail` below still matches against the real text,
-        // since the token is what makes the URL usable.
-        process.stdout.write(redactTokens(text));
+        // Only the sanitizer's output leaves this process. `tail` still sees
+        // the private text because the token is what makes the URL usable.
+        forwardStdout(safeStdout.push(text));
         if (settled) return;
         tail = (tail + text).slice(-4096); // one boot line, bounded
-        const match = tail.match(URL_RE);
-        if (match) done(resolve, match[0]);
+        const startupUrl = findStartupUrl(tail);
+        if (startupUrl) {
+          tail = "";
+          done(resolve, startupUrl);
+        }
       });
+      child.stdout.once("end", () => forwardStdout(safeStdout.end()));
 
       // Dying before it says anything is the common shape of a broken launch —
       // a missing dependency, an unreadable folder, a port walk that ran out.
-      child.once("exit", (code, signal) =>
-        done(reject, new Error(`the daemon exited (${signal ?? `code ${code}`}) before starting`)),
-      );
+      // `close`, unlike `exit`, waits for its output pipes, so the diagnostic
+      // buffer is complete before it is attached to the startup error.
+      child.once("close", (code, signal) => {
+        flushOutput();
+        done(reject, new Error(`the daemon exited (${signal ?? `code ${code}`}) before starting`));
+      });
       child.once("error", (err) => done(reject, err));
     }).catch((err) => {
       this.#child = null;
@@ -207,13 +384,15 @@ export class Daemon {
       // the whole tree, not just the daemon. Straight to SIGKILL: the boot
       // never completed, so there is nothing worth a graceful shutdown.
       if (child.pid) killTree(child.pid, "SIGKILL");
+      flushOutput();
       err.stderr = this.stderr;
       throw err;
     });
 
-    // Boot succeeded, so from here an exit is news. The listener above has
+    // Boot succeeded, so from here a close is news. The listener above has
     // already fired-or-not; this one owns the rest of the process's life.
-    child.once("exit", (code, signal) => {
+    child.once("close", (code, signal) => {
+      flushOutput();
       this.#child = null;
       if (this.#stopping) return; // we asked for it
       this.onCrash?.({ code, signal, stderr: this.stderr });
@@ -236,15 +415,11 @@ export class Daemon {
     // Set before the child check: start() consults it between its env await
     // and the spawn, so a stop that lands pre-spawn still takes effect.
     this.#stopping = true;
+    if (this.#stopPromise) return this.#stopPromise;
     const child = this.#child;
-    if (!child?.pid) return;
+    if (!child?.pid) return Promise.resolve(true);
     this.#child = null;
-
-    killTree(child.pid, "SIGTERM");
-    if (process.platform === "win32") return;
-    const grace = setTimeout(() => killTree(child.pid, "SIGKILL"), 4000);
-    // Don't hold the app open waiting to escalate a kill that may not be needed.
-    grace.unref?.();
-    child.once("exit", () => clearTimeout(grace));
+    this.#stopPromise = terminateProcessTree(child.pid);
+    return this.#stopPromise;
   }
 }
