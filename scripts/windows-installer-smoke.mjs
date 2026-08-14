@@ -117,13 +117,40 @@ function registrationExists(hive, view, installDirectory, spawn) {
   );
   if (result.error) throw new Error(`Windows ${hive} registration query could not run: ${result.error.message}`);
   invariant(result.signal === null, `Windows ${hive} registration query ended from signal ${result.signal}`);
-  if (result.status === 1) return false;
+  if (result.status === 1) {
+    const detail = String(result.stderr || result.stdout).trim();
+    invariant(
+      /unable to find the specified registry key or value|no matches found/i.test(detail),
+      `Windows ${hive} ${view}-bit registration query failed: ${detail || "no diagnostic"}`,
+    );
+    return false;
+  }
   invariant(result.status === 0, `Windows ${hive} registration query exited ${result.status}`);
   invariant(
     String(result.stdout).toLowerCase().includes(installDirectory.toLowerCase()),
     `Windows ${hive} registration query did not return the exact install path`,
   );
   return true;
+}
+
+function registrationDiagnostics(hive, view, spawn) {
+  const result = spawn(
+    "reg.exe",
+    ["query", `${hive}\\${UNINSTALL_ROOT}`, "/s", "/f", "Mirafold", "/d", `/reg:${view}`],
+    {
+      encoding: "utf8",
+      env: windowsEnvironment(),
+      maxBuffer: 1024 * 1024,
+      shell: false,
+      timeout: 30_000,
+      windowsHide: true,
+    },
+  );
+  if (result.error) return `query could not run: ${result.error.message}`;
+  const detail = String(result.stdout || result.stderr).trim();
+  if (result.status === 1) return "no Mirafold registration";
+  if (result.status !== 0) return `query exited ${result.status}: ${detail || "no diagnostic"}`;
+  return detail.slice(-4000);
 }
 
 function registrationViews(hive, installDirectory, spawn) {
@@ -153,6 +180,7 @@ export function verifyWindowsInstaller(
     platform = process.platform,
     temporaryDirectory = defaultTemporaryDirectory(),
     verifyInstalledApplication = verifyPackagedPaths,
+    progress = () => {},
   } = {},
 ) {
   invariant(platform === "win32" || platform === "windows", "NSIS lifecycle smoke requires Windows");
@@ -173,13 +201,24 @@ export function verifyWindowsInstaller(
   let failure = null;
   try {
     checkedCommand(paths.installer, silentInstallArguments(installDirectory), "silent current-user NSIS install", spawn);
+    progress("silent current-user installer exited successfully");
     invariant(existsSync(paths.executable) && lstatSync(paths.executable).isFile(), "installed Mirafold executable is missing");
     invariant(existsSync(paths.appDirectory) && lstatSync(paths.appDirectory).isDirectory(), "installed app directory is missing");
     invariant(existsSync(paths.uninstaller) && lstatSync(paths.uninstaller).isFile(), "installed Mirafold uninstaller is missing");
+    progress("installer produced the executable, app tree, and uninstaller");
 
     const userRegistration = registrationViews("HKCU", installDirectory, spawn);
     const machineRegistration = registrationViews("HKLM", installDirectory, spawn);
-    invariant(anyRegistration(userRegistration), "NSIS did not register the exact install under the current user");
+    progress(`exact registration views: ${JSON.stringify({ userRegistration, machineRegistration })}`);
+    if (!anyRegistration(userRegistration)) {
+      const diagnostics = {
+        hkcu64: registrationDiagnostics("HKCU", "64", spawn),
+        hkcu32: registrationDiagnostics("HKCU", "32", spawn),
+        hklm64: registrationDiagnostics("HKLM", "64", spawn),
+        hklm32: registrationDiagnostics("HKLM", "32", spawn),
+      };
+      throw new Error(`NSIS did not register the exact install under the current user: ${JSON.stringify(diagnostics)}`);
+    }
     invariant(!anyRegistration(machineRegistration), "NSIS registered the current-user install at machine scope");
 
     const installedApplication = verifyInstalledApplication({
@@ -191,8 +230,10 @@ export function verifyWindowsInstaller(
       spawn,
       temporaryDirectory,
     });
+    progress("installed bytes passed native-module and daemon lifecycle smoke");
 
     checkedCommand(paths.uninstaller, silentUninstallArguments(), "silent current-user NSIS uninstall", spawn);
+    progress("silent current-user uninstaller exited successfully");
     uninstalled = true;
     invariant(!existsSync(installDirectory), "NSIS uninstall left the installation directory behind");
     const userAfter = registrationViews("HKCU", installDirectory, spawn);
@@ -218,7 +259,9 @@ export function verifyWindowsInstaller(
   let cleanupFailure = null;
   if (!uninstalled && existsSync(paths.uninstaller)) {
     try {
+      progress("attempting cleanup uninstall after a failed proof");
       checkedCommand(paths.uninstaller, silentUninstallArguments(), "cleanup NSIS uninstall", spawn);
+      progress("cleanup uninstall exited successfully");
     } catch (error) {
       cleanupFailure = error;
     }
@@ -239,7 +282,9 @@ export function verifyWindowsInstaller(
 
 function main(args) {
   if (args.length !== 1) throw new Error("usage: windows-installer-smoke.mjs OUTPUT_DIRECTORY");
-  const report = verifyWindowsInstaller(args[0]);
+  const report = verifyWindowsInstaller(args[0], {
+    progress: (message) => process.stdout.write(`NSIS smoke: ${message}\n`),
+  });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 }
 
@@ -247,7 +292,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     main(process.argv.slice(2));
   } catch (error) {
-    process.stderr.write(`Windows installer smoke failed: ${error.message}\n`);
+    const nested = Array.isArray(error?.errors)
+      ? error.errors.map((item, index) => `  ${index + 1}. ${item?.message ?? String(item)}`).join("\n")
+      : "";
+    process.stderr.write(`Windows installer smoke failed: ${error.message}${nested ? `\n${nested}` : ""}\n`);
     process.exitCode = 1;
   }
 }
