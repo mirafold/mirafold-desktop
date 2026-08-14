@@ -60,7 +60,11 @@ function simulatedWindows({ verifyFailure = null } = {}) {
       if (hive === "HKCU" && registered) {
         return ok(`InstallLocation    REG_SZ    ${installDirectory}\r\n`);
       }
-      return { ...ok(), status: 1 };
+      return {
+        ...ok(),
+        status: 1,
+        stderr: "ERROR: The system was unable to find the specified registry key or value.",
+      };
     }
     throw new Error(`unexpected simulated command ${command}`);
   };
