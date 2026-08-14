@@ -593,6 +593,25 @@ still ~2.5 s, three consecutive clean runs; all ten rehearsal scenarios pass;
 completed Phases 3–5, 8–9, the maintenance pass, and the Phase 1–2 status
 narratives moved verbatim into `PLAN-ARCHIVE.md`.
 
+**Post-push correction, same day:** opening PR #1 revealed that GitHub had
+been rejecting `ci.yml` and `shell-intake.yml` at run creation on **every**
+push since they were written — `${{ runner.temp }}` inside JOB-level `env:`
+is not an available context there (`Unrecognized named-value: 'runner'`,
+0-second failures with no jobs), and the audit fix had copied the same idiom
+into `release.yml`, breaking the one workflow that had actually executed.
+The flaw stayed latent because neither broken workflow had ever been
+triggered for real: CI's push/PR filters target `main`, and scheduled or
+dispatched workflows run only from the default branch — exactly the "GitHub
+has not yet observed the new CI check identities" limit Steps 5.4/5.5
+recorded. All five job-level uses across the three workflows now create and
+export the isolated npm user config inside the toolchain step (`$RUNNER_TEMP`
+plus `$GITHUB_ENV`), a cross-workflow test forbids the runner context in
+job-level env (falsified: reintroducing the line fails it), and the presence
+pins moved to the new idiom. Suite **166/166**. Lesson recorded: local YAML
+parsing and text-pinning tests cannot validate GitHub's expression rules —
+only a real triggered run can, and a workflow that has never fired is
+unverified no matter how green the repo looks.
+
 ## Status
 
 **Phase 1 — the app itself: DONE (2026-08-02)** — Electron shell, daemon

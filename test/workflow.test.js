@@ -70,7 +70,8 @@ test("the build job verifies every updater asset before retaining it", () => {
 test("the build job installs with the script-free pinned npm toolchain", () => {
   const build = job("build");
   assert.match(build, /NPM_CONFIG_IGNORE_SCRIPTS: "true"/);
-  assert.match(build, /NPM_CONFIG_USERCONFIG: \$\{\{ runner\.temp \}\}\/mirafold-empty-npmrc/);
+  assert.match(build, /export NPM_CONFIG_USERCONFIG="\$RUNNER_TEMP\/mirafold-empty-npmrc"/);
+  assert.match(build, /NPM_CONFIG_USERCONFIG=\$NPM_CONFIG_USERCONFIG" >> "\$GITHUB_ENV"/);
   assert.match(build, /NPM_CONFIG_REGISTRY: https:\/\/registry\.npmjs\.org/);
   assert.match(build, /test "\$\(npm --version\)" = "12\.0\.2"/);
   assert.doesNotMatch(build, /cache:/);

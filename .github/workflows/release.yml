@@ -75,7 +75,6 @@ jobs:
             args: --win
     env:
       NPM_CONFIG_REGISTRY: https://registry.npmjs.org
-      NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/mirafold-empty-npmrc
       NPM_CONFIG_IGNORE_SCRIPTS: "true"
     steps:
       # Nothing in this job pushes, so don't leave a credential on disk for the
@@ -109,6 +108,12 @@ jobs:
       - name: Use the declared npm release toolchain
         run: |
           set -euo pipefail
+          # The runner context is step-scoped: using it in JOB-level
+          # env made GitHub reject the whole workflow at run creation
+          # ("Unrecognized named-value: runner", found 2026-08-14). Create the
+          # isolated npm user config here and persist it for later steps.
+          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/mirafold-empty-npmrc"
+          echo "NPM_CONFIG_USERCONFIG=$NPM_CONFIG_USERCONFIG" >> "$GITHUB_ENV"
           touch "$NPM_CONFIG_USERCONFIG"
           chmod 600 "$NPM_CONFIG_USERCONFIG"
           npm install --global npm@12.0.2 \

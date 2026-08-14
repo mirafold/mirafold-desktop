@@ -32,3 +32,26 @@ test("every workflow action is one reviewed immutable commit with its release co
   }
   assert.ok(uses > 0, "no workflow actions were inspected");
 });
+
+// Pins the 2026-08-14 failure: `runner.temp` inside JOB-level `env:` is not a
+// valid GitHub Actions context there — GitHub rejected every workflow carrying
+// it at run creation ("Unrecognized named-value: 'runner'", a 0-second failure
+// with no jobs), so pushes produced instant red runs and pull requests got no
+// checks at all. The runner context is step-scoped. This check keys on the
+// repository's fixed two-space indentation: job-level env entries sit at
+// exactly six spaces, step-level entries deeper.
+test("no workflow uses the runner context in job-level env", () => {
+  let jobEnvEntries = 0;
+  for (const workflow of workflows) {
+    for (const line of workflow.text.split("\n")) {
+      if (!/^ {6}[A-Z_]+:/.test(line)) continue;
+      jobEnvEntries += 1;
+      assert.doesNotMatch(
+        line,
+        /\$\{\{\s*runner\./,
+        `${workflow.name} uses the runner context in job-level env: ${line.trim()}`,
+      );
+    }
+  }
+  assert.ok(jobEnvEntries > 0, "no job-level env entries were inspected");
+});

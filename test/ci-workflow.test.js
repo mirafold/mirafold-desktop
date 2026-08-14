@@ -35,6 +35,7 @@ test("both CI platforms use the exact toolchain and verify dependencies before t
   assert.ok(installTool !== -1 && installTool < installTree);
   assert.ok(installTree < list && list < audit && audit < signatures && signatures < tests);
   assert.match(workflow, /test "\$\(npm --version\)" = "12\.0\.2"/);
+  assert.match(workflow, /export NPM_CONFIG_USERCONFIG="\$RUNNER_TEMP\/mirafold-empty-npmrc"/);
   assert.doesNotMatch(workflow, /cache:/);
   assert.doesNotMatch(workflow, /\bnpx\b/);
 });
