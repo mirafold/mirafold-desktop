@@ -9,7 +9,7 @@
 // checks because an Actions process cannot truthfully observe them.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -86,8 +86,14 @@ export function silentInstallArguments(installDirectory) {
   return ["/S", "/currentuser", "/no-desktop-shortcut", `/D=${installDirectory}`];
 }
 
-export function silentUninstallArguments() {
-  return ["/S", "/currentuser"];
+export function silentUninstallArguments(installDirectory) {
+  invariant(typeof installDirectory === "string" && path.isAbsolute(installDirectory), "NSIS uninstall path must be absolute");
+  invariant(!/[\0\r\n"]/u.test(installDirectory), "NSIS uninstall path contains forbidden command-line characters");
+  // electron-builder's own waited old-version removal copies the uninstaller
+  // outside $INSTDIR and keeps this NSIS _?= override last. That makes the
+  // observed process perform the removal instead of returning after a
+  // self-relocation handoff.
+  return ["/S", "/currentuser", `_?=${installDirectory}`];
 }
 
 export function windowsInstallerPaths(outputDirectory, version, installDirectory) {
@@ -215,6 +221,7 @@ export function verifyWindowsInstaller(
   const absoluteOutput = path.resolve(outputDirectory);
   const temporaryRoot = mkdtempSync(path.join(temporaryDirectory, "mirafold-nsis-smoke-"));
   const installDirectory = path.join(temporaryRoot, "installed");
+  const detachedUninstaller = path.join(temporaryRoot, "Mirafold-uninstaller-probe.exe");
   const paths = windowsInstallerPaths(absoluteOutput, desktopVersion, installDirectory);
   invariant(existsSync(paths.installer) && lstatSync(paths.installer).isFile(), "NSIS candidate is missing");
 
@@ -254,7 +261,15 @@ export function verifyWindowsInstaller(
     });
     progress("installed bytes passed native-module and daemon lifecycle smoke");
 
-    checkedCommand(paths.uninstaller, silentUninstallArguments(), "silent current-user NSIS uninstall", spawn);
+    copyFileSync(paths.uninstaller, detachedUninstaller);
+    invariant(lstatSync(detachedUninstaller).isFile(), "detached Mirafold uninstaller is missing");
+    progress("copied the uninstaller outside the installation directory");
+    checkedCommand(
+      detachedUninstaller,
+      silentUninstallArguments(installDirectory),
+      "silent current-user NSIS uninstall",
+      spawn,
+    );
     progress("silent current-user uninstaller exited successfully");
     invariant(waitForPathRemoval(installDirectory), "NSIS uninstall left the installation directory behind");
     progress("uninstaller removed the installation directory");
@@ -283,7 +298,14 @@ export function verifyWindowsInstaller(
   if (!uninstalled && existsSync(paths.uninstaller)) {
     try {
       progress("attempting cleanup uninstall after a failed proof");
-      checkedCommand(paths.uninstaller, silentUninstallArguments(), "cleanup NSIS uninstall", spawn);
+      if (!existsSync(detachedUninstaller)) copyFileSync(paths.uninstaller, detachedUninstaller);
+      invariant(lstatSync(detachedUninstaller).isFile(), "detached cleanup uninstaller is missing");
+      checkedCommand(
+        detachedUninstaller,
+        silentUninstallArguments(installDirectory),
+        "cleanup NSIS uninstall",
+        spawn,
+      );
       progress("cleanup uninstall exited successfully");
       invariant(waitForPathRemoval(installDirectory), "cleanup NSIS uninstall left the installation directory behind");
       progress("cleanup uninstall removed the installation directory");

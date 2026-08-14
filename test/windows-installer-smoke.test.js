@@ -49,9 +49,9 @@ function simulatedWindows({ verifyFailure = null, userRegistrationView = "both" 
       registered = true;
       return ok();
     }
-    if (path.basename(command) === "Uninstall Mirafold.exe") {
+    if (path.basename(command) === "Mirafold-uninstaller-probe.exe") {
       uninstalls += 1;
-      assert.deepEqual(args, ["/S", "/currentuser"]);
+      assert.deepEqual(args, ["/S", "/currentuser", `_?=${installDirectory}`]);
       registered = false;
       rmSync(installDirectory, { recursive: true, force: true });
       return ok();
@@ -107,9 +107,14 @@ test("silent NSIS arguments force current-user mode and keep /D last", () => {
     "/no-desktop-shortcut",
     `/D=${installDirectory}`,
   ]);
-  assert.deepEqual(silentUninstallArguments(), ["/S", "/currentuser"]);
+  assert.deepEqual(silentUninstallArguments(installDirectory), [
+    "/S",
+    "/currentuser",
+    `_?=${installDirectory}`,
+  ]);
   assert.throws(() => silentInstallArguments("relative"), /must be absolute/);
   assert.throws(() => silentInstallArguments(`${installDirectory}\nnext`), /forbidden/);
+  assert.throws(() => silentUninstallArguments("relative"), /must be absolute/);
 });
 
 test("Windows installer paths name the built and installed NSIS files exactly", () => {
