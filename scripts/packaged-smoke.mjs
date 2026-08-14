@@ -291,7 +291,12 @@ async function verifyWindowsCrashOwnership(imported) {
     }
     invariant(unreachableAfterStop, "daemon URL remained reachable after process-tree shutdown");
     invariant(crash === null, "intentional daemon shutdown was reported as a crash");
+    // Only the real packaged application carries the launch-spec, bootstrap,
+    // Job wrapper, and genuine node-pty this proof needs; the caller decides
+    // (2026-08-14: the first native Windows run showed a bare platform check
+    // here made the minimal fixture app fail on Windows runners).
     const windowsCrashTreeStopped = process.platform === "win32"
+      && process.env.MIRAFOLD_PROBE_CRASH_OWNERSHIP === "1"
       ? await verifyWindowsCrashOwnership(imported)
       : null;
 
@@ -422,6 +427,12 @@ export function runPackagedDaemonProbe({
   invariant(typeof temporaryDirectory === "string" && path.isAbsolute(temporaryDirectory), "probe temp path must be absolute");
   invariant(lstatSync(temporaryDirectory).isDirectory(), "probe temp path must be a directory");
 
+  // The Windows crash-ownership proof needs the complete packaged surface —
+  // launch spec, bootstrap, Job wrapper, real node-pty — so it applies exactly
+  // where the true-report requirement below applies: the real Mirafold.exe.
+  const requireWindowsCrashOwnership = (platform === "win32" || platform === "windows")
+    && path.basename(executable).toLowerCase() === "mirafold.exe";
+
   const probeRoot = mkdtempSync(path.join(temporaryDirectory, "mirafold-packaged-daemon-"));
   const project = path.join(probeRoot, "project");
   mkdirSync(project);
@@ -430,6 +441,7 @@ export function runPackagedDaemonProbe({
       cwd: project,
       encoding: "utf8",
       env: minimalEnvironment(appDirectory, {
+        MIRAFOLD_PROBE_CRASH_OWNERSHIP: requireWindowsCrashOwnership ? "1" : "0",
         MIRAFOLD_PROBE_PROJECT: project,
         MIRAFOLD_LOG_FILE: "",
         MIRAFOLD_LOCAL_DISCOVERY: "off",
@@ -467,7 +479,7 @@ export function runPackagedDaemonProbe({
     invariant(report.unreachableAfterStop === true, "packaged daemon remained reachable after stop");
     invariant(report.crashReported === false, "packaged daemon stop was reported as a crash");
 
-    if ((platform === "win32" || platform === "windows") && path.basename(executable).toLowerCase() === "mirafold.exe") {
+    if (requireWindowsCrashOwnership) {
       invariant(report.windowsCrashTreeStopped === true, "packaged Windows crash tree was not stopped");
       const executableProcessesAfterProbe = windowsExecutableProcessCount(executable, spawn);
       invariant(executableProcessesAfterProbe === 0, `${executableProcessesAfterProbe} packaged Mirafold processes remained`);

@@ -612,6 +612,18 @@ parsing and text-pinning tests cannot validate GitHub's expression rules —
 only a real triggered run can, and a workflow that has never fired is
 unverified no matter how green the repo looks.
 
+That first real CI run then paid for itself immediately: Linux passed, and
+Windows failed on the Phase 9 crash-ownership probe's **first-ever native
+execution** — the packaged-smoke child keyed on the bare platform, so the
+minimal fixture app (fake daemon module, fake node-pty, no bootstrap or Job
+wrapper) was asked to prove Job-Object crash ownership it cannot support.
+The proof now applies exactly where its true-report requirement already
+applied — the real `Mirafold.exe` — via an explicit
+`MIRAFOLD_PROBE_CRASH_OWNERSHIP` flag the outer probe computes and the
+mocked Windows test pins; the fixture lifecycle test expects `null` on every
+host. Real-package behavior is unchanged, and the probe's first native
+result still belongs to the next non-publishing dispatch run.
+
 ## Status
 
 **Phase 1 — the app itself: DONE (2026-08-02)** — Electron shell, daemon

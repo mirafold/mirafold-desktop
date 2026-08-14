@@ -167,6 +167,10 @@ test("the packaged runtime starts, reaches, and completely stops its daemon", (t
   assert.equal(report.processTreeStopped, true);
   assert.equal(report.unreachableAfterStop, true);
   assert.equal(report.crashReported, false);
+  // Null on every host: the fixture is not the real Mirafold.exe, so the
+  // Windows Job-Object crash-ownership proof is deliberately out of scope here
+  // (2026-08-14: the first native Windows CI run failed when the child probe
+  // keyed on the platform alone and demanded surfaces the fixture lacks).
   assert.equal(report.windowsCrashTreeStopped, null);
 });
 
@@ -199,8 +203,8 @@ test("the Windows packaged daemon smoke uses native tasklist and proves no Miraf
     appDirectory: app,
     platform: "windows",
     temporaryDirectory: root,
-    spawn(command, args) {
-      calls.push({ command, args });
+    spawn(command, args, options) {
+      calls.push({ command, args, options });
       if (calls.length === 1) {
         return { error: null, signal: null, status: 0, stderr: "", stdout: daemonSmokeText() };
       }
@@ -216,10 +220,13 @@ test("the Windows packaged daemon smoke uses native tasklist and proves no Miraf
 
   assert.equal(result.executableProcessesAfterProbe, 0);
   assert.equal(result.windowsCrashTreeStopped, true);
-  assert.deepEqual(calls[1], {
-    command: "tasklist.exe",
-    args: ["/FI", "IMAGENAME eq Mirafold.exe", "/FO", "CSV", "/NH"],
-  });
+  assert.equal(
+    calls[0].options.env.MIRAFOLD_PROBE_CRASH_OWNERSHIP,
+    "1",
+    "the real Windows package must be told to prove Job-Object crash ownership",
+  );
+  assert.equal(calls[1].command, "tasklist.exe");
+  assert.deepEqual(calls[1].args, ["/FI", "IMAGENAME eq Mirafold.exe", "/FO", "CSV", "/NH"]);
 });
 
 test("the Windows packaged daemon smoke rejects a remaining Mirafold image", (t) => {
