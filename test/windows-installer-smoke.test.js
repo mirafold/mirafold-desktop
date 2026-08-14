@@ -7,6 +7,7 @@ import {
   silentInstallArguments,
   silentUninstallArguments,
   verifyWindowsInstaller,
+  waitForPathRemoval,
   windowsInstallerPaths,
 } from "../scripts/windows-installer-smoke.mjs";
 
@@ -29,7 +30,7 @@ function fixture(t) {
   return { root, output, temporaryDirectory };
 }
 
-function simulatedWindows({ verifyFailure = null } = {}) {
+function simulatedWindows({ verifyFailure = null, userRegistrationView = "both" } = {}) {
   let installDirectory = null;
   let registered = false;
   let installs = 0;
@@ -57,14 +58,16 @@ function simulatedWindows({ verifyFailure = null } = {}) {
     }
     if (command === "reg.exe") {
       const hive = args[1].split("\\")[0];
-      if (hive === "HKCU" && registered) {
+      const view = args.find((argument) => argument.startsWith("/reg:"))?.slice(5);
+      assert.deepEqual(args.slice(2), ["/s", `/reg:${view}`]);
+      if (
+        hive === "HKCU"
+        && registered
+        && (userRegistrationView === "both" || userRegistrationView === view)
+      ) {
         return ok(`InstallLocation    REG_SZ    ${installDirectory}\r\n`);
       }
-      return {
-        ...ok(),
-        status: 1,
-        stderr: "ERROR: The system was unable to find the specified registry key or value.",
-      };
+      return ok(`${hive}\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\r\n`);
     }
     throw new Error(`unexpected simulated command ${command}`);
   };
@@ -122,7 +125,7 @@ test("Windows installer paths name the built and installed NSIS files exactly", 
 
 test("the NSIS probe proves per-user registration, installed runtime, and complete uninstall", (t) => {
   const f = fixture(t);
-  const simulated = simulatedWindows();
+  const simulated = simulatedWindows({ userRegistrationView: "32" });
   const report = verifyWindowsInstaller(f.output, {
     root: f.root,
     platform: "windows",
@@ -139,6 +142,33 @@ test("the NSIS probe proves per-user registration, installed runtime, and comple
   assert.equal(report.uninstallCompleted, true);
   assert.equal(report.installDirectoryRemoved, true);
   assert.equal(report.registrationRemoved, true);
+});
+
+test("NSIS self-deletion polling waits for the installation path to disappear", () => {
+  const target = path.resolve("fixture-installed");
+  let checks = 0;
+  let clock = 0;
+  const pauses = [];
+  assert.equal(waitForPathRemoval(target, {
+    timeoutMs: 250,
+    exists: () => {
+      checks += 1;
+      return checks < 3;
+    },
+    now: () => clock,
+    pause: (milliseconds) => {
+      pauses.push(milliseconds);
+      clock += milliseconds;
+    },
+  }), true);
+  assert.deepEqual(pauses, [100, 100]);
+
+  assert.equal(waitForPathRemoval(target, {
+    timeoutMs: 100,
+    exists: () => true,
+    now: () => clock,
+    pause: (milliseconds) => { clock += milliseconds; },
+  }), false);
 });
 
 test("a rejected installed runtime still receives a silent cleanup uninstall", (t) => {
