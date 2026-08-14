@@ -75,6 +75,10 @@ test("a manual release rehearsal cannot enter the publishing job", () => {
   const header = workflow.slice(0, workflow.indexOf("\njobs:"));
   const release = job("release");
   assert.match(header, /workflow_dispatch:/);
+  assert.match(
+    header,
+    /fail_platform:\s*\n\s+description: .+\n\s+required: true\s*\n\s+default: none\s*\n\s+type: choice\s*\n\s+options:\s*\n\s+- none\s*\n\s+- linux\s*\n\s+- windows/,
+  );
   assert.match(release, /if: github\.event_name == 'push'/);
   assert.equal(workflow.match(/contents: write/g)?.length, 1);
   for (const name of ["build", "attest"]) {
@@ -83,6 +87,19 @@ test("a manual release rehearsal cannot enter the publishing job", () => {
     assert.doesNotMatch(value, /\bgit push\b/);
   }
 });
+
+for (const platform of ["linux", "windows"]) {
+  test(`a manual ${platform} failure rehearsal stops before dependency code`, () => {
+    const build = job("build");
+    const injection = build.indexOf("name: Inject requested rehearsal failure");
+    const install = build.indexOf("run: npm ci");
+    assert.ok(injection !== -1 && injection < install);
+    assert.match(
+      build.slice(injection, install),
+      /github\.event_name == 'workflow_dispatch' &&\s*\n\s+inputs\.fail_platform == matrix\.name/,
+    );
+  });
+}
 
 test("provenance receives OIDC only after both native builds and cannot publish", () => {
   const attest = job("attest");

@@ -179,7 +179,10 @@ retry state, publication isolation, and the exact Shell identity carried from
 reviewed intake into the proposed native package. A manual dispatch of the
 `Release` workflow is the separate native Linux/Windows rehearsal: it builds,
 smoke-checks, verifies, retains, and attests the nine files, while the event gate
-keeps its only `contents: write` publication job skipped.
+keeps its only `contents: write` publication job skipped. Its manual form also
+accepts `fail_platform=linux` or `fail_platform=windows`; the selected native
+leg fails before dependency code, proving that either platform failure prevents
+provenance and publication while the other matrix leg is still allowed to run.
 
 Every workflow action is pinned to a reviewed commit SHA. Normal pushes and
 pull requests run stable `test (linux)` and `test (windows)` checks, while

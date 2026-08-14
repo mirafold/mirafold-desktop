@@ -43,10 +43,16 @@ export const RELEASE_REHEARSAL_CHECKS = Object.freeze([
   check("failed-linux", [[
     "test/intake-workflow.test.js",
     "a failed Linux build cannot reach provenance or the release writer",
+  ], [
+    "test/workflow.test.js",
+    "a manual linux failure rehearsal stops before dependency code",
   ]]),
   check("failed-windows", [[
     "test/intake-workflow.test.js",
     "a failed Windows build cannot reach provenance or the release writer",
+  ], [
+    "test/workflow.test.js",
+    "a manual windows failure rehearsal stops before dependency code",
   ]]),
   check("stale-main", [[
     "test/release-coordinator.test.js",

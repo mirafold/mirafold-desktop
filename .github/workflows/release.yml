@@ -26,6 +26,16 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch: # rehearsal — builds and uploads artifacts, no release
+    inputs:
+      fail_platform:
+        description: Intentionally fail one native build to rehearse downstream gating
+        required: true
+        default: none
+        type: choice
+        options:
+          - none
+          - linux
+          - windows
 
 # Least privilege by default; only the release job below opts up to write.
 #
@@ -72,6 +82,12 @@ jobs:
       - name: Stable tag ↔ version check
         if: github.event_name == 'push'
         run: node scripts/release-contract.mjs identity "${{ github.ref_name }}"
+
+      - name: Inject requested rehearsal failure
+        if: >-
+          github.event_name == 'workflow_dispatch' &&
+          inputs.fail_platform == matrix.name
+        run: node -e "process.exit(1)"
 
       - run: npm ci
       - run: npm test
