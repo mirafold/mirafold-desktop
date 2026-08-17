@@ -57,13 +57,13 @@ discover its successor, so moving from that build still requires one manual
 download. The updater refuses lower Desktop versions; a recovery release uses
 a new, higher Desktop version containing the restored known-good source.
 
-**Windows** — `Mirafold-Setup-*.exe`. It is configured as a visible,
+**Windows (beta)** — `Mirafold-Setup-*.exe`. It is configured as a visible,
 current-user installer with an editable destination. The hosted Windows probe
 has proved silent installation and registration only for that user, followed
 by clean runtime and uninstall. SmartScreen, the visible wizard, elevation,
 and a human-driven update remain pending real-Windows observations.
 
-**macOS** — no package is built or supported. Apple allows a user to override
+**macOS** — not available: no package is built or supported. Apple allows a user to override
 the unidentified-developer block manually, but Mirafold will not call that a
 normal supported install path. Direct Mac distribution needs Developer ID
 signing, notarization, packaging, and real-Mac testing first.

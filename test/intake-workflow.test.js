@@ -255,7 +255,7 @@ test("the writer pushes branch and annotated tag together, then publishes only a
   const value = withoutComments(job("release"));
   const prepare = value.indexOf("release-coordinator.mjs prepare");
   const preflight = value.indexOf("release-coordinator.mjs remote");
-  const commit = value.indexOf('commit -m "$RELEASE_COMMIT_MESSAGE"');
+  const commit = value.indexOf('commit -s -m "$RELEASE_COMMIT_SUBJECT"');
   const tag = value.indexOf('tag -a "$RELEASE_TAG"');
   const local = value.indexOf("release-coordinator.mjs local");
   const push = value.indexOf("git push --atomic origin");

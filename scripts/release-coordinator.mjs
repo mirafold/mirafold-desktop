@@ -118,10 +118,25 @@ function assertOnlyPreparedFiles(root) {
   invariant(runGit(root, ["diff", "--check"]).stdout === "", "prepared source fails git diff --check");
 }
 
-export function automatedCommitMessage(desktopVersion, shellVersion) {
+// The identity the writer commits and signs off as. Every commit on `main`
+// carries a Developer Certificate of Origin sign-off (docs/RELEASING.md); the
+// automated release commit is no exception, so the DCO check stays green on
+// main and the trailer below is part of the reviewed commit message.
+export const AUTOMATED_AUTHOR = Object.freeze({
+  name: "github-actions[bot]",
+  email: "41898282+github-actions[bot]@users.noreply.github.com",
+});
+
+/** The single-line subject the workflow hands to `git commit -s -m`. */
+export function automatedCommitSubject(desktopVersion, shellVersion) {
   stableVersion(desktopVersion, "Desktop version");
   stableVersion(shellVersion, "Shell version");
   return `release: Desktop ${desktopVersion} with Shell ${shellVersion}`;
+}
+
+/** The complete commit message `git commit -s -m <subject>` produces. */
+export function automatedCommitMessage(desktopVersion, shellVersion) {
+  return `${automatedCommitSubject(desktopVersion, shellVersion)}\n\nSigned-off-by: ${AUTOMATED_AUTHOR.name} <${AUTOMATED_AUTHOR.email}>`;
 }
 
 export function automatedReleaseNotes(manifest) {
@@ -217,7 +232,7 @@ export async function prepareReleaseCandidate({
     tag: plan.tag,
     "desktop-version": plan.desktopVersion,
     "shell-version": plan.shell.version,
-    "commit-message": plan.commitMessage,
+    "commit-subject": automatedCommitSubject(plan.desktopVersion, plan.shell.version),
     "tag-message": plan.tagMessage,
     "release-title": plan.releaseTitle,
   });
