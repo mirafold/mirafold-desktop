@@ -8,15 +8,12 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { invariant } from "./shared.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(HERE);
 const DEFAULT_POLICY = path.join(ROOT, ".github", "repository-hardening.json");
 const API_VERSION = "2026-03-10";
-
-function invariant(condition, message) {
-  if (!condition) throw new Error(message);
-}
 
 function sortedJson(value) {
   if (Array.isArray(value)) return value.map(sortedJson);

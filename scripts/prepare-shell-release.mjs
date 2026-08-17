@@ -28,17 +28,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { canonicalIntegrity, invariant, jsonText, STABLE_VERSION } from "./shared.mjs";
 
 export const PUBLIC_NPM_REGISTRY = "https://registry.npmjs.org";
 export const REQUIRED_NPM_VERSION = "12.0.2";
 const LATEST_URL = `${PUBLIC_NPM_REGISTRY}/mirafold/latest`;
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
-
-function invariant(condition, message) {
-  if (!condition) throw new Error(message);
-}
-
 function parseJson(text, label) {
   let value;
   try {
@@ -68,15 +63,6 @@ export function compareStableVersions(left, right) {
 export function nextPatchVersion(version) {
   const [major, minor, patch] = stableVersionParts(version, "Desktop version");
   return `${major}.${minor}.${patch + 1n}`;
-}
-
-function canonicalIntegrity(value, label) {
-  invariant(typeof value === "string" && value.startsWith("sha512-"), `${label} is not SHA-512 integrity`);
-  const encoded = value.slice("sha512-".length);
-  invariant(/^[A-Za-z0-9+/]+={0,2}$/.test(encoded), `${label} is not canonical base64`);
-  const decoded = Buffer.from(encoded, "base64");
-  invariant(decoded.length === 64 && decoded.toString("base64") === encoded, `${label} is not a 64-byte SHA-512`);
-  return value;
 }
 
 function expectedTarball(version) {
@@ -291,10 +277,6 @@ async function refreshLockWithNpm({ directory, shellVersion }) {
     }),
   });
   invariant(!existsSync(path.join(directory, "node_modules")), "lock refresh unexpectedly created node_modules");
-}
-
-function jsonText(value) {
-  return `${JSON.stringify(value, null, 2)}\n`;
 }
 
 function writeReplacement(target, text, suffix) {

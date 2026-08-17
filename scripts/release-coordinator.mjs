@@ -10,7 +10,6 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
-  appendFileSync,
   createReadStream,
   existsSync,
   lstatSync,
@@ -29,6 +28,7 @@ import {
   expectedReleaseAssets,
   verifyCompleteArtifacts,
 } from "./release-contract.mjs";
+import { appendGithubOutputs, exactKeys, invariant, jsonText, sha256, stableVersion } from "./shared.mjs";
 
 export const RELEASE_PLAN_SCHEMA_VERSION = 2;
 export const RELEASE_REPOSITORY = "mirafold/mirafold-desktop";
@@ -37,35 +37,11 @@ export const RELEASE_BRANCH = "main";
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const GIT_OBJECT = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
-const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const PLAN_LIMIT = 1024 * 1024;
-
-function invariant(condition, message) {
-  if (!condition) throw new Error(message);
-}
-
-function exactKeys(value, expected, label) {
-  invariant(value && typeof value === "object" && !Array.isArray(value), `${label} must be an object`);
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  invariant(
-    actual.length === wanted.length && actual.every((key, index) => key === wanted[index]),
-    `${label} keys differ; expected [${wanted.join(", ")}], found [${actual.join(", ")}]`,
-  );
-}
-
-function stableVersion(value, label) {
-  invariant(typeof value === "string" && STABLE_VERSION.test(value), `${label} must be a stable x.y.z version`);
-  return value;
-}
 
 function gitObject(value, label) {
   invariant(typeof value === "string" && GIT_OBJECT.test(value), `${label} must be a 40-hex Git object`);
   return value;
-}
-
-function sha256(value) {
-  return createHash("sha256").update(value).digest("hex");
 }
 
 function sha256File(file) {
@@ -83,10 +59,6 @@ function canonicalReleaseNotes(value) {
   return Buffer.from(value).toString("utf8").replaceAll("\r\n", "\n").trimEnd() + "\n";
 }
 
-function jsonText(value) {
-  return `${JSON.stringify(value, null, 2)}\n`;
-}
-
 function writeExclusive(file, value, label) {
   invariant(!existsSync(file), `${label} already exists`);
   writeFileSync(file, value, { flag: "wx", mode: 0o600 });
@@ -94,18 +66,6 @@ function writeExclusive(file, value, label) {
 
 // Keep this small adapter local instead of expanding Shell intake's exported
 // interface solely to share it across two independently reviewed boundaries.
-function appendGithubOutputs(file, entries) {
-  if (file === undefined || file === null) return;
-  invariant(typeof file === "string" && file.length > 0, "GitHub output path is invalid");
-  invariant(lstatSync(file).isFile(), "GitHub output path must be a regular file");
-  const lines = Object.entries(entries).map(([key, value]) => {
-    invariant(/^[a-z][a-z0-9-]*$/.test(key), `invalid GitHub output name ${key}`);
-    invariant(typeof value === "string" && !value.includes("\n") && !value.includes("\r"), `invalid GitHub output ${key}`);
-    return `${key}=${value}`;
-  });
-  appendFileSync(file, `${lines.join("\n")}\n`);
-}
-
 function runGit(root, args, { allowExit = [] } = {}) {
   const result = spawnSync("git", args, {
     cwd: root,
