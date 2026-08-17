@@ -16,6 +16,24 @@ starts to look like product behavior, it belongs upstream instead.
 build is that it runs the exact artifact npm users install; a local divergence
 destroys that and creates a second thing to keep in sync.
 
+## Git workflow
+
+- `main` is the production mirror and moves only at release time; `next` is
+  staging. Normal work branches (`feature/*`, `fix/*`, `refactor/*`,
+  `docs/*`) start from `next` and open pull requests back into `next`.
+- **Every commit carries `Signed-off-by`** (the DCO check is required on both
+  protected branches). Commit with `git commit -s`; `CONTRIBUTING.md` has a
+  local hook that appends it automatically, and `git rebase --signoff`
+  repairs a branch that missed it.
+- A pull request stays open even after its checks pass. Complete the
+  requested review and follow-up work there, then ask Kyle explicitly whether
+  to merge when it appears ready. Opening the pull request or getting green
+  checks is not merge approval; merge only after Kyle says yes.
+- `docs/RELEASING.md` is the canonical branch and release runbook: automated
+  Shell-intake releases push straight to `main` through the ruleset bypass;
+  manual Desktop releases go `release/x.y.z` → PR into `main` → a signed `v*`
+  tag pushed by Kyle → the `Release` workflow, then a `main` → `next` sync.
+
 ## Hard constraints
 
 - **The daemon runs as a child process, never in-process.** Crash isolation,

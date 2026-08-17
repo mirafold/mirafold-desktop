@@ -526,6 +526,26 @@ Both refactors completed 2026-08-14 (Shell-intake validation decomposition;
 centralized packaged/NSIS smoke preconditions; zero behavior change) →
 archived in PLAN-ARCHIVE.md.
 
+### Maintenance pass — 2026-08-17 modularity and deduplication
+
+Completed 2026-08-17, zero behavior change, 166/166 tests green, plus a
+dev-checkout daemon start/403-without-token/clean-stop probe through the new
+module graph. `src/daemon.js` (757 lines) split three ways: `daemon.js` keeps
+the launch spec, URL contract, and `Daemon` lifecycle; `daemon-output.js` owns
+credential redaction and the bounded line stream; `process-tree.js` owns
+Linux identity tracking, the ledger, and `terminateProcessTree`. Seven
+release/verification scripts now import their shared standard-library helpers
+(`invariant`, `STABLE_VERSION`, `readJson`, `exactKeys`, `sha256`,
+`canonicalIntegrity`, `appendGithubOutputs`, …) from one `scripts/shared.mjs`;
+`release-contract.mjs` deliberately stays self-contained because it is the only
+verifier that runs beside the write token, and the import-scan tests now pin
+that `shared.mjs` itself is standard-library only. `platform-updaters.js`
+factors the duplicated `quitAndInstall` preamble; `updater.js` collapses the
+two once-per-version prompt state machines into one `versionPrompt()` helper;
+`main.js` uses one parented `showMessage` for every dialog. The previously
+orphaned `scripts/linux-update-probe.mjs` is now `npm run update:probe:linux`
+and documented in the README.
+
 ### Phase 8 — repair the updater and process-lifecycle correctness gaps
 
 All three steps completed 2026-08-14 (identity-checked Linux descendant
@@ -674,32 +694,70 @@ archived in PLAN-ARCHIVE.md.*
 - **macOS is deferred until Mirafold "takes off"** (Kyle's words, 2026-08-02) —
   a revenue trigger, not a technical blocker.
 
+## Launch plan — decided 2026-08-17 (Kyle)
+
+**Linux is the public launch; Windows ships alongside it labelled beta; macOS
+is stated as not available.** The paid metered tier is **deferred to after
+the Desktop launch** — this reverses the 2026-08-05 sequencing that made it a
+pre-launch gate. It is cleanly separable: the tier is accounts + subscription
+built upstream and on the site, and when it ships Shell intake carries it into
+a new Desktop release that installed apps pick up themselves. Until then the
+launch audience is people who already have a local Codex/ChatGPT login or an
+API key in their environment, which is stated plainly in the README and the
+release notes. Launch copy must also carry the two Linux caveats: `.deb`
+first, AppImage needs FUSE 2, `.tar.gz` is the no-FUSE fallback.
+
+The **held `mirafold` commit `6d31c39` is already on that repo's `origin/main`**
+(verified 2026-08-17: contained by `origin/main` and 18 other remote
+branches) — the old "push it at announcement time" item is closed; nothing is
+held there anymore.
+
+The repository now follows the Shell repository's branch/release process
+(`docs/RELEASING.md`, adopted 2026-08-17): `main` is the production mirror,
+`next` is staging, every commit is DCO-signed, manual Desktop releases go
+`release/x.y.z` → PR into `main` → signed tag by Kyle, and automated Shell
+intake keeps its direct, ruleset-bypassing push. Two rulesets
+(`main-release-safety`, `next-staging-safety`) plus the `DCO` required check
+are in `.github/repository-hardening.json` and applied by
+`scripts/repository-hardening.mjs`.
+
 ## Next
 
-1. **Complete `WINDOWS-TESTING.md` with a human — the top priority.** The hosted
-   runner has proved the silent per-user installer, real bundled daemon/native
-   modules, process-tree stop, and uninstall. Session A still needs a person to
-   observe the exact retained private candidate's Windows reputation response,
-   visible installer, folder picker, real Codex turn, ConPTY command, watcher,
-   ordinary quit, and uninstall. Session B later needs the separately approved
-   public bridge and a higher public release to prove anonymous acquisition and
-   the production update/restart path. The only action currently assigned to
-   Kyle is to identify one consenting Windows 10/11 x64 tester with a working
-   local Codex login and no existing Mirafold Desktop installation.
-2. **Then, and only then, announce — and the announcement is now a launch of
-   its own (Kyle, 2026-08-05).** The desktop app launches separately from the
-   core product's 2026-07-31 launch, and its launch waits on the paid
-   metered-access tier (accounts + a flat subscription with a capped usage
-   allowance, so non-technical users never touch an API key — built
-   server-side and upstream, nothing in this repo), because zero-setup convenience is the story the launch tells.
-   Requires Kyle's explicit go. A download page on mirafold.com lives in the
-   site repo, not here.
-3. **Push the held `genui-shell` commit.** `6d31c39` corrects `POST-RELEASE.md`
-   there, but that file ships in the **public** `mirafold/mirafold` repo, so
-   pushing it announces this app's existence. Held deliberately; push it when
-   the announcement happens.
+1. **Land the 2026-08-17 launch-readiness branch through the new process** —
+   PR into `next`, Kyle approves the merge, then it becomes the base of the
+   bridge release below. Kyle's one-time GitHub actions (each is a click, none
+   is code):
+   - Add this repository to the org's **DCO** GitHub App installation
+     (org Settings → GitHub Apps → DCO → Configure → Repository access → add
+     `mirafold-desktop`), so the `DCO` check runs here.
+   - Run `node scripts/repository-hardening.mjs audit`, then
+     `node scripts/repository-hardening.mjs apply --confirm mirafold/mirafold-desktop`
+     from a shell where `gh` is logged in as the repo admin. It refuses to
+     activate until `main` has green `test (linux)`, `test (windows)` and
+     `DCO` checks — so it runs after the first PR-driven merge to `main`.
+2. **Complete `WINDOWS-TESTING.md` with a human** on the bridge candidate.
+   Windows ships as beta either way; a green human pass upgrades the label
+   later, a red one produces fixes through the normal flow.
+3. **The bridge release** — first updater-capable Desktop version, via
+   `docs/RELEASING.md` Path B (`release/x.y.z` from `next`, signed tag on
+   `main`, Kyle approves the `manual-release` environment). Suggested version
+   `0.2.0`: the updater is a new capability.
+4. **Enable automation**: set the repository variable
+   `MIRAFOLD_AUTOMATED_RELEASES` to `enabled` (Settings → Secrets and
+   variables → Actions → Variables). From then on Shell releases become
+   Desktop releases with no routine work.
+5. **Download page on mirafold.com** (site repo, not here) with the Linux
+   caveats, Windows-beta and no-macOS statements, and the credential
+   requirement, then **announce**. Requires Kyle's explicit go.
 
 ## Known gaps, not yet scheduled
+
+- **One process-timing test flaked once in seven full-suite runs (2026-08-17):**
+  `retained Linux identities clean up a separate-session descendant after its
+  leader crashes` (`test/daemon.test.js`) failed once under the full parallel
+  suite and passed 6/6 full runs and 3/3 file-only runs afterwards. Not
+  chased: nothing in that pass touched the code under test. If it recurs,
+  characterize the rate before changing anything.
 
 - **Credential entry has no Desktop GUI — PARKED (Kyle, 2026-08-03), not
   scheduled.** Provider policy belongs to the exact bundled Shell and must not
