@@ -443,15 +443,31 @@ async function waitUntil(predicate, timeoutMs) {
  * @param {number} pid daemon/process-group leader
  * @param {Array<object>} trackedIdentities Linux identities retained before a
  *   daemon crash could erase their ancestry
- * @param {{termTimeoutMs?: number, killTimeoutMs?: number, ledgerFile?: string|null}} timings
- *   bounded waits plus the private Linux creation ledger; exposed so focused
- *   tests do not spend four seconds escalating
+ * @param {{termTimeoutMs?: number, killTimeoutMs?: number, ledgerFile?: string|null, windowsJobOwned?: boolean}} timings
+ *   bounded waits, the private Linux creation ledger, and whether a Windows
+ *   leader owns its descendants through a kill-on-close Job Object; exposed so
+ *   focused tests do not spend four seconds escalating
  * @returns {Promise<boolean>} true only after clean tree termination is proven
  */
 export async function terminateProcessTree(pid, trackedIdentities = [], timings = {}) {
   if (!Number.isInteger(pid) || pid <= 0) return true;
 
   if (process.platform === "win32") {
+    if (timings.windowsJobOwned === true) {
+      // After daemon startup, this PID is the PowerShell wrapper that created,
+      // configured, and exclusively holds the kill-on-close Job handle. End
+      // that wrapper directly: Windows then synchronously owns termination of
+      // every daemon/ConPTY descendant in the Job. Using taskkill /T here is
+      // both redundant and unreliable for packaged Electron under the hosted
+      // runner's outer Job (the 2026-08-25 production smoke left taskkill open
+      // until its 120-second parent timeout).
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch (error) {
+        return error?.code === "ESRCH";
+      }
+      return waitUntil(() => processExists(pid), 10_000);
+    }
     const killer = killTree(pid, "SIGTERM");
     if (!killer) return !processExists(pid);
     return new Promise((resolve) => {
@@ -749,6 +765,11 @@ export class Daemon {
     const trackedIdentities = this.#takeTreeSnapshot();
     this.#stopPromise = terminateProcessTree(child.pid, trackedIdentities, {
       ledgerFile: this.#ledgerFile,
+      // A startup URL can only arrive after the PowerShell wrapper has created
+      // its Job and launched the daemon, so the wrapper is now a valid OS-owned
+      // process-tree boundary. The pre-start failure path deliberately omits
+      // this flag because Job setup may not have completed there.
+      windowsJobOwned: process.platform === "win32",
     }).finally(() => {
       this.#cleanLedger();
     });
