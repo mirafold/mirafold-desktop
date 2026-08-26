@@ -89,7 +89,10 @@ test("the build job installs with the script-free pinned npm toolchain", () => {
 
 test("tag identity and stable-channel policy are checked before dependency code", () => {
   const build = job("build");
+  const tip = build.indexOf("Tag must be main's current tip");
   const identity = build.indexOf("release-contract.mjs identity");
+  assert.ok(tip !== -1 && tip < identity, "a pushed tag must be proven to be main's tip before anything else");
+  assert.match(build, /git fetch --depth=1 origin main/);
   const install = build.indexOf("npm ci");
   assert.ok(identity !== -1 && install !== -1 && identity < install);
 });

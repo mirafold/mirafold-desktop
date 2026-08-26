@@ -1,10 +1,13 @@
 name: CI
 
+# `main` is the production mirror and `next` is staging (docs/RELEASING.md).
+# Both are pull-request-only, and both rulesets require these two checks, so
+# every pull request into either branch must run them.
 on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, next]
   workflow_dispatch:
 
 permissions:

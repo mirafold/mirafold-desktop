@@ -11,16 +11,9 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import {
-  CredentialSafeLineStream,
-  Daemon,
-  LinuxProcessTreeTracker,
-  appendStderr,
-  daemonLaunchSpec,
-  findStartupUrl,
-  redactCredentials,
-  terminateProcessTree,
-} from "../src/daemon.js";
+import { Daemon, daemonLaunchSpec, findStartupUrl } from "../src/daemon.js";
+import { CredentialSafeLineStream, appendStderr, redactCredentials } from "../src/daemon-output.js";
+import { LinuxProcessTreeTracker, terminateProcessTree } from "../src/process-tree.js";
 
 const require = createRequire(import.meta.url);
 

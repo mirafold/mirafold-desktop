@@ -21,6 +21,10 @@ const preparationSource = readFileSync(
   new URL("../scripts/prepare-shell-release.mjs", import.meta.url),
   "utf8",
 );
+const sharedSource = readFileSync(
+  new URL("../scripts/shared.mjs", import.meta.url),
+  "utf8",
+);
 const coordinatorSource = readFileSync(
   new URL("../scripts/release-coordinator.mjs", import.meta.url),
   "utf8",
@@ -152,18 +156,15 @@ test("tests consume the immutable reviewed artifact only after intake succeeds",
 });
 
 test("the intake policy implementation loads no third-party code", () => {
-  const intakeImports = [...intakeSource.matchAll(/\bfrom\s+["']([^"']+)["']/g)]
-    .map((match) => match[1]);
-  assert.deepEqual(
-    intakeImports.filter((specifier) => !specifier.startsWith("node:")),
-    ["./prepare-shell-release.mjs"],
-  );
-  const preparationImports = [...preparationSource.matchAll(/\bfrom\s+["']([^"']+)["']/g)]
-    .map((match) => match[1]);
-  assert.deepEqual(
-    preparationImports.filter((specifier) => !specifier.startsWith("node:")),
-    [],
-  );
+  // Repository-owned relative modules are the same trust boundary as the file
+  // itself; anything else (a bare specifier) would be installed dependency code.
+  const nonNodeImports = (source) =>
+    [...source.matchAll(/\bfrom\s+["']([^"']+)["']/g)]
+      .map((match) => match[1])
+      .filter((specifier) => !specifier.startsWith("node:"));
+  assert.deepEqual(nonNodeImports(intakeSource), ["./prepare-shell-release.mjs", "./shared.mjs"]);
+  assert.deepEqual(nonNodeImports(preparationSource), ["./shared.mjs"]);
+  assert.deepEqual(nonNodeImports(sharedSource), [], "scripts/shared.mjs must stay standard-library only");
 });
 
 test("native Linux and Windows builds consume, test, smoke, and retain one reviewed candidate", () => {
@@ -252,7 +253,7 @@ test("the write-capable job loads no installed dependency code", () => {
   const writer = withoutComments(job("release"));
   assert.doesNotMatch(writer, /\bnpm\s+(?:ci|install|test|run)\b/);
   assert.doesNotMatch(writer, /\bnpx\b/);
-  const imports = [coordinatorSource, intakeSource, preparationSource, releaseContractSource]
+  const imports = [coordinatorSource, intakeSource, preparationSource, releaseContractSource, sharedSource]
     .flatMap((source) => [...source.matchAll(/\bfrom\s+["']([^"']+)["']/g)].map((match) => match[1]));
   assert.deepEqual(
     imports.filter((specifier) => !specifier.startsWith("node:") && !specifier.startsWith("./")),
@@ -264,7 +265,7 @@ test("the writer pushes branch and annotated tag together, then publishes only a
   const value = withoutComments(job("release"));
   const prepare = value.indexOf("release-coordinator.mjs prepare");
   const preflight = value.indexOf("release-coordinator.mjs remote");
-  const commit = value.indexOf('commit -m "$RELEASE_COMMIT_MESSAGE"');
+  const commit = value.indexOf('commit -s -m "$RELEASE_COMMIT_SUBJECT"');
   const tag = value.indexOf('tag -a "$RELEASE_TAG"');
   const local = value.indexOf("release-coordinator.mjs local");
   const push = value.indexOf("git push --atomic origin");

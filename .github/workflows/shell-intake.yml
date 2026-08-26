@@ -417,15 +417,17 @@ jobs:
       - name: Create and atomically push the reviewed commit and tag
         if: steps.preflight.outputs.mode == 'create'
         env:
-          RELEASE_COMMIT_MESSAGE: ${{ steps.prepare.outputs.commit-message }}
+          RELEASE_COMMIT_SUBJECT: ${{ steps.prepare.outputs.commit-subject }}
           RELEASE_TAG: ${{ steps.prepare.outputs.tag }}
           RELEASE_TAG_MESSAGE: ${{ steps.prepare.outputs.tag-message }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # `-s` adds the DCO Signed-off-by trailer for that identity; the
+          # coordinator's local and remote checks expect exactly that message.
           git -c commit.gpgsign=false -c core.hooksPath=/dev/null \
-            commit -m "$RELEASE_COMMIT_MESSAGE"
+            commit -s -m "$RELEASE_COMMIT_SUBJECT"
           git -c tag.gpgSign=false tag -a "$RELEASE_TAG" \
             -m "$RELEASE_TAG_MESSAGE"
           node scripts/release-coordinator.mjs local \

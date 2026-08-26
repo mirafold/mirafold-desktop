@@ -7,10 +7,10 @@ const workflow = readFileSync(
   "utf8",
 ).replaceAll("\r\n", "\n");
 
-test("CI supplies stable Linux and Windows checks for main and pull requests", () => {
+test("CI supplies stable Linux and Windows checks for main and pull requests into main or next", () => {
   const header = workflow.slice(0, workflow.indexOf("\njobs:"));
   assert.match(header, /push:\s*\n\s+branches: \[main\]/);
-  assert.match(header, /pull_request:\s*\n\s+branches: \[main\]/);
+  assert.match(header, /pull_request:\s*\n\s+branches: \[main, next\]/);
   assert.match(header, /workflow_dispatch:/);
   assert.doesNotMatch(header, /pull_request_target/);
   assert.match(workflow, /name: test \(\$\{\{ matrix\.name \}\}\)/);

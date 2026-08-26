@@ -86,6 +86,24 @@ jobs:
         with:
           node-version: 22
 
+      # A release is exactly what `main` says right now — nothing else. The tag
+      # trigger is branch-blind by platform design (any pushed v* tag starts
+      # this workflow, whatever commit it points at), so without this gate a
+      # tag aimed at a feature branch or an old main commit would be built and
+      # published. `main` advances only at release time (docs/RELEASING.md), so
+      # main's tip and the published installers are the same thing. Dispatch
+      # rehearsals run from a branch ref and skip this.
+      - name: Tag must be main's current tip
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin main
+          TIP="$(git rev-parse origin/main)"
+          if [ "$(git rev-parse HEAD)" != "$TIP" ]; then
+            echo "tag $GITHUB_REF_NAME points at $(git rev-parse HEAD), not main's tip $TIP — refusing to release" >&2
+            exit 1
+          fi
+
       # A tag that doesn't match package.json is a mis-cut release. The stable
       # feed also refuses prerelease versions outright: a beta must never become
       # `latest` merely because gh defaults to a normal release.

@@ -10,32 +10,11 @@ import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { invariant, readJson, stableVersion } from "./shared.mjs";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const MARKER = "MIRAFOLD_PACKAGED_SMOKE=";
 const DAEMON_MARKER = "MIRAFOLD_PACKAGED_DAEMON_SMOKE=";
-const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
-
-function invariant(condition, message) {
-  if (!condition) throw new Error(message);
-}
-
-function readJson(file, label) {
-  invariant(lstatSync(file).isFile(), `${label} must be a regular file`);
-  try {
-    const value = JSON.parse(readFileSync(file, "utf8"));
-    invariant(value && typeof value === "object" && !Array.isArray(value), `${label} must contain an object`);
-    return value;
-  } catch (error) {
-    throw new Error(`${label} is not valid JSON: ${error.message}`);
-  }
-}
-
-function stableVersion(value, label) {
-  invariant(typeof value === "string" && STABLE_VERSION.test(value), `${label} must be a stable x.y.z version`);
-  return value;
-}
-
 function minimalEnvironment(appDirectory, additions = {}) {
   const env = {
     ELECTRON_RUN_AS_NODE: "1",

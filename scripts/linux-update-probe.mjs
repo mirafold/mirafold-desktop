@@ -32,6 +32,7 @@ import { Daemon } from "../src/daemon.js";
 import { createSafeAppImageUpdater } from "../src/platform-updaters.js";
 import { DOWNLOAD_PAGE_URL, createDesktopUpdater } from "../src/updater.js";
 import { parseUpdateMetadata, verifyPlatformArtifacts } from "./release-contract.mjs";
+import { invariant } from "./shared.mjs";
 
 const require = createRequire(import.meta.url);
 const { AppImageUpdater, AppUpdater, DebUpdater } = require("electron-updater");
@@ -40,10 +41,6 @@ const { NodeHttpExecutor } = require("builder-util/out/nodeHttpExecutor.js");
 const { configureRequestOptions, configureRequestUrl } = require("builder-util-runtime");
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(HERE);
-
-function invariant(condition, message) {
-  if (!condition) throw new Error(message);
-}
 
 function deferred() {
   let resolve;

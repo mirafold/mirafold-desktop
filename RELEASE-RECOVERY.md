@@ -77,14 +77,23 @@ repository. Merely referencing these environment names in workflow source does
 not establish their protection rules; `.github/repository-hardening.json` is
 the exact desired remote state.
 
-The proposed `main-release-safety` ruleset requires a pull request, successful
-`test (linux)` and `test (windows)` checks from the GitHub Actions App, an
-up-to-date branch, resolved review threads, and a squash or rebase merge. It
+The `main-release-safety` ruleset requires a pull request, successful
+`test (linux)` and `test (windows)` checks from the GitHub Actions App and the
+`DCO` sign-off check from the DCO App (ID `1861`), an up-to-date branch,
+resolved review threads, linear history, and a squash or rebase merge. It
 requires zero approvals so Kyle is not locked out of his solo repository. Only
 GitHub Actions App ID `15368` has an always bypass, which preserves the audited
-automated writer's atomic direct push of the Desktop version commit and tag.
-Dependabot does not receive that bypass; its pull requests merge after the same
-two checks. Force pushes and deletion remain blocked for non-bypass actors.
+automated writer's atomic direct push of the Desktop version commit and tag;
+that commit is itself signed off as `github-actions[bot]`. Dependabot does not
+receive that bypass; its pull requests merge after the same three checks
+(Dependabot signs its commits off). Force pushes and deletion remain blocked
+for non-bypass actors.
+
+The `next-staging-safety` ruleset protects the staging branch the same way —
+pull request, the same three checks, linear history, no force-push or
+deletion — with two differences: nothing may bypass it, and it does not
+require the branch to be up to date, so day-to-day merges never queue behind
+one another. `docs/RELEASING.md` describes how work flows `next` → `main`.
 
 Required commit signatures are deliberately not enabled. The automated writer
 currently creates an unsigned commit and annotated tag, and imposing a signing

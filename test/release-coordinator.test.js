@@ -231,7 +231,10 @@ function retryState(candidate, overrides = {}) {
 test("automated identity and release notes are deterministic and source-bound", () => {
   const candidate = plan();
   assert.equal(validateReleasePlan(candidate), candidate);
-  assert.equal(candidate.commitMessage, "release: Desktop 1.2.4 with Shell 0.3.8");
+  assert.equal(
+    candidate.commitMessage,
+    "release: Desktop 1.2.4 with Shell 0.3.8\n\nSigned-off-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>",
+  );
   const notes = automatedReleaseNotes({
     desktopVersion: VERSION,
     shell: { version: SHELL_VERSION },
@@ -558,12 +561,14 @@ test("the writer reconstructs, stages, commits, and tags only the reviewed pair"
   writeFileSync(notesFile, automatedReleaseNotes(manifest));
   assert.match(readFileSync(outputFile, "utf8"), /tag=v1\.2\.4/);
 
+  // Exactly what the workflow runs: the writer's identity plus `-s`, so the
+  // sign-off trailer is produced by git and must match the reviewed message.
   git(
     root,
-    "-c", "user.name=Fixture",
-    "-c", "user.email=fixture@example.com",
+    "-c", "user.name=github-actions[bot]",
+    "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
     "-c", "commit.gpgsign=false",
-    "commit", "-m", prepared.commitMessage,
+    "commit", "-s", "-m", prepared.commitMessage.split("\n")[0],
   );
   git(
     root,

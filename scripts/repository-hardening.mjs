@@ -8,15 +8,12 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { invariant } from "./shared.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(HERE);
 const DEFAULT_POLICY = path.join(ROOT, ".github", "repository-hardening.json");
 const API_VERSION = "2026-03-10";
-
-function invariant(condition, message) {
-  if (!condition) throw new Error(message);
-}
 
 function sortedJson(value) {
   if (Array.isArray(value)) return value.map(sortedJson);
@@ -44,8 +41,55 @@ export function loadHardeningPolicy(file = DEFAULT_POLICY) {
   return JSON.parse(readFileSync(file, "utf8"));
 }
 
-function rulesByType(policy) {
-  return new Map(policy.ruleset.rules.map((rule) => [rule.type, rule]));
+function rulesByType(ruleset) {
+  return new Map(ruleset.rules.map((rule) => [rule.type, rule]));
+}
+
+/** The default-branch ruleset: the one the automated release writer bypasses. */
+export function mainRuleset(policy) {
+  return policy.rulesets.find((ruleset) => ruleset.name === "main-release-safety");
+}
+
+/** Every ruleset requires the same three checks from the same two GitHub Apps. */
+function requiredChecks(policy) {
+  return [
+    { context: "test (linux)", integration_id: policy.integrations.githubActionsAppId },
+    { context: "test (windows)", integration_id: policy.integrations.githubActionsAppId },
+    { context: "DCO", integration_id: policy.integrations.dcoAppId },
+  ];
+}
+
+const PULL_REQUEST_POLICY = {
+  allowed_merge_methods: ["squash", "rebase"],
+  dismiss_stale_reviews_on_push: false,
+  require_code_owner_review: false,
+  require_last_push_approval: false,
+  required_approving_review_count: 0,
+  required_review_thread_resolution: true,
+};
+
+function validateRuleset(policy, ruleset, expected) {
+  invariant(ruleset.target === "branch" && ruleset.enforcement === "active", `${ruleset.name} must be active and branch-scoped`);
+  invariant(equivalent(ruleset.conditions, expected.conditions), `${ruleset.name} must target only ${expected.describe}`);
+  invariant(equivalent(ruleset.bypass_actors, expected.bypassActors), expected.bypassMessage);
+  const byType = rulesByType(ruleset);
+  invariant(byType.size === 5, `${ruleset.name} must contain exactly five reviewed rules`);
+  for (const type of ["deletion", "non_fast_forward", "required_linear_history", "pull_request", "required_status_checks"]) {
+    invariant(byType.has(type), `${ruleset.name} is missing ${type}`);
+  }
+  invariant(!byType.has("required_signatures"), "commit-signature enforcement is outside the approved key model");
+  invariant(
+    equivalent(byType.get("pull_request").parameters, PULL_REQUEST_POLICY),
+    `${ruleset.name} pull-request policy changed without review`,
+  );
+  invariant(
+    equivalent(byType.get("required_status_checks").parameters, {
+      do_not_enforce_on_create: false,
+      required_status_checks: requiredChecks(policy),
+      strict_required_status_checks_policy: expected.strict,
+    }),
+    `${ruleset.name} required CI identities changed without review`,
+  );
 }
 
 export function validateHardeningPolicy(policy) {
@@ -56,6 +100,7 @@ export function validateHardeningPolicy(policy) {
   invariant(repository.defaultBranch === "main", "policy default branch must be main");
   invariant(repository.owner?.login === "kserrec" && repository.owner.userId === 32747715, "policy owner identity changed");
   invariant(policy.integrations?.githubActionsAppId === 15368, "GitHub Actions integration identity changed");
+  invariant(policy.integrations.dcoAppId === 1861, "DCO GitHub App identity changed");
   invariant(
     equivalent(policy.actionsPermissions, {
       default_workflow_permissions: "read",
@@ -122,57 +167,43 @@ export function validateHardeningPolicy(policy) {
     "manual releases must be limited to v* tags",
   );
 
-  const ruleset = policy.ruleset;
-  invariant(ruleset?.name === "main-release-safety", "reviewed ruleset name changed");
-  invariant(ruleset.target === "branch" && ruleset.enforcement === "active", "main ruleset must be active and branch-scoped");
-  invariant(
-    equivalent(ruleset.conditions, { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } }),
-    "ruleset must target only the default branch",
-  );
-  invariant(
-    equivalent(ruleset.bypass_actors, [{
+  invariant(Array.isArray(policy.rulesets) && policy.rulesets.length === 2, "policy must own exactly two branch rulesets");
+  const rulesets = new Map(policy.rulesets.map((ruleset) => [ruleset.name, ruleset]));
+  const main = rulesets.get("main-release-safety");
+  const next = rulesets.get("next-staging-safety");
+  invariant(main && next, "both main-release-safety and next-staging-safety rulesets are required");
+  // main is the production mirror: pull-request-only for people, up-to-date
+  // required, and only the audited automated release writer may push directly.
+  validateRuleset(policy, main, {
+    describe: "the default branch",
+    conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
+    bypassActors: [{
       actor_id: policy.integrations.githubActionsAppId,
       actor_type: "Integration",
       bypass_mode: "always",
-    }]),
-    "only the GitHub Actions integration may bypass the main ruleset",
-  );
-  const byType = rulesByType(policy);
-  invariant(byType.size === 5, "main ruleset must contain exactly five reviewed rules");
-  for (const type of ["deletion", "non_fast_forward", "required_linear_history", "pull_request", "required_status_checks"]) {
-    invariant(byType.has(type), `main ruleset is missing ${type}`);
-  }
-  invariant(!byType.has("required_signatures"), "commit-signature enforcement is outside the approved key model");
-  invariant(
-    equivalent(byType.get("pull_request").parameters, {
-      allowed_merge_methods: ["squash", "rebase"],
-      dismiss_stale_reviews_on_push: false,
-      require_code_owner_review: false,
-      require_last_push_approval: false,
-      required_approving_review_count: 0,
-      required_review_thread_resolution: true,
-    }),
-    "pull-request policy changed without review",
-  );
-  invariant(
-    equivalent(byType.get("required_status_checks").parameters, {
-      do_not_enforce_on_create: false,
-      required_status_checks: [
-        { context: "test (linux)", integration_id: policy.integrations.githubActionsAppId },
-        { context: "test (windows)", integration_id: policy.integrations.githubActionsAppId },
-      ],
-      strict_required_status_checks_policy: true,
-    }),
-    "required CI identities changed without review",
-  );
+    }],
+    bypassMessage: "only the GitHub Actions integration may bypass the main ruleset",
+    strict: true,
+  });
+  // next is staging: pull-request-only for everyone, no bypass at all, and
+  // no up-to-date requirement so day-to-day merges do not queue behind each
+  // other.
+  validateRuleset(policy, next, {
+    describe: "the next branch",
+    conditions: { ref_name: { include: ["refs/heads/next"], exclude: [] } },
+    bypassActors: [],
+    bypassMessage: "nothing may bypass the next ruleset",
+    strict: false,
+  });
   return policy;
 }
 
 export function evaluateMainUpdate(policy, scenario) {
   validateHardeningPolicy(policy);
-  const rules = rulesByType(policy);
+  const main = mainRuleset(policy);
+  const rules = rulesByType(main);
   const actor = scenario.actor ?? {};
-  const bypass = policy.ruleset.bypass_actors.some(
+  const bypass = main.bypass_actors.some(
     (candidate) => candidate.actor_type === actor.type && candidate.actor_id === actor.id && candidate.bypass_mode === "always",
   );
   if (bypass) return { allowed: true, reason: "reviewed GitHub Actions ruleset bypass" };
@@ -207,7 +238,7 @@ export function evaluateMainUpdate(policy, scenario) {
 }
 
 export function compatibilityDemonstration(policy) {
-  const checks = ["test (linux)", "test (windows)"];
+  const checks = ["test (linux)", "test (windows)", "DCO"];
   const pullRequest = {
     operation: "update",
     viaPullRequest: true,
@@ -315,13 +346,16 @@ export function hardeningMutations(policy, state = {}) {
     }
   }
 
-  requests.push({
-    method: state.rulesetId === undefined ? "POST" : "PUT",
-    path: state.rulesetId === undefined
-      ? `/repos/${repository}/rulesets`
-      : `/repos/${repository}/rulesets/${state.rulesetId}`,
-    body: rulesetBody(policy.ruleset),
-  });
+  for (const ruleset of policy.rulesets) {
+    const existingId = state.rulesetIds?.[ruleset.name];
+    requests.push({
+      method: existingId === undefined ? "POST" : "PUT",
+      path: existingId === undefined
+        ? `/repos/${repository}/rulesets`
+        : `/repos/${repository}/rulesets/${existingId}`,
+      body: rulesetBody(ruleset),
+    });
+  }
   return requests;
 }
 
@@ -391,14 +425,20 @@ export async function observeHardening(policy, client) {
     client.request("GET", `/repos/${repository}/private-vulnerability-reporting`),
   ]);
   invariant(Array.isArray(rulesets), "GitHub returned an invalid ruleset list");
-  const named = rulesets.filter((candidate) => candidate.name === policy.ruleset.name && candidate.source_type === "Repository");
-  invariant(named.length <= 1, `multiple repository rulesets are named ${policy.ruleset.name}`);
-  const ruleset = named.length === 0
-    ? null
-    : await client.request("GET", `/repos/${repository}/rulesets/${named[0].id}`);
+  const ownedNames = new Set(policy.rulesets.map((ruleset) => ruleset.name));
+  const observedRulesets = {};
+  const rulesetIds = {};
+  for (const name of ownedNames) {
+    const named = rulesets.filter((candidate) => candidate.name === name && candidate.source_type === "Repository");
+    invariant(named.length <= 1, `multiple repository rulesets are named ${name}`);
+    observedRulesets[name] = named.length === 0
+      ? null
+      : await client.request("GET", `/repos/${repository}/rulesets/${named[0].id}`);
+    if (named.length === 1) rulesetIds[name] = named[0].id;
+  }
   const otherActiveRulesets = rulesets.filter(
     (candidate) => candidate.source_type === "Repository" && candidate.enforcement === "active" &&
-      candidate.name !== policy.ruleset.name,
+      !ownedNames.has(candidate.name),
   );
 
   const environments = {};
@@ -425,8 +465,8 @@ export async function observeHardening(policy, client) {
   return {
     repo,
     actions,
-    ruleset,
-    rulesetId: ruleset?.id,
+    rulesets: observedRulesets,
+    rulesetIds,
     otherActiveRulesets,
     vulnerabilityAlerts: vulnerabilityAlerts !== null,
     dependabotSecurityUpdates,
@@ -463,10 +503,13 @@ export async function auditHardening(policy, client) {
   if (observed.privateReporting?.enabled !== policy.security.privateVulnerabilityReporting) {
     mismatches.push("private vulnerability reporting differs");
   }
-  if (observed.ruleset === null) {
-    mismatches.push(`ruleset ${policy.ruleset.name} is absent`);
-  } else if (!equivalent(selectedRuleset(observed.ruleset), rulesetBody(policy.ruleset))) {
-    mismatches.push(`ruleset ${policy.ruleset.name} differs`);
+  for (const ruleset of policy.rulesets) {
+    const actual = observed.rulesets[ruleset.name];
+    if (actual === null) {
+      mismatches.push(`ruleset ${ruleset.name} is absent`);
+    } else if (!equivalent(selectedRuleset(actual), rulesetBody(ruleset))) {
+      mismatches.push(`ruleset ${ruleset.name} differs`);
+    }
   }
   if (observed.otherActiveRulesets.length > 0) {
     mismatches.push(`unowned active branch rulesets exist: ${observed.otherActiveRulesets.map((value) => value.name).join(", ")}`);
@@ -494,12 +537,12 @@ async function requireSuccessfulPolicyChecks(policy, client) {
     `/repos/${repository}/commits/${encodeURIComponent(policy.repository.defaultBranch)}/check-runs?per_page=100`,
   );
   const runs = response.check_runs ?? [];
-  const required = rulesByType(policy).get("required_status_checks").parameters.required_status_checks;
+  const required = rulesByType(mainRuleset(policy)).get("required_status_checks").parameters.required_status_checks;
   for (const check of required) {
     const match = runs.find(
       (run) => run.name === check.context && run.app?.id === check.integration_id && run.conclusion === "success",
     );
-    invariant(match, `main has no successful ${check.context} check from GitHub Actions; refusing to activate the ruleset`);
+    invariant(match, `main has no successful ${check.context} check from GitHub App ${check.integration_id}; refusing to activate the rulesets`);
   }
 }
 
@@ -512,7 +555,7 @@ export async function applyHardening(policy, client) {
   invariant(before.otherActiveRulesets.length === 0, "unowned active branch rulesets exist; refusing to compound them");
   await requireSuccessfulPolicyChecks(policy, client);
   const mutations = hardeningMutations(policy, {
-    rulesetId: before.rulesetId,
+    rulesetIds: before.rulesetIds,
     branchPoliciesByEnvironment: before.branchPoliciesByEnvironment,
   });
   for (const mutation of mutations) {

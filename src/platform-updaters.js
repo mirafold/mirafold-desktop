@@ -14,14 +14,29 @@ import {
 } from "node:fs";
 import path from "node:path";
 
-function downloadedInstall(updater) {
+/**
+ * The shared entry of every quitAndInstall override: refuse a second call,
+ * require a verified download, then mark the install as started. Returns the
+ * download plus the resolved run-after flag, or null when nothing may proceed
+ * (the reason has already been logged or dispatched as an error).
+ */
+function beginQuitAndInstall(updater, isSilent, isForceRunAfter) {
+  if (updater.quitAndInstallCalled) {
+    updater._logger.warn("install call ignored: quitAndInstallCalled is set to true");
+    return null;
+  }
   const installerPath = updater.installerPath;
   const downloadedFileInfo = updater.downloadedUpdateHelper?.downloadedFileInfo;
-  if (typeof installerPath === "string" && installerPath.length > 0 && downloadedFileInfo != null) {
-    return { installerPath, downloadedFileInfo };
+  if (typeof installerPath !== "string" || installerPath.length === 0 || downloadedFileInfo == null) {
+    updater.dispatchError(new Error("No update filepath provided, can't quit and install"));
+    return null;
   }
-  updater.dispatchError(new Error("No update filepath provided, can't quit and install"));
-  return null;
+  updater.quitAndInstallCalled = true;
+  return {
+    installerPath,
+    downloadedFileInfo,
+    forceRunAfter: isSilent ? isForceRunAfter : updater.autoRunAppAfterInstall,
+  };
 }
 
 function fsyncFile(file) {
@@ -133,15 +148,9 @@ function installFailure(updater, error, rollbackError = null) {
 export function createSafeAppImageUpdater(AppImageUpdater, { emitBeforeQuit = () => {} } = {}) {
   return class MirafoldAppImageUpdater extends AppImageUpdater {
     quitAndInstall(isSilent = false, isForceRunAfter = false) {
-      if (this.quitAndInstallCalled) {
-        this._logger.warn("install call ignored: quitAndInstallCalled is set to true");
-        return Promise.resolve(false);
-      }
-      const download = downloadedInstall(this);
-      if (!download) return Promise.resolve(false);
-      this.quitAndInstallCalled = true;
-      const forceRunAfter = isSilent ? isForceRunAfter : this.autoRunAppAfterInstall;
-      return this.#replaceLaunchAndQuit(download.installerPath, forceRunAfter);
+      const install = beginQuitAndInstall(this, isSilent, isForceRunAfter);
+      if (!install) return Promise.resolve(false);
+      return this.#replaceLaunchAndQuit(install.installerPath, install.forceRunAfter);
     }
 
     async #replaceLaunchAndQuit(installerPath, forceRunAfter) {
@@ -194,19 +203,13 @@ export function createSafeNsisUpdater(
 ) {
   return class MirafoldNsisUpdater extends NsisUpdater {
     quitAndInstall(isSilent = false, isForceRunAfter = false) {
-      if (this.quitAndInstallCalled) {
-        this._logger.warn("install call ignored: quitAndInstallCalled is set to true");
-        return Promise.resolve(false);
-      }
-      const download = downloadedInstall(this);
-      if (!download) return Promise.resolve(false);
-      this.quitAndInstallCalled = true;
-      const forceRunAfter = isSilent ? isForceRunAfter : this.autoRunAppAfterInstall;
+      const install = beginQuitAndInstall(this, isSilent, isForceRunAfter);
+      if (!install) return Promise.resolve(false);
       return this.#launchAndQuit(
-        download.installerPath,
-        download.downloadedFileInfo,
+        install.installerPath,
+        install.downloadedFileInfo,
         isSilent,
-        forceRunAfter,
+        install.forceRunAfter,
       );
     }
 
