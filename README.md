@@ -9,7 +9,18 @@ terminal. This repo wraps that same software in a desktop application so that
 installing it is a download and a double-click.
 
 **Download:** [Releases](https://github.com/mirafold/mirafold-desktop/releases)
-— Linux (`.deb`, `.tar.gz`, `.AppImage`) and Windows (`.exe`).
+— **Linux** (`.deb`, `.tar.gz`, `.AppImage`) is the supported release.
+**Windows** (`.exe`) is a **beta**: the installer is unsigned, so SmartScreen
+warns on it, and it has not yet had the real-machine testing Linux has.
+**macOS is not available** — there is no Mac package, and none is planned
+until the project can carry Apple's signing and notarization requirements
+(see *Signing status* below).
+
+**What you need:** a coding agent the bundled Mirafold Shell can use — today
+that means a local Codex/ChatGPT login, or an API key already present in your
+normal environment. The app has no credential-entry screen and never asks you
+to send credentials anywhere; if no live agent path is available, demo mode
+shows the interface with scripted replies.
 
 ## How updates work
 
@@ -110,9 +121,12 @@ need no bridge.
 | `src/main.js` | app lifecycle, window, menu, folder picker, crash dialog |
 | `src/app-lifecycle.js` | hold ordinary Electron quit until asynchronous cleanup finishes |
 | `src/daemon-bootstrap.cjs` | enter packaged Node mode, scrub it, and register Linux pseudo-terminals |
-| `src/daemon.js` | spawn the daemon, read its URL, track and stop its whole process tree |
+| `src/daemon.js` | spawn the daemon as a child, read its URL, own its lifecycle |
+| `src/daemon-output.js` | credential-redacting, memory-bounded handling of the daemon's output |
+| `src/process-tree.js` | track and stop the daemon's whole process tree, and prove it is gone |
 | `src/windows-daemon-job.ps1` | own the Windows daemon tree with a kill-on-close Job Object |
 | `src/navigation.js` | what the window is allowed to load, and what goes to the browser |
+| `src/permissions.js` | deny every Chromium permission check and request |
 | `src/platform-updaters.js` | atomic AppImage replacement and acknowledged NSIS launch |
 | `src/updater.js` | update policy for direct installers, Store packages, and Linux tar archives |
 | `src/login-env.js` | recover the login shell's `PATH` so agent CLIs are findable |
@@ -120,6 +134,10 @@ need no bridge.
 | `electron-builder.yml` | packaging targets, with the reasoning as comments |
 
 ## Development
+
+Contributions follow [CONTRIBUTING.md](CONTRIBUTING.md) (DCO sign-off, branch
+from `next`) and releases follow [docs/RELEASING.md](docs/RELEASING.md) —
+`main` is the production mirror and only advances at release time.
 
 ```
 npm install
@@ -170,9 +188,11 @@ byte-level no-op. For a newer version it prepares the package/lock pair with
 lifecycle scripts disabled, asks npm to verify every registry signature and
 provenance attestation, and then applies an additional Mirafold policy: the
 package bytes must come from `mirafold/mirafold`, the matching `vVERSION` tag,
-and `/.github/workflows/release.yml` on a GitHub-hosted runner. Only the reviewed
+and `.github/workflows/release.yml` on a GitHub-hosted runner. Only the reviewed
 `package.json`, `package-lock.json`, and compact `shell-intake.json` evidence
-cross into fresh read-only test and build jobs. The native Linux and Windows
+cross into fresh read-only test and build jobs. Git attributes force the two
+reviewed manifests to LF on every checkout, preserving the byte-exact baseline
+across Linux and Windows. The native Linux and Windows
 runners independently apply that exact pair, install with lifecycle scripts
 disabled, validate the dependency tree, advisories, registry signatures, and
 attestations, run the full suite, and build their native installers. Each
@@ -212,6 +232,18 @@ write job can run. Keep it absent through the one-time updater bridge release
 and the non-publishing rehearsal. Once that gate is deliberately enabled,
 ordinary Shell releases require no Desktop source edit, version command, tag,
 installer build, or GitHub Release action from a maintainer.
+
+`npm run update:probe:linux OLD_APPIMAGE NEW_RELEASE_DIR` is the local-only,
+disposable proof of the real Linux update paths. It serves a freshly built
+release over IPv4 loopback only, drives electron-updater's real metadata,
+SHA-512, download, and platform-installer code for AppImage, `.deb` and the
+tar notice, starts the real bundled daemon and proves its URL is unreachable
+before any installer runs, and touches nothing outside a temporary directory
+(the Debian privilege command is captured, not executed). Its `--bridge
+BRIDGE_DIR REGRESSED_DIR RECOVERY_DIR` form rehearses the one-time updater
+bridge, checksum rejection, and forward-only recovery. It is not part of `npm
+test` because it needs two packaged versions and several minutes; it is
+what proved the per-form Linux update table above.
 
 `npm run release:rehearse` runs the deterministic, local, non-networked release
 state-machine rehearsal. It covers no update, one update, rapid consecutive

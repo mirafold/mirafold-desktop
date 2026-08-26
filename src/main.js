@@ -268,7 +268,8 @@ function installedLinuxPackageType() {
   }
 }
 
-function showUpdaterMessage(options) {
+/** A native message box parented to the window while one exists. */
+function showMessage(options) {
   return win && !win.isDestroyed()
     ? dialog.showMessageBox(win, options)
     : dialog.showMessageBox(options);
@@ -305,7 +306,7 @@ async function onBootFailure(err) {
   // Same guard as onDaemonCrash: during quit (or with the window gone) there
   // is no one to ask — a dialog would race app teardown, parentless.
   if (quitting || !win) return;
-  const { response } = await dialog.showMessageBox(win, {
+  const { response } = await showMessage({
     type: "error",
     title: "Mirafold couldn't start",
     message: "The Mirafold daemon failed to start.",
@@ -330,7 +331,7 @@ async function onDaemonCleanupFailure(action) {
   daemonOrigin = null;
   if (quitting || !win) return;
   try {
-    await dialog.showMessageBox(win, {
+    await showMessage({
       type: "error",
       title: "Mirafold couldn't stop safely",
       message: `Mirafold could not prove its background processes stopped while ${action}.`,
@@ -359,7 +360,7 @@ async function onDaemonCrash(crashed, { code, signal, stderr, clean }) {
   if (quitting || !win) return;
   if (clean !== true) return onDaemonCleanupFailure("recovering from a daemon crash");
   const how = signal ? `was killed (${signal})` : `exited with code ${code}`;
-  const { response } = await dialog.showMessageBox(win, {
+  const { response } = await showMessage({
     type: "error",
     title: "Mirafold stopped",
     message: `The Mirafold daemon ${how}.`,
@@ -454,7 +455,7 @@ if (!app.requestSingleInstanceLock()) {
       shellVersion: SHELL_VERSION,
       updateStrategy,
       loadUpdater: () => loadAutoUpdater(updateStrategy),
-      showMessage: showUpdaterMessage,
+      showMessage,
       openDownloadPage: (url) => shell.openExternal(url),
       prepareInstall: prepareForUpdateInstall,
       recoverInstall: recoverFromUpdateInstallFailure,

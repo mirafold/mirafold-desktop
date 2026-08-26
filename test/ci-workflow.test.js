@@ -7,10 +7,10 @@ const workflow = readFileSync(
   "utf8",
 ).replaceAll("\r\n", "\n");
 
-test("CI supplies stable Linux and Windows checks for main and pull requests", () => {
+test("CI supplies stable Linux and Windows checks for main and pull requests into main or next", () => {
   const header = workflow.slice(0, workflow.indexOf("\njobs:"));
   assert.match(header, /push:\s*\n\s+branches: \[main\]/);
-  assert.match(header, /pull_request:\s*\n\s+branches: \[main\]/);
+  assert.match(header, /pull_request:\s*\n\s+branches: \[main, next\]/);
   assert.match(header, /workflow_dispatch:/);
   assert.doesNotMatch(header, /pull_request_target/);
   assert.match(workflow, /name: test \(\$\{\{ matrix\.name \}\}\)/);
@@ -38,4 +38,16 @@ test("both CI platforms use the exact toolchain and verify dependencies before t
   assert.match(workflow, /export NPM_CONFIG_USERCONFIG="\$RUNNER_TEMP\/mirafold-empty-npmrc"/);
   assert.doesNotMatch(workflow, /cache:/);
   assert.doesNotMatch(workflow, /\bnpx\b/);
+});
+
+test("Windows pull-request CI builds and smokes the real packaged Electron runtime", () => {
+  assert.match(
+    workflow,
+    /name: Build and smoke-check the real Windows package\s*\n\s*if: matrix\.name == 'windows'/,
+  );
+  assert.match(
+    workflow,
+    /node node_modules\/electron-builder\/cli\.js --win --dir --publish never/,
+  );
+  assert.match(workflow, /node scripts\/packaged-smoke\.mjs windows dist/);
 });

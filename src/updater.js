@@ -127,12 +127,40 @@ export function createDesktopUpdater(options) {
   let installing = false;
   let installFailurePromise = null;
   let dialogTail = Promise.resolve();
-  let downloadedInfo = null;
-  let downloadPromptPromise = null;
-  let lastPromptedVersion = null;
-  let externalDownloadInfo = null;
-  let externalPromptPromise = null;
-  let lastExternalPromptedVersion = null;
+  // One prompt of each kind: an update ready to install (direct forms) or an
+  // update to fetch by hand (tar archives). Each is single-flight and shown
+  // once per version unless a manual check explicitly asks to see it again.
+  const installPrompt = versionPrompt();
+  const externalPrompt = versionPrompt();
+
+  /**
+   * State for a prompt that must not stack: `show(info, repeat, present)`
+   * remembers `info` for a later manual check, runs `present` at most once at
+   * a time, and skips a version the user has already answered unless `repeat`.
+   */
+  function versionPrompt() {
+    let info = null;
+    let inFlight = null;
+    let promptedVersion = null;
+    return {
+      get info() {
+        return info;
+      },
+      show(nextInfo = {}, repeat, present) {
+        info = nextInfo;
+        const version = typeof nextInfo.version === "string" ? nextInfo.version : "the new version";
+        if (inFlight) return inFlight;
+        if (!repeat && promptedVersion === version) return;
+        promptedVersion = version;
+        inFlight = Promise.resolve()
+          .then(() => present(version))
+          .finally(() => {
+            inFlight = null;
+          });
+        return inFlight;
+      },
+    };
+  }
 
   function queueMessage(message) {
     const result = dialogTail.then(() => showMessage(message));
@@ -201,14 +229,8 @@ export function createDesktopUpdater(options) {
     return installFailurePromise;
   }
 
-  async function promptForExternalDownload(info = {}, repeat = false) {
-    externalDownloadInfo = info;
-    const version = typeof info.version === "string" ? info.version : "the new version";
-    if (externalPromptPromise) return externalPromptPromise;
-    if (!repeat && lastExternalPromptedVersion === version) return;
-    lastExternalPromptedVersion = version;
-
-    externalPromptPromise = (async () => {
+  function promptForExternalDownload(info, repeat = false) {
+    return externalPrompt.show(info, repeat, async (version) => {
       const { response } = await queueMessage({
         type: "info",
         title: "Mirafold update available",
@@ -231,10 +253,7 @@ export function createDesktopUpdater(options) {
           await reportFailure("open the Mirafold download page", error, true);
         }
       }
-    })().finally(() => {
-      externalPromptPromise = null;
     });
-    return externalPromptPromise;
   }
 
   function externalUpdateAvailable(info) {
@@ -289,14 +308,8 @@ export function createDesktopUpdater(options) {
     }
   }
 
-  async function promptForDownloadedUpdate(info = {}, repeat = false) {
-    downloadedInfo = info;
-    const version = typeof info.version === "string" ? info.version : "the new version";
-    if (downloadPromptPromise) return downloadPromptPromise;
-    if (!repeat && lastPromptedVersion === version) return;
-    lastPromptedVersion = version;
-
-    downloadPromptPromise = (async () => {
+  function promptForDownloadedUpdate(info, repeat = false) {
+    return installPrompt.show(info, repeat, async (version) => {
       const { response } = await queueMessage({
         type: "info",
         title: "Mirafold update ready",
@@ -311,10 +324,7 @@ export function createDesktopUpdater(options) {
         cancelId: 1,
       });
       if (response === 0) await installDownloadedUpdate();
-    })().finally(() => {
-      downloadPromptPromise = null;
     });
-    return downloadPromptPromise;
   }
 
   async function ensureUpdater() {
@@ -373,13 +383,13 @@ export function createDesktopUpdater(options) {
     // "Later" means later in this same run too: a manual menu check should
     // reopen the install choice immediately, without redownloading or querying
     // the feed for a file already verified in electron-updater's cache.
-    if (manual && downloadedInfo) {
-      await promptForDownloadedUpdate(downloadedInfo, true);
-      return { isUpdateAvailable: true, updateInfo: downloadedInfo, downloadPromise: null };
+    if (manual && installPrompt.info) {
+      await promptForDownloadedUpdate(installPrompt.info, true);
+      return { isUpdateAvailable: true, updateInfo: installPrompt.info, downloadPromise: null };
     }
-    if (manual && externalDownloadInfo) {
-      await promptForExternalDownload(externalDownloadInfo, true);
-      return { isUpdateAvailable: true, updateInfo: externalDownloadInfo, downloadPromise: null };
+    if (manual && externalPrompt.info) {
+      await promptForExternalDownload(externalPrompt.info, true);
+      return { isUpdateAvailable: true, updateInfo: externalPrompt.info, downloadPromise: null };
     }
     if (checkPromise) {
       if (manual) {

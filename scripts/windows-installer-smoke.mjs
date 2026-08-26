@@ -9,36 +9,15 @@
 // checks because an Actions process cannot truthfully observe them.
 
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { verifyPackagedPaths } from "./packaged-smoke.mjs";
+import { invariant, readJson, stableVersion } from "./shared.mjs";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const UNINSTALL_ROOT = "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
-const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
-
-function invariant(condition, message) {
-  if (!condition) throw new Error(message);
-}
-
-function readJson(file, label) {
-  invariant(existsSync(file) && lstatSync(file).isFile(), `${label} must be a regular file`);
-  try {
-    const value = JSON.parse(readFileSync(file, "utf8"));
-    invariant(value && typeof value === "object" && !Array.isArray(value), `${label} must contain an object`);
-    return value;
-  } catch (error) {
-    throw new Error(`${label} is not valid JSON: ${error.message}`);
-  }
-}
-
-function stableVersion(value, label) {
-  invariant(typeof value === "string" && STABLE_VERSION.test(value), `${label} must be a stable x.y.z version`);
-  return value;
-}
-
 function windowsEnvironment() {
   const env = {};
   for (const name of [

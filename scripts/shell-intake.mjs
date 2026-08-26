@@ -17,9 +17,7 @@
 // `check` proves dependency/test execution did not alter either reviewed
 // manifest. GitHub Actions separately fixes every job to the run's github.sha.
 
-import { createHash } from "node:crypto";
 import {
-  appendFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -39,18 +37,18 @@ import {
   nextPatchVersion,
   prepareShellRelease,
 } from "./prepare-shell-release.mjs";
+import { appendGithubOutputs, canonicalBase64, canonicalIntegrity, exactKeys, invariant, jsonText, sha256, stableVersion } from "./shared.mjs";
 
 export const INTAKE_SCHEMA_VERSION = 1;
 export const SHELL_PACKAGE = "mirafold";
 export const SHELL_SOURCE_REPOSITORY = "https://github.com/mirafold/mirafold";
-export const SHELL_SOURCE_WORKFLOW = "/.github/workflows/release.yml";
+export const SHELL_SOURCE_WORKFLOW = ".github/workflows/release.yml";
 export const SLSA_PROVENANCE_TYPE = "https://slsa.dev/provenance/v1";
 export const GITHUB_WORKFLOW_BUILD_TYPE =
   "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1";
 export const GITHUB_HOSTED_BUILDER = "https://github.com/actions/runner/github-hosted";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const SHA256_HEX = /^[a-f0-9]{64}$/;
 const GIT_COMMIT = /^[a-f0-9]{40}$/;
 const PACKAGE_LIMIT = 1024 * 1024;
@@ -58,25 +56,6 @@ const LOCK_LIMIT = 32 * 1024 * 1024;
 const STATE_LIMIT = 1024 * 1024;
 const AUDIT_LIMIT = 128 * 1024 * 1024;
 const ARTIFACT_FILES = ["package-lock.json", "package.json", "shell-intake.json"];
-
-function invariant(condition, message) {
-  if (!condition) throw new Error(message);
-}
-
-function stableVersion(value, label) {
-  invariant(typeof value === "string" && STABLE_VERSION.test(value), `${label} must be a stable x.y.z version`);
-  return value;
-}
-
-function exactKeys(value, expected, label) {
-  invariant(value && typeof value === "object" && !Array.isArray(value), `${label} must be an object`);
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  invariant(
-    actual.length === wanted.length && actual.every((key, index) => key === wanted[index]),
-    `${label} keys differ; expected [${wanted.join(", ")}], found [${actual.join(", ")}]`,
-  );
-}
 
 function validateIntakeIdentity(value, label) {
   invariant(value.schemaVersion === INTAKE_SCHEMA_VERSION, `${label} schema is unsupported`);
@@ -117,28 +96,6 @@ function parseJsonText(text, label) {
 
 function readJson(file, label, maximumBytes) {
   return parseJsonText(readRegularText(file, label, maximumBytes), label);
-}
-
-function jsonText(value) {
-  return `${JSON.stringify(value, null, 2)}\n`;
-}
-
-function sha256(value) {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-function canonicalBase64(value, label) {
-  invariant(typeof value === "string" && /^[A-Za-z0-9+/]+={0,2}$/.test(value), `${label} is not base64`);
-  const bytes = Buffer.from(value, "base64");
-  invariant(bytes.length > 0 && bytes.toString("base64") === value, `${label} is not canonical base64`);
-  return bytes;
-}
-
-function canonicalIntegrity(value, label) {
-  invariant(typeof value === "string" && value.startsWith("sha512-"), `${label} is not SHA-512 integrity`);
-  const bytes = canonicalBase64(value.slice("sha512-".length), label);
-  invariant(bytes.length === 64, `${label} is not a 64-byte SHA-512`);
-  return value;
 }
 
 function shellTarball(version) {
@@ -222,18 +179,6 @@ function writeExclusiveJson(file, value, label) {
 
 // Keep this small adapter local: Shell intake's one repository-owned import is
 // an explicit trust boundary, and sharing it does not justify widening that.
-function appendGithubOutputs(file, entries) {
-  if (file === undefined || file === null) return;
-  invariant(typeof file === "string" && file.length > 0, "GitHub output path is invalid");
-  invariant(lstatSync(file).isFile(), "GitHub output path must be a regular file");
-  const lines = Object.entries(entries).map(([key, value]) => {
-    invariant(/^[a-z][a-z0-9-]*$/.test(key), `invalid GitHub output name ${key}`);
-    invariant(typeof value === "string" && !value.includes("\n") && !value.includes("\r"), `invalid GitHub output ${key}`);
-    return `${key}=${value}`;
-  });
-  appendFileSync(file, `${lines.join("\n")}\n`);
-}
-
 export async function prepareIntake({
   root = ROOT,
   stateFile,
@@ -327,7 +272,13 @@ function verifiedShellEntry(audit, evidence) {
   const entry = matches[0];
   invariant(entry.version === evidence.version, "verified Mirafold version differs from observed latest");
   invariant(entry.location === `node_modules/${SHELL_PACKAGE}`, "verified Mirafold install location differs");
-  invariant(entry.registry === `${PUBLIC_NPM_REGISTRY}/`, "verified Mirafold registry differs");
+  // npm copies the configured registry spelling into this report verbatim.
+  // Accept only the two equivalent spellings of the fixed public registry;
+  // the workflow currently emits the form without a trailing slash.
+  invariant(
+    entry.registry === PUBLIC_NPM_REGISTRY || entry.registry === `${PUBLIC_NPM_REGISTRY}/`,
+    "verified Mirafold registry differs",
+  );
   return entry;
 }
 
