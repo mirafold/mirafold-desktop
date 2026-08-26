@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
+const gitAttributes = readFileSync(
+  new URL("../.gitattributes", import.meta.url),
+  "utf8",
+).replaceAll("\r\n", "\n");
 const workflow = readFileSync(
   new URL("../.github/workflows/shell-intake.yml", import.meta.url),
   "utf8",
@@ -40,6 +44,12 @@ function withoutComments(value) {
     .filter((line) => !line.trimStart().startsWith("#"))
     .join("\n");
 }
+
+test("the reviewed manifests have byte-identical line endings on every runner", () => {
+  assert.match(gitAttributes, /^package\.json text eol=lf$/m);
+  assert.match(gitAttributes, /^package-lock\.json text eol=lf$/m);
+  assert.doesNotMatch(gitAttributes, /eol=crlf/);
+});
 
 test("Shell intake is scheduled twice hourly, manually dispatchable, and serialized", () => {
   const header = workflow.slice(0, workflow.indexOf("\njobs:"));

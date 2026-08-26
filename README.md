@@ -172,7 +172,9 @@ provenance attestation, and then applies an additional Mirafold policy: the
 package bytes must come from `mirafold/mirafold`, the matching `vVERSION` tag,
 and `.github/workflows/release.yml` on a GitHub-hosted runner. Only the reviewed
 `package.json`, `package-lock.json`, and compact `shell-intake.json` evidence
-cross into fresh read-only test and build jobs. The native Linux and Windows
+cross into fresh read-only test and build jobs. Git attributes force the two
+reviewed manifests to LF on every checkout, preserving the byte-exact baseline
+across Linux and Windows. The native Linux and Windows
 runners independently apply that exact pair, install with lifecycle scripts
 disabled, validate the dependency tree, advisories, registry signatures, and
 attestations, run the full suite, and build their native installers. Each
