@@ -170,7 +170,7 @@ byte-level no-op. For a newer version it prepares the package/lock pair with
 lifecycle scripts disabled, asks npm to verify every registry signature and
 provenance attestation, and then applies an additional Mirafold policy: the
 package bytes must come from `mirafold/mirafold`, the matching `vVERSION` tag,
-and `/.github/workflows/release.yml` on a GitHub-hosted runner. Only the reviewed
+and `.github/workflows/release.yml` on a GitHub-hosted runner. Only the reviewed
 `package.json`, `package-lock.json`, and compact `shell-intake.json` evidence
 cross into fresh read-only test and build jobs. The native Linux and Windows
 runners independently apply that exact pair, install with lifecycle scripts

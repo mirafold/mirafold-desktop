@@ -43,7 +43,7 @@ import {
 export const INTAKE_SCHEMA_VERSION = 1;
 export const SHELL_PACKAGE = "mirafold";
 export const SHELL_SOURCE_REPOSITORY = "https://github.com/mirafold/mirafold";
-export const SHELL_SOURCE_WORKFLOW = "/.github/workflows/release.yml";
+export const SHELL_SOURCE_WORKFLOW = ".github/workflows/release.yml";
 export const SLSA_PROVENANCE_TYPE = "https://slsa.dev/provenance/v1";
 export const GITHUB_WORKFLOW_BUILD_TYPE =
   "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1";
@@ -327,7 +327,13 @@ function verifiedShellEntry(audit, evidence) {
   const entry = matches[0];
   invariant(entry.version === evidence.version, "verified Mirafold version differs from observed latest");
   invariant(entry.location === `node_modules/${SHELL_PACKAGE}`, "verified Mirafold install location differs");
-  invariant(entry.registry === `${PUBLIC_NPM_REGISTRY}/`, "verified Mirafold registry differs");
+  // npm copies the configured registry spelling into this report verbatim.
+  // Accept only the two equivalent spellings of the fixed public registry;
+  // the workflow currently emits the form without a trailing slash.
+  invariant(
+    entry.registry === PUBLIC_NPM_REGISTRY || entry.registry === `${PUBLIC_NPM_REGISTRY}/`,
+    "verified Mirafold registry differs",
+  );
   return entry;
 }
 
