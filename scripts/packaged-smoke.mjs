@@ -144,27 +144,49 @@ function processExists(pid) {
   }
 }
 
+function settleWithin(promise, timeout) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), timeout);
+    promise.then((value) => {
+      clearTimeout(timer);
+      resolve(value);
+    });
+  });
+}
+
 async function verifyWindowsCrashOwnership(imported) {
   const readyFile = path.join(project, "windows-crash-child.json");
+  const stageFile = path.join(project, "windows-crash-stage.txt");
   const fakeDaemon = path.join(project, "windows-crash-daemon.cjs");
   fs.writeFileSync(fakeDaemon, [
     'const { spawn } = require("node:child_process");',
     'const { writeFileSync } = require("node:fs");',
     'const { createRequire } = require("node:module");',
     'const path = require("node:path");',
-    'const powershell = path.join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");',
+    'const stage = (value) => writeFileSync(process.env.MIRAFOLD_JOB_CRASH_STAGE, value);',
+    'stage("fake-daemon-started");',
+    'const commandPrompt = path.join(process.env.SystemRoot, "System32", "cmd.exe");',
     'const requireApp = createRequire(path.join(process.env.MIRAFOLD_PACKAGED_APP, "package.json"));',
     'const pty = requireApp("@lydell/node-pty");',
-    'const terminal = pty.spawn(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "[Console]::WriteLine(\\"JOB_PTY_OK\\")"],',
+    'stage("node-pty-loaded");',
+    'const terminal = pty.spawn(commandPrompt, ["/d", "/s", "/c", "echo JOB_PTY_OK"],',
     '  { name: "xterm-256color", cols: 80, rows: 24, cwd: process.cwd(), env: process.env });',
+    'stage("conpty-spawned");',
     'let ptyOutput = "";',
-    'terminal.onData((data) => { ptyOutput += data; });',
-    'terminal.onExit(({ exitCode }) => {',
-    '  if (exitCode !== 0 || !ptyOutput.includes("JOB_PTY_OK")) process.exit(72);',
-    '  const child = spawn(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "while ($true) { Start-Sleep -Seconds 60 }"],',
-    '    { stdio: "ignore", windowsHide: true });',
+    'let crashStarted = false;',
+    'function startCrashChild() {',
+    '  if (crashStarted || !ptyOutput.includes("JOB_PTY_OK")) return;',
+    '  crashStarted = true;',
+    '  stage("conpty-output-observed");',
+    '  try { terminal.kill(); } catch {}',
+    '  // An ordinary child is re-parented when this process crashes but stays',
+    '  // in the immediate Job. Node detached mode can escape a hosted nested Job.',
+    '  const child = spawn(process.execPath, ["--eval", "setInterval(() => {}, 60000)"],',
+    '    { env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, stdio: "ignore", windowsHide: true });',
     '  child.once("error", () => process.exit(73));',
     '  child.once("spawn", () => {',
+    '    child.unref();',
+    '    stage("crash-child-spawned");',
     '    writeFileSync(process.env.MIRAFOLD_JOB_CRASH_READY, JSON.stringify({',
     '      pid: child.pid,',
     '      runAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null,',
@@ -172,7 +194,22 @@ async function verifyWindowsCrashOwnership(imported) {
     '    }));',
     '    setTimeout(() => process.exit(23), 100);',
     '  });',
+    '}',
+    'terminal.onData((data) => {',
+    '  ptyOutput += data;',
+    '  startCrashChild();',
     '});',
+    'terminal.onExit(({ exitCode }) => {',
+    '  if (crashStarted) return;',
+    '  if (exitCode !== 0) process.exit(72);',
+    '  startCrashChild();',
+    '  if (!crashStarted) process.exit(72);',
+    '});',
+    'setTimeout(() => {',
+    '  if (crashStarted) return;',
+    '  process.stderr.write("Windows ConPTY produced no output inside the Job Object\\n");',
+    '  process.exit(74);',
+    '}, 5000);',
     '',
   ].join("\n"));
 
@@ -182,7 +219,11 @@ async function verifyWindowsCrashOwnership(imported) {
     bootstrapEntry: path.join(app, "src", "daemon-bootstrap.cjs"),
     daemonEntry: fakeDaemon,
     windowsJobEntry: path.join(app, "src", "windows-daemon-job.ps1"),
-    env: { ...process.env, MIRAFOLD_JOB_CRASH_READY: readyFile },
+    env: {
+      ...process.env,
+      MIRAFOLD_JOB_CRASH_READY: readyFile,
+      MIRAFOLD_JOB_CRASH_STAGE: stageFile,
+    },
   });
   const wrapper = spawn(launch.command, launch.args, {
     cwd: project,
@@ -202,34 +243,59 @@ async function verifyWindowsCrashOwnership(imported) {
     return value;
   });
 
-  const readyDeadline = Date.now() + 15000;
-  while (!fs.existsSync(readyFile) && outcome === null && Date.now() < readyDeadline) {
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  invariant(fs.existsSync(readyFile), "Windows crash child did not start: " + stderr);
-  const report = JSON.parse(fs.readFileSync(readyFile, "utf8"));
-  invariant(Number.isInteger(report.pid) && report.pid > 0, "Windows crash child reported no PID");
-  invariant(report.runAsNode === null, "Windows crash child inherited Electron Node mode");
-  invariant(report.conptyWorkedInsideJob === true, "Windows ConPTY failed inside the Job Object");
+  try {
+    // A fresh hosted Windows PowerShell spends about 17 seconds compiling the
+    // wrapper's Job-Object interop type before it can invoke this child. This
+    // is the second such wrapper in the smoke, so give native setup bounded
+    // headroom instead of misclassifying ordinary Add-Type startup as a hang.
+    const readyDeadline = Date.now() + 45000;
+    while (!fs.existsSync(readyFile) && outcome === null && Date.now() < readyDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    let stage = "wrapper-started; fake daemon did not record a stage";
+    try { stage = fs.readFileSync(stageFile, "utf8"); } catch {}
+    invariant(fs.existsSync(readyFile), "Windows crash child did not start (stage: " + stage + "): " + stderr);
+    const report = JSON.parse(fs.readFileSync(readyFile, "utf8"));
+    invariant(Number.isInteger(report.pid) && report.pid > 0, "Windows crash child reported no PID");
+    invariant(report.runAsNode === null, "Windows crash child inherited Electron Node mode");
+    invariant(report.conptyWorkedInsideJob === true, "Windows ConPTY failed inside the Job Object");
 
-  const wrapperResult = await closed;
-  invariant(!wrapperResult.error, "Windows Job Object wrapper failed: " + wrapperResult.error?.message);
-  invariant(wrapperResult.signal === null, "Windows Job Object wrapper ended from " + wrapperResult.signal);
-  invariant(wrapperResult.code === 23, "Windows Job Object wrapper exited " + wrapperResult.code + ": " + stderr);
+    const wrapperResult = outcome ?? await settleWithin(closed, 15000);
+    invariant(wrapperResult !== null, "Windows Job Object wrapper did not exit: " + stderr);
+    invariant(!wrapperResult.error, "Windows Job Object wrapper failed: " + wrapperResult.error?.message);
+    invariant(wrapperResult.signal === null, "Windows Job Object wrapper ended from " + wrapperResult.signal);
+    invariant(wrapperResult.code === 23, "Windows Job Object wrapper exited " + wrapperResult.code + ": " + stderr);
 
-  const stoppedDeadline = Date.now() + 10000;
-  while (processExists(report.pid) && Date.now() < stoppedDeadline) {
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    const stoppedDeadline = Date.now() + 10000;
+    while (processExists(report.pid) && Date.now() < stoppedDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    const stopped = !processExists(report.pid);
+    if (!stopped) {
+      spawnSync("taskkill.exe", ["/PID", String(report.pid), "/T", "/F"], {
+        stdio: "ignore",
+        timeout: 10000,
+        windowsHide: true,
+      });
+    }
+    invariant(stopped, "Windows Job Object left crash descendant " + report.pid + " running");
+    return true;
+  } finally {
+    // A failed readiness/exit assertion must not leave the wrapper (and its
+    // deliberately long-lived descendant) holding this headless probe open.
+    if (outcome === null) {
+      try { wrapper.kill(); } catch {}
+      if (await settleWithin(closed, 5000) === null && wrapper.pid) {
+        spawnSync("taskkill.exe", ["/PID", String(wrapper.pid), "/T", "/F"], {
+          stdio: "ignore",
+          timeout: 10000,
+          windowsHide: true,
+        });
+        wrapper.stderr.destroy();
+        wrapper.unref();
+      }
+    }
   }
-  const stopped = !processExists(report.pid);
-  if (!stopped) {
-    spawnSync("taskkill.exe", ["/PID", String(report.pid), "/T", "/F"], {
-      stdio: "ignore",
-      windowsHide: true,
-    });
-  }
-  invariant(stopped, "Windows Job Object left crash descendant " + report.pid + " running");
-  return true;
 }
 
 (async () => {
@@ -245,7 +311,7 @@ async function verifyWindowsCrashOwnership(imported) {
   const daemon = new imported.Daemon((info) => { crash = info; });
   const guard = setTimeout(() => {
     void stopDaemon(daemon).finally(() => process.exit(70));
-  }, 75000);
+  }, 105000);
 
   try {
     const rawUrl = await daemon.start(project);
@@ -348,7 +414,10 @@ function parseMarkedReport(stdout, marker, label) {
 }
 
 function spawnResult(result, label) {
-  if (result.error) throw new Error(`${label} could not run: ${result.error.message}`);
+  if (result.error) {
+    const diagnostic = String(result.stderr ?? "").trim().slice(-4000);
+    throw new Error(`${label} could not run: ${result.error.message}${diagnostic ? `: ${diagnostic}` : ""}`);
+  }
   invariant(result.signal === null, `${label} ended from signal ${result.signal}`);
   invariant(result.status === 0, `${label} exited ${result.status}: ${String(result.stderr).slice(-4000)}`);
 }
@@ -452,7 +521,7 @@ export function runPackagedDaemonProbe({
       }),
       maxBuffer: 4 * 1024 * 1024,
       shell: false,
-      timeout: 90_000,
+      timeout: 120_000,
       windowsHide: true,
     });
     assertCredentialSafe(String(result.stdout), "packaged daemon stdout");

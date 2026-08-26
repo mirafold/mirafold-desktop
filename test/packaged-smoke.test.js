@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   packagedPaths,
   runPackagedDaemonProbe,
   runPackagedNodeProbe,
 } from "../scripts/packaged-smoke.mjs";
+
+const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 function jsonText(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
@@ -193,6 +196,25 @@ test("the packaged daemon smoke rejects credential-bearing diagnostics", (t) => 
   );
 });
 
+test("a packaged daemon timeout preserves the inner diagnostic", (t) => {
+  const { root, app } = fixture(t);
+  assert.throws(
+    () => runPackagedDaemonProbe({
+      executable: process.execPath,
+      appDirectory: app,
+      temporaryDirectory: root,
+      spawn: () => ({
+        error: Object.assign(new Error("spawnSync ETIMEDOUT"), { code: "ETIMEDOUT" }),
+        signal: "SIGTERM",
+        status: null,
+        stderr: "inner Windows crash probe failed\n",
+        stdout: "",
+      }),
+    }),
+    /spawnSync ETIMEDOUT: inner Windows crash probe failed/,
+  );
+});
+
 test("the Windows packaged daemon smoke uses native tasklist and proves no Mirafold image remains", (t) => {
   const { root, app } = fixture(t);
   const executable = path.join(root, "Mirafold.exe");
@@ -255,6 +277,25 @@ test("the Windows packaged daemon smoke rejects a remaining Mirafold image", (t)
     }),
     /1 packaged Mirafold processes remained/,
   );
+});
+
+test("the native Windows runner proves ConPTY and Job-Object crash ownership", {
+  skip: process.platform !== "win32",
+  timeout: 150_000,
+}, (t) => {
+  const temporaryDirectory = mkdtempSync(path.join(tmpdir(), "mirafold-native-windows-smoke-"));
+  t.after(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
+  const executable = path.join(temporaryDirectory, "Mirafold.exe");
+  copyFileSync(process.execPath, executable);
+
+  const report = runPackagedDaemonProbe({
+    executable,
+    appDirectory: ROOT,
+    platform: "windows",
+    temporaryDirectory,
+  });
+  assert.equal(report.windowsCrashTreeStopped, true);
+  assert.equal(report.executableProcessesAfterProbe, 0);
 });
 
 test("native build output paths are exact for Linux and Windows", () => {
