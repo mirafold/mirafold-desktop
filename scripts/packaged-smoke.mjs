@@ -105,6 +105,7 @@ const DAEMON_CHILD_PROBE = String.raw`
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
+const { randomUUID } = require("node:crypto");
 const { pathToFileURL } = require("node:url");
 
 const app = process.env.MIRAFOLD_PACKAGED_APP;
@@ -221,6 +222,7 @@ async function verifyWindowsCrashOwnership(imported) {
     windowsJobEntry: path.join(app, "src", "windows-daemon-job.ps1"),
     env: {
       ...process.env,
+      MIRAFOLD_DESKTOP_WINDOWS_STOP_EVENT: "Local\\MirafoldDesktopStop-" + randomUUID(),
       MIRAFOLD_JOB_CRASH_READY: readyFile,
       MIRAFOLD_JOB_CRASH_STAGE: stageFile,
     },

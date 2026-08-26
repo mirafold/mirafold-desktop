@@ -27,6 +27,7 @@
 // Node.js installed, which is the entire point of shipping a desktop build.
 
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -39,6 +40,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DAEMON_BOOTSTRAP = path.join(HERE, "daemon-bootstrap.cjs");
 const WINDOWS_DAEMON_JOB = path.join(HERE, "windows-daemon-job.ps1");
 const PID_LEDGER_ENV = "MIRAFOLD_DESKTOP_PID_LEDGER";
+const WINDOWS_STOP_EVENT_ENV = "MIRAFOLD_DESKTOP_WINDOWS_STOP_EVENT";
 
 // How long to wait for the daemon to announce its URL before calling the boot a
 // failure. Generous: a cold start can pay for filesystem crawling on a large
@@ -443,15 +445,70 @@ async function waitUntil(predicate, timeoutMs) {
  * @param {number} pid daemon/process-group leader
  * @param {Array<object>} trackedIdentities Linux identities retained before a
  *   daemon crash could erase their ancestry
- * @param {{termTimeoutMs?: number, killTimeoutMs?: number, ledgerFile?: string|null}} timings
- *   bounded waits plus the private Linux creation ledger; exposed so focused
- *   tests do not spend four seconds escalating
+ * @param {{termTimeoutMs?: number, killTimeoutMs?: number, ledgerFile?: string|null, windowsJobOwned?: boolean, windowsJobClosed?: Promise<unknown>|null, windowsStopEvent?: string|null, windowsEnv?: object|null}} timings
+ *   bounded waits, the private Linux creation ledger, and whether a Windows
+ *   leader owns its descendants through a kill-on-close Job Object; exposed so
+ *   focused tests do not spend four seconds escalating
  * @returns {Promise<boolean>} true only after clean tree termination is proven
  */
 export async function terminateProcessTree(pid, trackedIdentities = [], timings = {}) {
   if (!Number.isInteger(pid) || pid <= 0) return true;
 
   if (process.platform === "win32") {
+    if (timings.windowsJobOwned === true) {
+      // The wrapper registered this event with a native callback after joining
+      // its kill-on-close Job. Signal it from a short stock-PowerShell process;
+      // the callback calls TerminateJobObject, which is an authoritative tree
+      // boundary even when taskkill cannot traverse a hosted Electron tree.
+      const stopEvent = timings.windowsStopEvent;
+      if (typeof stopEvent !== "string" || !stopEvent.startsWith("Local\\MirafoldDesktopStop-")) {
+        return false;
+      }
+      const systemRoot = timings.windowsEnv?.SystemRoot
+        ?? timings.windowsEnv?.SYSTEMROOT
+        ?? "C:\\Windows";
+      const signaler = spawn(
+        path.win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+        [
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "$event = [Threading.EventWaitHandle]::OpenExisting($env:MIRAFOLD_DESKTOP_WINDOWS_STOP_EVENT); try { if (-not $event.Set()) { exit 1 } } finally { $event.Dispose() }",
+        ],
+        {
+          env: { ...timings.windowsEnv, [WINDOWS_STOP_EVENT_ENV]: stopEvent },
+          stdio: "ignore",
+          windowsHide: true,
+        },
+      );
+      signaler.once("error", () => {});
+      const signaled = await new Promise((resolve) => {
+        let settled = false;
+        const finish = (clean) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          resolve(clean);
+        };
+        const timeout = setTimeout(() => {
+          signaler.kill();
+          finish(false);
+        }, 10_000);
+        signaler.once("error", () => finish(false));
+        signaler.once("close", (code) => finish(code === 0));
+      });
+      if (!signaled || !timings.windowsJobClosed) return false;
+      // ChildProcess `close` is stronger than `exit`: Node emits it only after
+      // the wrapper has exited and every inherited stdio handle is closed. The
+      // packaged daemon inherits those handles, so this also prevents stop()
+      // from racing the final loopback reachability check while Job teardown
+      // is still completing.
+      return Promise.race([
+        timings.windowsJobClosed.then(() => true),
+        delay(10_000).then(() => false),
+      ]);
+    }
     const killer = killTree(pid, "SIGTERM");
     if (!killer) return !processExists(pid);
     return new Promise((resolve) => {
@@ -543,6 +600,7 @@ export class Daemon {
   #treeTracker = null;
   #stopping = false;
   #stopPromise = null;
+  #windowsStopEvent = null;
   #stderr = [];
 
   /** @param {(info: {code: number|null, signal: string|null, stderr: string, clean: boolean}) => void} onCrash */
@@ -583,6 +641,10 @@ export class Daemon {
       this.#ledgerFile = ledgerFile;
       env[PID_LEDGER_ENV] = ledgerFile;
     }
+    if (process.platform === "win32") {
+      this.#windowsStopEvent = `Local\\MirafoldDesktopStop-${randomUUID()}`;
+      env[WINDOWS_STOP_EVENT_ENV] = this.#windowsStopEvent;
+    }
     const launch = daemonLaunchSpec({ env });
     let child;
     try {
@@ -597,6 +659,7 @@ export class Daemon {
       });
     } catch (error) {
       this.#cleanLedger();
+      this.#windowsStopEvent = null;
       throw error;
     }
     this.#child = child;
@@ -675,6 +738,7 @@ export class Daemon {
         });
       }
       this.#cleanLedger();
+      this.#windowsStopEvent = null;
       flushOutput();
       err.stderr = this.stderr;
       throw err;
@@ -696,6 +760,7 @@ export class Daemon {
         : terminateProcessTree(child.pid, trackedIdentities, { ledgerFile: this.#ledgerFile });
       this.#stopPromise = cleanup.finally(() => {
         this.#cleanLedger();
+        this.#windowsStopEvent = null;
       });
       void this.#stopPromise.then((clean) => {
         if (!this.#stopping) this.onCrash?.({ code, signal, stderr: this.stderr, clean });
@@ -733,7 +798,7 @@ export class Daemon {
   /**
    * Stop the daemon AND everything it started (see killTree). SIGTERM first
    * so the daemon can close sockets, SIGKILL after a grace period for
-   * anything ignoring it; on Windows the first taskkill is already final.
+   * anything ignoring it; on Windows a named event terminates the owning Job.
    */
   stop() {
     // Set before the child check: start() consults it between its env await
@@ -743,14 +808,27 @@ export class Daemon {
     const child = this.#child;
     if (!child?.pid) {
       this.#cleanLedger();
+      this.#windowsStopEvent = null;
       return Promise.resolve(true);
     }
     this.#child = null;
     const trackedIdentities = this.#takeTreeSnapshot();
+    const windowsJobClosed = process.platform === "win32"
+      ? new Promise((resolve) => child.once("close", resolve))
+      : null;
     this.#stopPromise = terminateProcessTree(child.pid, trackedIdentities, {
       ledgerFile: this.#ledgerFile,
+      // A startup URL can only arrive after the PowerShell wrapper has created
+      // its Job and launched the daemon, so the wrapper is now a valid OS-owned
+      // process-tree boundary. The pre-start failure path deliberately omits
+      // this flag because Job setup may not have completed there.
+      windowsJobOwned: process.platform === "win32",
+      windowsJobClosed,
+      windowsStopEvent: this.#windowsStopEvent,
+      windowsEnv: process.env,
     }).finally(() => {
       this.#cleanLedger();
+      this.#windowsStopEvent = null;
     });
     return this.#stopPromise;
   }
