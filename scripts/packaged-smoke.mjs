@@ -242,7 +242,11 @@ async function verifyWindowsCrashOwnership(imported) {
   });
 
   try {
-    const readyDeadline = Date.now() + 15000;
+    // A fresh hosted Windows PowerShell spends about 17 seconds compiling the
+    // wrapper's Job-Object interop type before it can invoke this child. This
+    // is the second such wrapper in the smoke, so give native setup bounded
+    // headroom instead of misclassifying ordinary Add-Type startup as a hang.
+    const readyDeadline = Date.now() + 45000;
     while (!fs.existsSync(readyFile) && outcome === null && Date.now() < readyDeadline) {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
@@ -305,7 +309,7 @@ async function verifyWindowsCrashOwnership(imported) {
   const daemon = new imported.Daemon((info) => { crash = info; });
   const guard = setTimeout(() => {
     void stopDaemon(daemon).finally(() => process.exit(70));
-  }, 75000);
+  }, 105000);
 
   try {
     const rawUrl = await daemon.start(project);
@@ -515,7 +519,7 @@ export function runPackagedDaemonProbe({
       }),
       maxBuffer: 4 * 1024 * 1024,
       shell: false,
-      timeout: 90_000,
+      timeout: 120_000,
       windowsHide: true,
     });
     assertCredentialSafe(String(result.stdout), "packaged daemon stdout");

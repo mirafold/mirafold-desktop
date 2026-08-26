@@ -281,7 +281,7 @@ test("the Windows packaged daemon smoke rejects a remaining Mirafold image", (t)
 
 test("the native Windows runner proves ConPTY and Job-Object crash ownership", {
   skip: process.platform !== "win32",
-  timeout: 120_000,
+  timeout: 150_000,
 }, (t) => {
   const temporaryDirectory = mkdtempSync(path.join(tmpdir(), "mirafold-native-windows-smoke-"));
   t.after(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
