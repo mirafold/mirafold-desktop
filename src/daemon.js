@@ -443,7 +443,7 @@ async function waitUntil(predicate, timeoutMs) {
  * @param {number} pid daemon/process-group leader
  * @param {Array<object>} trackedIdentities Linux identities retained before a
  *   daemon crash could erase their ancestry
- * @param {{termTimeoutMs?: number, killTimeoutMs?: number, ledgerFile?: string|null, windowsJobOwned?: boolean}} timings
+ * @param {{termTimeoutMs?: number, killTimeoutMs?: number, ledgerFile?: string|null, windowsJobOwned?: boolean, windowsJobClosed?: Promise<unknown>|null}} timings
  *   bounded waits, the private Linux creation ledger, and whether a Windows
  *   leader owns its descendants through a kill-on-close Job Object; exposed so
  *   focused tests do not spend four seconds escalating
@@ -466,7 +466,18 @@ export async function terminateProcessTree(pid, trackedIdentities = [], timings 
       } catch (error) {
         return error?.code === "ESRCH";
       }
-      return waitUntil(() => processExists(pid), 10_000);
+      if (!timings.windowsJobClosed) {
+        return waitUntil(() => processExists(pid), 10_000);
+      }
+      // ChildProcess `close` is stronger than `exit`: Node emits it only after
+      // the wrapper has exited and every inherited stdio handle is closed. The
+      // packaged daemon inherits those handles, so this also prevents stop()
+      // from racing the final loopback reachability check while Job teardown
+      // is still completing.
+      return Promise.race([
+        timings.windowsJobClosed.then(() => true),
+        delay(10_000).then(() => false),
+      ]);
     }
     const killer = killTree(pid, "SIGTERM");
     if (!killer) return !processExists(pid);
@@ -763,6 +774,9 @@ export class Daemon {
     }
     this.#child = null;
     const trackedIdentities = this.#takeTreeSnapshot();
+    const windowsJobClosed = process.platform === "win32"
+      ? new Promise((resolve) => child.once("close", resolve))
+      : null;
     this.#stopPromise = terminateProcessTree(child.pid, trackedIdentities, {
       ledgerFile: this.#ledgerFile,
       // A startup URL can only arrive after the PowerShell wrapper has created
@@ -770,6 +784,7 @@ export class Daemon {
       // process-tree boundary. The pre-start failure path deliberately omits
       // this flag because Job setup may not have completed there.
       windowsJobOwned: process.platform === "win32",
+      windowsJobClosed,
     }).finally(() => {
       this.#cleanLedger();
     });
