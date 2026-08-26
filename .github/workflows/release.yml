@@ -285,8 +285,11 @@ jobs:
           created=true
 
           gh release upload "$RELEASE_TAG" artifacts/*
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
-            --jq '{tagName:.tag_name,isDraft:.draft,isPrerelease:.prerelease,assets:[.assets[]|{name,size,digest}]}' \
+          # GitHub's tag endpoint resolves published releases only. An
+          # authenticated release listing includes drafts; pagination also
+          # keeps recovery correct after the repository exceeds 100 releases.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\" and .draft == true) | {tagName:.tag_name,isDraft:.draft,isPrerelease:.prerelease,assets:[.assets[]|{name,size,digest}]}" \
             > "$RUNNER_TEMP/mirafold-release.json"
           node scripts/release-contract.mjs \
             draft "$RELEASE_TAG" artifacts "$RUNNER_TEMP/mirafold-release.json"
