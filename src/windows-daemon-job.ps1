@@ -70,6 +70,31 @@ namespace MirafoldDesktop {
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool TerminateJobObject(IntPtr job, UInt32 exitCode);
+  }
+
+  public sealed class JobStopRegistration : IDisposable {
+    private readonly EventWaitHandle stopEvent;
+    private readonly RegisteredWaitHandle registration;
+
+    public JobStopRegistration(IntPtr job, string eventName) {
+      stopEvent = new EventWaitHandle(false, EventResetMode.ManualReset, eventName);
+      registration = ThreadPool.RegisterWaitForSingleObject(
+        stopEvent,
+        (state, timedOut) => JobObjectNative.TerminateJobObject((IntPtr)state, 0),
+        job,
+        Timeout.Infinite,
+        true
+      );
+    }
+
+    public void Dispose() {
+      registration.Unregister(null);
+      stopEvent.Dispose();
+    }
   }
 }
 "@
@@ -117,5 +142,15 @@ if (-not $assigned) {
   )
 }
 
-& $ElectronExecutable $BootstrapEntry $DaemonEntry
-exit $LASTEXITCODE
+$stopEventName = $env:MIRAFOLD_DESKTOP_WINDOWS_STOP_EVENT
+if (-not $stopEventName -or -not $stopEventName.StartsWith("Local\MirafoldDesktopStop-")) {
+  throw "Mirafold daemon stop event is missing or invalid"
+}
+$stopRegistration = [MirafoldDesktop.JobStopRegistration]::new($job, $stopEventName)
+
+try {
+  & $ElectronExecutable $BootstrapEntry $DaemonEntry
+  exit $LASTEXITCODE
+} finally {
+  $stopRegistration.Dispose()
+}
