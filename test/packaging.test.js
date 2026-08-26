@@ -37,7 +37,7 @@ test("the updater protocol implementation is an exact runtime dependency", () =>
 });
 
 test("blockmap verification pins the builder's existing hash implementation for development only", () => {
-  assert.equal(packageMetadata.devDependencies?.["@noble/hashes"], "2.2.0");
+  assert.equal(packageMetadata.devDependencies?.["@noble/hashes"], "2.3.0");
   assert.equal(packageMetadata.dependencies?.["@noble/hashes"], undefined);
 });
 
