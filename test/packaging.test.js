@@ -84,14 +84,18 @@ test("packaging carries the daemon bootstrap and Windows kill-on-close wrapper",
     "AssignProcessToJobObject",
     "TerminateJobObject",
     "JobStopRegistration",
+    "CreateProcess",
+    "CREATE_SUSPENDED",
+    "IsProcessInJob",
+    "JobObjectProcessLauncher",
     "MIRAFOLD_DESKTOP_WINDOWS_STOP_EVENT",
     "0x00002000",
   ]) {
     assert.ok(windowsJobSource.includes(required), `Windows Job Object wrapper omits ${required}`);
   }
   assert.ok(
-    windowsJobSource.indexOf("AssignProcessToJobObject") < windowsJobSource.lastIndexOf("& $ElectronExecutable"),
-    "the wrapper must join the Job Object before starting Electron",
+    windowsJobSource.indexOf("AssignProcessToJobObject") < windowsJobSource.lastIndexOf("JobObjectProcessLauncher]::Run"),
+    "the wrapper must establish Job assignment before resuming Electron",
   );
 });
 
