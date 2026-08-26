@@ -11,13 +11,17 @@
 // the negative pid signals the group. Linux additionally tracks per-process
 // identity (pid + kernel start time) because pseudo-terminals start their
 // foreground process in a new session and group, outside the daemon's own; a
-// retained identity guards a later signal against a reused PID. Windows uses
-// `taskkill /T` for the orderly path and a kill-on-close Job Object (see
-// windows-daemon-job.ps1) so a daemon crash cannot erase the ancestry Windows
-// would otherwise need to walk.
+// retained identity guards a later signal against a reused PID. On Windows,
+// the wrapper owns the daemon in a kill-on-close Job Object (see
+// windows-daemon-job.ps1). A private named event requests complete Job
+// termination during an orderly stop; kill-on-close provides the same boundary
+// after a crash, while `taskkill /T` remains the pre-ownership fallback.
 
 import { spawn } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
+
+const WINDOWS_STOP_EVENT_ENV = "MIRAFOLD_DESKTOP_WINDOWS_STOP_EVENT";
 
 // Linux pseudo-terminals start their foreground process in a new session and
 // process group. The daemon's own group therefore cannot, by itself, describe
@@ -178,9 +182,9 @@ export class LinuxProcessTreeTracker {
  *
  * Unix: signal the daemon process GROUP (the negative pid), which detached:true
  * made it the leader of. Linux termination supplements this primitive with the
- * tracked identities above for separately grouped PTYs. Windows normally uses
- * `taskkill /T`; the daemon also runs inside a kill-on-close Job Object so a
- * daemon crash cannot erase the only ancestry Windows could walk.
+ * tracked identities above for separately grouped PTYs. The Windows fallback
+ * uses `taskkill /T`; the ordinary post-start path uses the daemon's
+ * kill-on-close Job Object instead.
  */
 function killTree(pid, signal) {
   if (process.platform === "win32") {
@@ -241,15 +245,70 @@ async function waitUntil(predicate, timeoutMs) {
  * @param {number} pid daemon/process-group leader
  * @param {Array<object>} trackedIdentities Linux identities retained before a
  *   daemon crash could erase their ancestry
- * @param {{termTimeoutMs?: number, killTimeoutMs?: number, ledgerFile?: string|null}} timings
- *   bounded waits plus the private Linux creation ledger; exposed so focused
- *   tests do not spend four seconds escalating
+ * @param {{termTimeoutMs?: number, killTimeoutMs?: number, ledgerFile?: string|null, windowsJobOwned?: boolean, windowsJobClosed?: Promise<unknown>|null, windowsStopEvent?: string|null, windowsEnv?: object|null}} timings
+ *   bounded waits, the private Linux creation ledger, and whether a Windows
+ *   leader owns its descendants through a kill-on-close Job Object; exposed so
+ *   focused tests do not spend four seconds escalating
  * @returns {Promise<boolean>} true only after clean tree termination is proven
  */
 export async function terminateProcessTree(pid, trackedIdentities = [], timings = {}) {
   if (!Number.isInteger(pid) || pid <= 0) return true;
 
   if (process.platform === "win32") {
+    if (timings.windowsJobOwned === true) {
+      // The wrapper registered this event with a native callback after joining
+      // its kill-on-close Job. Signal it from a short stock-PowerShell process;
+      // the callback calls TerminateJobObject, which is an authoritative tree
+      // boundary even when taskkill cannot traverse a hosted Electron tree.
+      const stopEvent = timings.windowsStopEvent;
+      if (typeof stopEvent !== "string" || !stopEvent.startsWith("Local\\MirafoldDesktopStop-")) {
+        return false;
+      }
+      const systemRoot = timings.windowsEnv?.SystemRoot
+        ?? timings.windowsEnv?.SYSTEMROOT
+        ?? "C:\\Windows";
+      const signaler = spawn(
+        path.win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+        [
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "$event = [Threading.EventWaitHandle]::OpenExisting($env:MIRAFOLD_DESKTOP_WINDOWS_STOP_EVENT); try { if (-not $event.Set()) { exit 1 } } finally { $event.Dispose() }",
+        ],
+        {
+          env: { ...timings.windowsEnv, [WINDOWS_STOP_EVENT_ENV]: stopEvent },
+          stdio: "ignore",
+          windowsHide: true,
+        },
+      );
+      signaler.once("error", () => {});
+      const signaled = await new Promise((resolve) => {
+        let settled = false;
+        const finish = (clean) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          resolve(clean);
+        };
+        const timeout = setTimeout(() => {
+          signaler.kill();
+          finish(false);
+        }, 10_000);
+        signaler.once("error", () => finish(false));
+        signaler.once("close", (code) => finish(code === 0));
+      });
+      if (!signaled || !timings.windowsJobClosed) return false;
+      // ChildProcess `close` is stronger than `exit`: Node emits it only after
+      // the wrapper has exited and every inherited stdio handle is closed. The
+      // packaged daemon inherits those handles, so this also prevents stop()
+      // from racing the final loopback reachability check while Job teardown
+      // is still completing.
+      return Promise.race([
+        timings.windowsJobClosed.then(() => true),
+        delay(10_000).then(() => false),
+      ]);
+    }
     const killer = killTree(pid, "SIGTERM");
     if (!killer) return !processExists(pid);
     return new Promise((resolve) => {

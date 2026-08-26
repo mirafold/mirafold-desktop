@@ -521,7 +521,7 @@ test("the writer reconstructs, stages, commits, and tags only the reviewed pair"
       repository: "https://github.com/mirafold/mirafold",
       ref: `refs/tags/v${SHELL_VERSION}`,
       commit: SOURCE,
-      workflow: "/.github/workflows/release.yml",
+      workflow: ".github/workflows/release.yml",
       builder: "https://github.com/actions/runner/github-hosted",
     },
     files: {

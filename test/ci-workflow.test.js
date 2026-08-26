@@ -39,3 +39,15 @@ test("both CI platforms use the exact toolchain and verify dependencies before t
   assert.doesNotMatch(workflow, /cache:/);
   assert.doesNotMatch(workflow, /\bnpx\b/);
 });
+
+test("Windows pull-request CI builds and smokes the real packaged Electron runtime", () => {
+  assert.match(
+    workflow,
+    /name: Build and smoke-check the real Windows package\s*\n\s*if: matrix\.name == 'windows'/,
+  );
+  assert.match(
+    workflow,
+    /node node_modules\/electron-builder\/cli\.js --win --dir --publish never/,
+  );
+  assert.match(workflow, /node scripts\/packaged-smoke\.mjs windows dist/);
+});

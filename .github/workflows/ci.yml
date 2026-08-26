@@ -68,3 +68,15 @@ jobs:
           npm audit --audit-level=moderate
           npm audit signatures --include-attestations
           npm test
+
+      # A copied node.exe is close to ELECTRON_RUN_AS_NODE, but it is not the
+      # packaged Electron runtime. The 2026-08-25 production intake proved that
+      # distinction when the copied-Node Job test passed and Mirafold.exe still
+      # hung during clean shutdown. Keep the real Windows package lifecycle in
+      # pull-request CI so that failure cannot reach the scheduled workflow.
+      - name: Build and smoke-check the real Windows package
+        if: matrix.name == 'windows'
+        run: |
+          set -euo pipefail
+          node node_modules/electron-builder/cli.js --win --dir --publish never
+          node scripts/packaged-smoke.mjs windows dist
