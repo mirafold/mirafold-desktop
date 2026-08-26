@@ -156,28 +156,35 @@ function settleWithin(promise, timeout) {
 
 async function verifyWindowsCrashOwnership(imported) {
   const readyFile = path.join(project, "windows-crash-child.json");
+  const stageFile = path.join(project, "windows-crash-stage.txt");
   const fakeDaemon = path.join(project, "windows-crash-daemon.cjs");
   fs.writeFileSync(fakeDaemon, [
     'const { spawn } = require("node:child_process");',
     'const { writeFileSync } = require("node:fs");',
     'const { createRequire } = require("node:module");',
     'const path = require("node:path");',
+    'const stage = (value) => writeFileSync(process.env.MIRAFOLD_JOB_CRASH_STAGE, value);',
+    'stage("fake-daemon-started");',
     'const commandPrompt = path.join(process.env.SystemRoot, "System32", "cmd.exe");',
     'const requireApp = createRequire(path.join(process.env.MIRAFOLD_PACKAGED_APP, "package.json"));',
     'const pty = requireApp("@lydell/node-pty");',
+    'stage("node-pty-loaded");',
     'const terminal = pty.spawn(commandPrompt, ["/d", "/s", "/c", "echo JOB_PTY_OK"],',
     '  { name: "xterm-256color", cols: 80, rows: 24, cwd: process.cwd(), env: process.env });',
+    'stage("conpty-spawned");',
     'let ptyOutput = "";',
     'let crashStarted = false;',
     'function startCrashChild() {',
     '  if (crashStarted || !ptyOutput.includes("JOB_PTY_OK")) return;',
     '  crashStarted = true;',
+    '  stage("conpty-output-observed");',
     '  try { terminal.kill(); } catch {}',
     '  const child = spawn(process.execPath, ["--eval", "setInterval(() => {}, 60000)"],',
     '    { detached: true, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, stdio: "ignore", windowsHide: true });',
     '  child.once("error", () => process.exit(73));',
     '  child.once("spawn", () => {',
     '    child.unref();',
+    '    stage("crash-child-spawned");',
     '    writeFileSync(process.env.MIRAFOLD_JOB_CRASH_READY, JSON.stringify({',
     '      pid: child.pid,',
     '      runAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null,',
@@ -210,7 +217,11 @@ async function verifyWindowsCrashOwnership(imported) {
     bootstrapEntry: path.join(app, "src", "daemon-bootstrap.cjs"),
     daemonEntry: fakeDaemon,
     windowsJobEntry: path.join(app, "src", "windows-daemon-job.ps1"),
-    env: { ...process.env, MIRAFOLD_JOB_CRASH_READY: readyFile },
+    env: {
+      ...process.env,
+      MIRAFOLD_JOB_CRASH_READY: readyFile,
+      MIRAFOLD_JOB_CRASH_STAGE: stageFile,
+    },
   });
   const wrapper = spawn(launch.command, launch.args, {
     cwd: project,
@@ -235,7 +246,9 @@ async function verifyWindowsCrashOwnership(imported) {
     while (!fs.existsSync(readyFile) && outcome === null && Date.now() < readyDeadline) {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
-    invariant(fs.existsSync(readyFile), "Windows crash child did not start: " + stderr);
+    let stage = "wrapper-started; fake daemon did not record a stage";
+    try { stage = fs.readFileSync(stageFile, "utf8"); } catch {}
+    invariant(fs.existsSync(readyFile), "Windows crash child did not start (stage: " + stage + "): " + stderr);
     const report = JSON.parse(fs.readFileSync(readyFile, "utf8"));
     invariant(Number.isInteger(report.pid) && report.pid > 0, "Windows crash child reported no PID");
     invariant(report.runAsNode === null, "Windows crash child inherited Electron Node mode");
