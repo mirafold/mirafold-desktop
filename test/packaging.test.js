@@ -82,6 +82,9 @@ test("packaging carries the daemon bootstrap and Windows kill-on-close wrapper",
     "CreateJobObject",
     "SetInformationJobObject",
     "AssignProcessToJobObject",
+    "TerminateJobObject",
+    "JobStopRegistration",
+    "MIRAFOLD_DESKTOP_WINDOWS_STOP_EVENT",
     "0x00002000",
   ]) {
     assert.ok(windowsJobSource.includes(required), `Windows Job Object wrapper omits ${required}`);
