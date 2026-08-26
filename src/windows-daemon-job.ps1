@@ -19,6 +19,7 @@ $ErrorActionPreference = "Stop"
 $jobObjectSource = @"
 using System;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace MirafoldDesktop {
   [StructLayout(LayoutKind.Sequential)]
