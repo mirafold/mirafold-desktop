@@ -273,14 +273,23 @@ test("the writer pushes branch and annotated tag together, then publishes only a
   const notes = value.indexOf("release-coordinator.mjs notes");
   const draft = value.indexOf('gh release create "$RELEASE_TAG"');
   const upload = value.indexOf('gh release upload "$RELEASE_TAG"');
+  const draftLookup = value.indexOf("releases?per_page=100");
   const verifyDraft = value.indexOf("release-contract.mjs draft");
   const publish = value.indexOf('gh release edit "$RELEASE_TAG"');
+  const publicLookup = value.indexOf("releases/tags/$RELEASE_TAG");
   const verifyPublic = value.indexOf("release-contract.mjs published");
   assert.ok(prepare !== -1 && prepare < preflight && preflight < commit);
   assert.ok(commit < tag && tag < local && local < push && push < remote);
-  assert.ok(remote < notes && notes < draft && draft < upload && upload < verifyDraft);
-  assert.ok(verifyDraft < publish && publish < verifyPublic);
+  assert.ok(remote < notes && notes < draft && draft < upload && upload < draftLookup && draftLookup < verifyDraft);
+  assert.ok(verifyDraft < publish && publish < publicLookup && publicLookup < verifyPublic);
   assert.match(value.slice(draft, upload), /--draft/);
+  assert.match(value.slice(upload, verifyDraft), /gh api --paginate/);
+  assert.ok(value.includes('select(.tag_name == \\"$RELEASE_TAG\\" and .draft == true)'));
+  assert.equal(
+    value.match(/releases\/tags\/\$RELEASE_TAG/g)?.length,
+    1,
+    "only the published release may use GitHub's tag endpoint",
+  );
   assert.match(value.slice(publish), /--latest/);
   assert.equal(value.match(/\{name,size,digest\}/g)?.length, 2);
 });

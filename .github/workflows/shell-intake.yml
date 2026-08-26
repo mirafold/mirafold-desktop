@@ -490,8 +490,11 @@ jobs:
             exit 1
           fi
 
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
-            --jq '{tagName:.tag_name,isDraft:.draft,isPrerelease:.prerelease,assets:[.assets[]|{name,size,digest}]}' \
+          # GitHub's tag endpoint resolves published releases only. An
+          # authenticated release listing includes drafts; pagination lets a
+          # recovery run find its draft regardless of repository release count.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\" and .draft == true) | {tagName:.tag_name,isDraft:.draft,isPrerelease:.prerelease,assets:[.assets[]|{name,size,digest}]}" \
             > "$RUNNER_TEMP/mirafold-release-draft.json"
           node scripts/release-contract.mjs draft \
             "$RELEASE_TAG" "$RELEASE_ASSETS" \

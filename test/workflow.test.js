@@ -185,16 +185,28 @@ test("a release stays draft until its complete remote asset set is verified", ()
   const complete = release.indexOf("release-contract.mjs complete");
   const create = release.indexOf('gh release create "$RELEASE_TAG"');
   const upload = release.indexOf('gh release upload "$RELEASE_TAG"');
+  const draftLookup = release.indexOf("releases?per_page=100");
   const remote = release.indexOf('draft "$RELEASE_TAG" artifacts');
   const publish = release.indexOf('gh release edit "$RELEASE_TAG"');
+  const publicLookup = release.indexOf("releases/tags/$RELEASE_TAG");
   const published = release.indexOf("release-contract.mjs published");
   assert.ok(complete !== -1 && complete < create, "local complete-set verification must precede draft creation");
-  assert.ok(create < upload && upload < remote && remote < publish, "draft upload/verification/publication order changed");
+  assert.ok(
+    create < upload && upload < draftLookup && draftLookup < remote && remote < publish,
+    "draft upload/lookup/verification/publication order changed",
+  );
   assert.match(release.slice(create, upload), /--draft/);
+  assert.match(release.slice(upload, remote), /gh api --paginate/);
+  assert.ok(release.includes('select(.tag_name == \\"$RELEASE_TAG\\" and .draft == true)'));
+  assert.equal(
+    release.match(/releases\/tags\/\$RELEASE_TAG/g)?.length,
+    1,
+    "only the published release may use GitHub's tag endpoint",
+  );
   assert.match(release.slice(publish), /--draft=false/);
   assert.match(release.slice(publish), /--prerelease=false/);
   assert.match(release.slice(publish), /--latest/);
-  assert.ok(publish < published, "public/latest verification must follow publication");
+  assert.ok(publish < publicLookup && publicLookup < published, "public/latest verification must follow publication");
   assert.equal(release.match(/\{name,size,digest\}/g)?.length, 2, "draft and public assets must expose GitHub SHA-256 digests");
 });
 
