@@ -74,6 +74,9 @@ function createWindow() {
     height: 860,
     minWidth: 640,
     minHeight: 480,
+    // Keep the native commands and accelerators without presenting generic
+    // application chrome as part of Mirafold's interface. Alt reveals it.
+    autoHideMenuBar: true,
     backgroundColor: "#0a0d13", // matches the shell's surface, so no white flash
     icon: ICON, // used on Linux; Windows takes it from the packaged executable
     show: true,
@@ -383,13 +386,17 @@ async function onDaemonCrash(crashed, { code, signal, stderr, clean }) {
   app.quit();
 }
 
-function buildMenu() {
+export function buildMenu(isPackaged = app.isPackaged) {
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       {
-        label: "File",
+        label: "Project",
         submenu: [
-          { label: "Open Folder…", accelerator: "CmdOrCtrl+O", click: () => void openFolder() },
+          {
+            label: "Open Project Folder…",
+            accelerator: "CmdOrCtrl+O",
+            click: () => void openFolder(),
+          },
           { type: "separator" },
           { role: "quit" },
         ],
@@ -409,13 +416,13 @@ function buildMenu() {
       {
         label: "View",
         submenu: [
-          { role: "reload" },
+          ...(!isPackaged ? [{ role: "reload" }] : []),
           { role: "resetZoom" },
           { role: "zoomIn" },
           { role: "zoomOut" },
           { type: "separator" },
           { role: "togglefullscreen" },
-          { role: "toggleDevTools" },
+          ...(!isPackaged ? [{ role: "toggleDevTools" }] : []),
         ],
       },
       {

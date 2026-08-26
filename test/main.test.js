@@ -50,8 +50,9 @@ class FakeDaemon {
 }
 
 class FakeWindow extends EventEmitter {
-  constructor() {
+  constructor(options) {
     super();
+    this.options = options;
     this.destroyed = false;
     this.webContents = new EventEmitter();
     this.webContents.session = {
@@ -135,7 +136,7 @@ mock.module(new URL("./src/state.js", import.meta.url).href, {
   },
 });
 
-await import(new URL("./src/main.js?folder-race-probe", import.meta.url));
+const mainModule = await import(new URL("./src/main.js?folder-race-probe", import.meta.url));
 
 async function waitFor(predicate, message) {
   const deadline = Date.now() + 2000;
@@ -150,9 +151,33 @@ await waitFor(
     && (mode === "crash-during-load" || daemonInstances[0].running),
   "initial daemon did not finish booting",
 );
-const openFolder = menuTemplate.find((item) => item.label === "File").submenu[0].click;
+assert.equal(windows[0].options.autoHideMenuBar, true, "the native menu bar must start hidden");
+assert.deepEqual(menuTemplate.map((item) => item.label), ["Project", "Edit", "View", "Help"]);
+const projectMenu = menuTemplate.find((item) => item.label === "Project");
+assert.equal(projectMenu.submenu[0].label, "Open Project Folder…");
+const openFolder = projectMenu.submenu[0].click;
+const developmentViewRoles = menuTemplate
+  .find((item) => item.label === "View")
+  .submenu.map((item) => item.role)
+  .filter(Boolean);
+assert.deepEqual(
+  developmentViewRoles,
+  ["reload", "resetZoom", "zoomIn", "zoomOut", "togglefullscreen", "toggleDevTools"],
+);
 
-if (mode === "crash-during-load") {
+if (mode === "packaged-menu") {
+  mainModule.buildMenu(true);
+  const packagedViewRoles = menuTemplate
+    .find((item) => item.label === "View")
+    .submenu.map((item) => item.role)
+    .filter(Boolean);
+  assert.deepEqual(
+    packagedViewRoles,
+    ["resetZoom", "zoomIn", "zoomOut", "togglefullscreen"],
+    "packaged builds must not present reload or developer tools as product commands",
+  );
+  process.stdout.write("main lifecycle probe passed\n");
+} else if (mode === "crash-during-load") {
   // Pins the v0.1.1 bug: a daemon dying right after reporting its URL made
   // BOTH onDaemonCrash and the page-load failure path report, stacking two
   // dialogs. Exactly one dialog — the crash report — may appear.
@@ -273,4 +298,8 @@ test("an unproven daemon stop starts no replacement and forces a safe quit", () 
 
 test("a daemon crash during the page load produces exactly one dialog", () => {
   runProbe("crash-during-load");
+});
+
+test("the native menu auto-hides and packaged builds omit development commands", () => {
+  runProbe("packaged-menu");
 });
