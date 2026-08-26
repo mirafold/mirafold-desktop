@@ -167,7 +167,8 @@ function auditFixture({ mutateStatement, mutateEntry, mutateAudit } = {}) {
     name: "mirafold",
     version: TARGET_SHELL,
     location: "node_modules/mirafold",
-    registry: `${PUBLIC_NPM_REGISTRY}/`,
+    // npm 12 preserves the workflow's configured spelling (no trailing slash).
+    registry: PUBLIC_NPM_REGISTRY,
     attestations: {
       provenance: { predicateType: SLSA_PROVENANCE_TYPE },
     },
@@ -321,6 +322,7 @@ test("verified npm evidence is reduced to one exact immutable-candidate artifact
 });
 
 test("the source policy binds package bytes to Mirafold's tagged GitHub release workflow", () => {
+  assert.equal(SHELL_SOURCE_WORKFLOW, ".github/workflows/release.yml");
   assert.deepEqual(verifyMirafoldProvenance(auditFixture(), TARGET_EVIDENCE), {
     repository: SHELL_SOURCE_REPOSITORY,
     ref: `refs/tags/v${TARGET_SHELL}`,
@@ -328,6 +330,13 @@ test("the source policy binds package bytes to Mirafold's tagged GitHub release 
     workflow: SHELL_SOURCE_WORKFLOW,
     builder: GITHUB_HOSTED_BUILDER,
   });
+});
+
+test("the source policy accepts npm's equivalent trailing-slash registry spelling", () => {
+  const audit = auditFixture({
+    mutateEntry: (entry) => { entry.registry = `${PUBLIC_NPM_REGISTRY}/`; },
+  });
+  assert.equal(verifyMirafoldProvenance(audit, TARGET_EVIDENCE).commit, SOURCE_COMMIT);
 });
 
 test("the source policy refuses signature gaps and every material provenance substitution", async (t) => {
@@ -348,6 +357,11 @@ test("the source policy refuses signature gaps and every material provenance sub
       pattern: /2 Mirafold entries/,
     },
     {
+      name: "different registry",
+      audit: auditFixture({ mutateEntry: (entry) => { entry.registry = "https://registry.example.com"; } }),
+      pattern: /verified Mirafold registry differs/,
+    },
+    {
       name: "different subject bytes",
       audit: auditFixture({ mutateStatement: (statement) => { statement.subject[0].digest.sha512 = "0".repeat(128); } }),
       pattern: /statement digest differs/,
@@ -364,7 +378,7 @@ test("the source policy refuses signature gaps and every material provenance sub
     },
     {
       name: "different workflow",
-      audit: auditFixture({ mutateStatement: (statement) => { statement.predicate.buildDefinition.externalParameters.workflow.path = "/.github/workflows/other.yml"; } }),
+      audit: auditFixture({ mutateStatement: (statement) => { statement.predicate.buildDefinition.externalParameters.workflow.path = ".github/workflows/other.yml"; } }),
       pattern: /workflow path differs/,
     },
     {

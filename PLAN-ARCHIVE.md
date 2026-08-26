@@ -616,7 +616,7 @@ cut so release assets become anonymously downloadable.
   statement bound the package subject and SHA-512 bytes to
   `https://github.com/mirafold/mirafold`, `refs/tags/v0.3.7`, source commit
   `1723a2d6f5f2d08159d1acf7c5d496d3420882d9`,
-  `/.github/workflows/release.yml`, and GitHub's hosted runner builder.
+  `.github/workflows/release.yml`, and GitHub's hosted runner builder.
 
   **New read-only workflow:** `.github/workflows/shell-intake.yml` is scheduled
   at minutes 17 and 47 of each UTC hour and is manually dispatchable. A static
