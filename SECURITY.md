@@ -54,6 +54,19 @@ finding, but an argument that one of them is *worse than I think* is welcome.
   or supported; a normal direct Mac release would require Developer ID signing,
   notarization, packaging, and real-Mac testing. `npm i -g mirafold` is the same
   Shell software through a channel you may trust more.
+- **The Ubuntu APT repository is signed, but that is an archive signature—not
+  executable code signing.** Its dedicated RSA-3072 public key has fingerprint
+  `30C663842E3433E94B793B79AD4514FE0C3F6F0C` and expires on 2029-08-26. The
+  bootstrap package pins only Mirafold's source to that key with `Signed-By`;
+  it does not add the key to APT's global trust set. Every release carries a
+  clear-signed `InRelease`, detached `Release.gpg`, package-index hashes, and
+  package hashes. Signing happens in a read-only Ubuntu job that installs no
+  project dependencies; provenance and the isolated publisher independently
+  verify the signed repository before attestation or publication. A direct
+  `.deb` downloaded without the bootstrap remains on the separately verified
+  in-app updater path. Report a suspected archive-key compromise immediately;
+  rotation must ship an overlapping keyring update signed by the old trusted
+  key before releases rely only on its replacement.
 - **The window has no bridge into it.** There is no preload script, no IPC
   channel, and no Node access in the page — the window loads the daemon's
   local page the way a browser would. This is deliberate, so that the app

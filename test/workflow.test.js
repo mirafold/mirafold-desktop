@@ -12,6 +12,7 @@ const workflow = readFileSync(new URL("../.github/workflows/release.yml", import
   .split("\r\n")
   .join("\n");
 const releaseContract = readFileSync(new URL("../scripts/release-contract.mjs", import.meta.url), "utf8");
+const aptContract = readFileSync(new URL("../scripts/apt-repository.mjs", import.meta.url), "utf8");
 
 /** The text of one top-level job block, by name. */
 function job(name) {
@@ -100,14 +101,55 @@ test("tag identity and stable-channel policy are checked before dependency code"
 test("only the release job may write repository contents", () => {
   const release = job("release");
   assert.match(release, /permissions:\s*\n\s+contents: write/);
-  assert.match(release, /needs: \[build, attest\]/);
+  assert.match(release, /needs: \[build, apt, attest\]/);
   assert.match(release, /environment: manual-release/);
   assert.match(release, /concurrency:\s*\n\s+group: mirafold-desktop-publication\s*\n\s+cancel-in-progress: false/);
   assert.equal(workflow.match(/contents: write/g)?.length, 1);
 });
 
+test("the archive key is isolated in a read-only dependency-free signing job", () => {
+  const apt = job("apt");
+  const executable = apt
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n");
+  assert.match(apt, /needs: build/);
+  assert.match(
+    apt,
+    /environment: \$\{\{ github\.event_name == 'push' && 'manual-release' \|\| 'automated-release' \}\}/,
+  );
+  assert.match(apt, /permissions:\s*\n\s+contents: read/);
+  assert.doesNotMatch(apt, /contents: write/);
+  assert.match(apt, /persist-credentials: false/);
+  assert.match(apt, /secrets\.MIRAFOLD_APT_SIGNING_PRIVATE_KEY/);
+  assert.equal(workflow.match(/secrets\.MIRAFOLD_APT_SIGNING_PRIVATE_KEY/g)?.length, 1);
+  assert.doesNotMatch(job("release"), /MIRAFOLD_APT_SIGNING_PRIVATE_KEY/);
+  assert.doesNotMatch(executable, /\bnpm\s+(?:ci|install|test|run)\b/);
+  assert.doesNotMatch(executable, /\bnpx\b/);
+  const download = apt.indexOf("name: linux");
+  const importKey = apt.indexOf("gpg --batch --no-options --import");
+  const assemble = apt.indexOf("apt-repository.mjs assemble");
+  const upload = apt.indexOf("uses: actions/upload-artifact@");
+  assert.ok(download !== -1 && download < importKey && importKey < assemble && assemble < upload);
+  assert.match(apt, /unset MIRAFOLD_APT_SIGNING_PRIVATE_KEY/);
+  assert.match(apt, /trap cleanup_apt_key EXIT/);
+  for (const name of [
+    "Packages",
+    "Packages.gz",
+    "Release",
+    "InRelease",
+    "Release.gpg",
+    "mirafold-archive-keyring_1.0_all.deb",
+    "mirafold-archive-keyring.gpg",
+    "mirafold.sources",
+  ]) {
+    assert.ok(apt.includes(`/mirafold-apt-work/${name}`), `APT artifact upload omits ${name}`);
+  }
+});
+
 test("a manual release rehearsal cannot enter the publishing job", () => {
   const header = workflow.slice(0, workflow.indexOf("\njobs:"));
+  const build = job("build");
   const release = job("release");
   assert.match(header, /workflow_dispatch:/);
   assert.match(
@@ -116,7 +158,14 @@ test("a manual release rehearsal cannot enter the publishing job", () => {
   );
   assert.match(release, /if: github\.event_name == 'push'/);
   assert.equal(workflow.match(/contents: write/g)?.length, 1);
-  for (const name of ["build", "attest"]) {
+  const gate = build.indexOf("name: Rehearsal must use canonical main");
+  const install = build.indexOf("npm install --global npm@12.0.2");
+  assert.ok(gate !== -1 && gate < install, "a dispatch must prove canonical main before dependency code");
+  assert.match(
+    build.slice(gate, install),
+    /github\.event_name == 'workflow_dispatch'[\s\S]*test "\$RELEASE_REPOSITORY" = "mirafold\/mirafold-desktop"[\s\S]*test "\$RELEASE_REF" = "refs\/heads\/main"/,
+  );
+  for (const name of ["build", "apt", "attest"]) {
     const value = job(name);
     assert.doesNotMatch(value, /\bgh release\b/);
     assert.doesNotMatch(value, /\bgit push\b/);
@@ -138,7 +187,7 @@ for (const platform of ["linux", "windows"]) {
 
 test("provenance receives OIDC only after both native builds and cannot publish", () => {
   const attest = job("attest");
-  assert.match(attest, /needs: build/);
+  assert.match(attest, /needs: \[build, apt\]/);
   assert.match(attest, /contents: read/);
   assert.match(attest, /id-token: write/);
   assert.match(attest, /attestations: write/);
@@ -146,9 +195,11 @@ test("provenance receives OIDC only after both native builds and cannot publish"
   assert.doesNotMatch(attest, /contents: write/);
   assert.match(attest, /persist-credentials: false/);
   const download = attest.indexOf("uses: actions/download-artifact@");
+  const aptVerify = attest.indexOf("apt-repository.mjs verify-approved");
   const verify = attest.indexOf("release-contract.mjs artifacts");
   const provenance = attest.indexOf("uses: actions/attest@");
-  assert.ok(download !== -1 && download < verify && verify < provenance);
+  assert.ok(download !== -1 && download < aptVerify && aptVerify < verify && verify < provenance);
+  assert.match(attest, /all 17 release files/);
   assert.match(attest, /subject-path: \$\{\{ runner\.temp \}\}\/mirafold-release-assets\/\*/);
   assert.doesNotMatch(attest, /\bnpm\s+(?:ci|install|test|run)\b/);
   assert.doesNotMatch(attest, /\bnpx\b/);
@@ -166,10 +217,11 @@ test("the write-capable release job runs no installed dependency code", () => {
 });
 
 test("the release verifier keeps dependency code out of its static writer path", () => {
-  const imports = [...releaseContract.matchAll(/\bfrom\s+["']([^"']+)["']/g)].map((match) => match[1]);
+  const imports = [releaseContract, aptContract]
+    .flatMap((source) => [...source.matchAll(/\bfrom\s+["']([^"']+)["']/g)].map((match) => match[1]));
   assert.ok(imports.length > 0, "release verifier import scan found nothing");
   assert.deepEqual(
-    imports.filter((specifier) => !specifier.startsWith("node:")),
+    imports.filter((specifier) => !specifier.startsWith("node:") && !specifier.startsWith("./")),
     [],
     "write-capable release verification must not load dependency code",
   );
@@ -182,6 +234,7 @@ test("the release verifier keeps dependency code out of its static writer path",
 
 test("a release stays draft until its complete remote asset set is verified", () => {
   const release = job("release");
+  const aptVerify = release.indexOf("apt-repository.mjs verify-approved");
   const complete = release.indexOf("release-contract.mjs complete");
   const create = release.indexOf('gh release create "$RELEASE_TAG"');
   const upload = release.indexOf('gh release upload "$RELEASE_TAG"');
@@ -190,7 +243,10 @@ test("a release stays draft until its complete remote asset set is verified", ()
   const publish = release.indexOf('gh release edit "$RELEASE_TAG"');
   const publicLookup = release.indexOf("releases/tags/$RELEASE_TAG");
   const published = release.indexOf("release-contract.mjs published");
-  assert.ok(complete !== -1 && complete < create, "local complete-set verification must precede draft creation");
+  assert.ok(
+    aptVerify !== -1 && aptVerify < complete && complete < create,
+    "APT and complete-set verification must precede draft creation",
+  );
   assert.ok(
     create < upload && upload < draftLookup && draftLookup < remote && remote < publish,
     "draft upload/lookup/verification/publication order changed",

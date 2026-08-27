@@ -9,9 +9,10 @@ principle generates every rule here:
 > code on `main` and the installers people download are always the same
 > thing.**
 
-"Production" is the GitHub Releases feed — the nine files per version that the
-installed app's updater reads (`README.md` → *How updates work*). `main` is
-protected so that it can move in exactly two ways, and both are releases.
+"Production" is the GitHub Releases feed — the 17 files per version consumed
+by the direct updater and the APT channel (`README.md` → *How updates work*).
+`main` is protected so that it can move in exactly two ways, and both are
+releases.
 
 ## The branches
 
@@ -47,6 +48,60 @@ Mechanics to know:
   intake bumps the **patch**; a manual Desktop release bumps whatever the
   change warrants (a new capability is a minor bump).
 
+## APT archive identity and secret boundary
+
+The Ubuntu repository is the latest stable GitHub Release viewed as a signed
+flat APT repository. Eight APT files accompany the nine existing native files:
+`Packages`, `Packages.gz`, `Release`, `InRelease`, `Release.gpg`,
+`mirafold-archive-keyring_1.0_all.deb`, `mirafold-archive-keyring.gpg`, and
+`mirafold.sources`. Package filenames in the index are relative to that release
+root. The source uses exact-path suite `./` and `Signed-By`, so this key grants
+trust only to Mirafold's source.
+
+The v1 archive identity is:
+
+- fingerprint `30C663842E3433E94B793B79AD4514FE0C3F6F0C`;
+- RSA-3072, signing-only use, expiring 2029-08-26;
+- public material in `packaging/apt/`;
+- private GnuPG home at
+  `${XDG_DATA_HOME:-$HOME/.local/share}/mirafold-apt-signing-v1` on Kyle's
+  machine; and
+- GitHub environment secret `MIRAFOLD_APT_SIGNING_PRIVATE_KEY`, stored
+  separately in `manual-release` and `automated-release`.
+
+The private key deliberately has no passphrase because GitHub Actions must use
+it unattended. Filesystem ownership, an encrypted recovery copy kept outside
+the working machine, and the protected GitHub environments are therefore the
+security boundary. Never commit, paste, log, or write an unencrypted export.
+`scripts/create-apt-signing-key.sh` creates or reuses exactly one matching key
+and exports only its public half. `scripts/backup-apt-signing-key.sh` streams
+that private identity through GnuPG symmetric encryption, verifies the
+encrypted result through a pipe, and writes only the encrypted recovery file
+outside the repository. Keep its passphrase separately and copy the encrypted
+file off the working machine before configuring GitHub.
+`scripts/configure-github-apt-secret.sh --check` verifies local/GitHub identity
+without mutation; running it without the flag streams the private export
+directly to `gh secret set`, which encrypts it locally, and verifies only the
+two resulting secret names.
+
+Both release paths keep powers split. Native jobs run dependency code with a
+read-only token and no archive key. A separate Ubuntu job receives the key but
+only a read-only token, installs no dependencies, builds and verifies the APT
+repository, erases its temporary GnuPG home, and uploads an immutable artifact.
+The provenance job independently verifies the signature and attests all 17
+files. The publisher independently verifies it again before receiving or using
+repository write access. A nonpublishing rehearsal runs from canonical `main`
+and obtains the signer from the main-only `automated-release` environment. A
+real `v*` tag obtains the signer from `manual-release`; signing and publication
+are then separate reviewer-protected deployments.
+
+Key rotation is an overlapping release operation, never a same-day swap: bump
+the archive-keyring package version, ship both old and new public keys while
+`Release` is still signed by the old trusted key, wait for supported users to
+receive that keyring update, then sign with the replacement. Losing the old
+private key before overlap means existing users cannot authenticate the new
+identity automatically.
+
 ## Path A — automated: a new Shell version becomes a Desktop release
 
 This is the routine path and needs no person once it is enabled. The
@@ -54,16 +109,17 @@ This is the routine path and needs no person once it is enabled. The
 `mirafold` `latest` tag twice an hour. When it changes, the workflow proves the
 package's npm provenance back to `mirafold/mirafold`'s release workflow, pins
 the exact version, bumps the Desktop patch version, tests on both platforms,
-builds and smoke-checks native Linux and Windows packages, attests provenance,
+builds and smoke-checks native Linux and Windows packages, signs the APT index,
+attests provenance,
 and then — in one isolated job that installs no dependencies — commits the
 version bump, tags it, pushes commit and tag atomically to `main` (the ruleset
-bypass), and publishes the verified nine-file GitHub Release. Retries resume;
+bypass), and publishes the verified 17-file GitHub Release. Retries resume;
 nothing partial ever becomes visible.
 
 It is dormant until the repository variable `MIRAFOLD_AUTOMATED_RELEASES` is
-exactly `enabled`. It stays dormant through the one-time updater bridge
-release (Path B, below), which must exist first so that installed users can
-receive what Path A publishes.
+exactly `enabled`. It stays dormant through the first signed APT release and
+its nonpublishing rehearsal (Path B, below), so routine publication cannot
+start before the new repository channel exists and has been exercised.
 
 `README.md` → *Automated Shell releases* has the full contract;
 `RELEASE-RECOVERY.md` has the failure and retry states.
@@ -76,15 +132,43 @@ for the one-time bridge release.
 1. **Feature work**: branch off `next`, commit with `-s`, open a PR into
    `next`. Keep follow-ups on that PR; ask Kyle for merge approval when it
    appears ready. Repeat until `next` holds the release you want.
-2. **Fold in `main`** (only matters if Path A has published since `next` last
-   synced): `git switch -c release/x.y.z origin/next && git merge origin/main`.
-   The only expected conflict is `package.json`/`package-lock.json` versions —
-   keep the newer Shell pin, then apply the bump below.
-3. **Bump the Desktop version** in `package.json` and `package-lock.json`
-   (`npm version x.y.z --no-git-tag-version` does both) — commit
-   `release: vx.y.z` (signed off).
+2. **Reconstruct the exact reviewed staging tree on production's parent.** Make
+   sure the previous release's `main` → `next` sync is complete first; if Path A
+   has published since that sync, complete a new sync PR before continuing.
+   Then start from current production and apply the direct tree difference:
+
+   ```
+   git fetch origin
+   git switch -c release/x.y.z origin/main
+   git diff --binary origin/main origin/next | git apply --index
+   git diff --cached --quiet origin/next
+   git diff --quiet
+   ```
+
+   Both final commands must exit zero. This is intentionally a two-tree
+   reconstruction, not an ancestry merge: protected branches use squash merges,
+   so equivalent prior content has different commit ancestry. A normal merge
+   manufactured six conflicts during the `0.3.0` release even though direct
+   tree comparison proved the only content difference was the reviewed feature.
+3. **Bump the Desktop version** in `package.json` and `package-lock.json`, stage
+   those two release-specific changes, verify the complete staged patch, and
+   create one signed-off release commit:
+
+   ```
+   npm version x.y.z --no-git-tag-version
+   git add package.json package-lock.json
+   git diff --cached --check
+   git commit -s -m "release: vx.y.z"
+   ```
 4. **PR `release/x.y.z` → `main`**, merge on green.
-5. **Tag and push — this is the release, and it is a human act:**
+5. **Rehearse the exact merged commit without publishing:** manually dispatch
+   the `Release` workflow from `main` with `fail_platform=none`. The workflow
+   requires canonical `main` before dependency code, builds and smoke-checks
+   both native packages, signs the APT repository with the production key from
+   the main-only `automated-release` environment, verifies all 17 files, and
+   creates provenance attestations. The publication job is event-gated to tag
+   pushes and must remain skipped. Diagnose any failure before creating a tag.
+6. **Tag and push — this is the release, and it is a human act:**
 
    ```
    git switch main && git pull --ff-only
@@ -95,13 +179,14 @@ for the one-time bridge release.
    The tag push triggers `.github/workflows/release.yml`: main-tip guard,
    tag↔version guard, script-free pinned install with signature verification,
    tests, native Linux + Windows builds, packaged and NSIS smoke checks,
-   nine-file contract check, provenance attestation, then the write-capable
-   publish job — which runs in the `manual-release` environment and waits for
-   Kyle to approve it in the Actions UI before it creates the release.
-6. **Verify the same day**: the run is green including both guards; the
-   Release page shows all nine files and `latest`; download one installer
+   read-only APT signing job, 17-file contract check, provenance attestation,
+   then the write-capable publish job. The signing job and publisher each run
+   in the `manual-release` environment and wait for Kyle's approval in the
+   Actions UI before they may use the archive key or create the release.
+7. **Verify the same day**: the run is green including both guards; the
+   Release page shows all 17 files and `latest`; download one installer
    anonymously and check its SHA-256 against `SHA256SUMS-<platform>.txt`.
-7. **Close the loop — do not skip**: bring `main` back into `next` so the
+8. **Close the loop — do not skip**: bring `main` back into `next` so the
    next cycle's release branch does not conflict:
 
    ```
@@ -114,7 +199,7 @@ for the one-time bridge release.
    Merge it on green (squash is fine — the content is what matters). Do the
    same sync whenever Path A has published and you are about to cut a manual
    release; step 2 handles the case where you forgot.
-8. Delete the merged `feature/*`, `release/*`, and `sync/*` branches
+9. Delete the merged `feature/*`, `release/*`, and `sync/*` branches
    (`delete_branch_on_merge` does most of this).
 
 ## Hotfixes

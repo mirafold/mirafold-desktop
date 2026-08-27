@@ -566,6 +566,152 @@ first result belongs to the next non-publishing run, which must also produce
 the fresh candidate `WINDOWS-TESTING.md` now requires in place of the
 forbidden pre-Job artifact.
 
+### Phase 10 — signed Ubuntu APT distribution
+
+Started 2026-08-26 after the public `v0.2.0` bridge release. This is an
+oversized feature: each Step is one independently executable pass. The outcome
+is a real public channel where a new Ubuntu user installs the repository once
+and then uses `sudo apt install mirafold-desktop`; later Desktop releases arrive
+through Ubuntu's normal package-manager flow.
+
+**Verified starting state (2026-08-26):** GitHub's latest stable release is
+public `v0.2.0`, with the exact nine-file release contract and a
+`mirafold-desktop_0.2.0_amd64.deb` payload. The package's observed Debian
+identity is `mirafold-desktop`, architecture `amd64`. GitHub Actions currently
+has no repository or release-environment secrets and the release contains no
+APT `Packages`, `Release`, `InRelease`, archive-keyring, or source-definition
+assets. Packaged Debian currently selects Mirafold's private verified `.deb`
+updater; it cannot distinguish an APT-managed installation. This machine is
+Ubuntu 24.04 `amd64` and has no `mirafold-desktop` package installed.
+
+**Distribution decision:** each stable GitHub Release doubles as one signed
+flat APT repository. The stable base URI is GitHub's documented
+`/releases/latest/download/` asset route, so APT downloads the exact already
+verified release `.deb` rather than a duplicated copy on another hosting
+service. A dedicated Mirafold APT archive key signs `Release`; it is not Kyle's
+personal Git/tag key. A tiny `mirafold-archive-keyring` bootstrap package owns
+the public key, deb822 source definition, and an APT-management marker. The
+Desktop consults only that marker: repository installations leave updates to
+APT, while a direct `.deb` without the bootstrap package retains the existing
+in-app updater. Key rotation must overlap through a newer keyring package
+before a Release is signed solely by a replacement key.
+
+**Approved boundary:** modify `src/main.js`, `src/updater.js`, the release and
+Shell-intake workflows, release-contract/coordinator helpers and tests,
+`README.md`, `SECURITY.md`, `docs/RELEASING.md`, and this plan. Create a small
+standard-library APT repository helper, its tests, and public packaging assets.
+Do not add an npm dependency: Node's standard library handles deterministic
+text, compression, and hashes; Debian's own `dpkg-deb`/APT tools handle Debian
+package semantics; GnuPG handles OpenPGP signing and verification. Preserve the
+Electron/daemon architecture, agent and credential ownership, the existing
+AppImage/tar/Windows channels, and the immutable published `v0.2.0` release.
+A new higher release activates APT; no published asset is replaced or appended.
+
+- [x] **Step 10.1 — implement and locally prove the APT repository contract.**
+  Build deterministic unsigned flat-repository metadata and the archive-keyring
+  bootstrap package from injected public-key material; sign/verify with an
+  ephemeral test key; exercise APT through an isolated local configuration and
+  an HTTP redirect matching GitHub's latest-asset behavior; and make packaged
+  Debian select an APT-owned, updater-disabled policy only when the bootstrap
+  marker exists. Add focused falsification tests and faithful documentation.
+  Create no real key, secret, release, repository setting, DNS record, package
+  installation, or other external state.
+
+  Completed 2026-08-26. `scripts/apt-repository.mjs` now builds the two-package
+  flat index, compressed index, checksummed `Release`, clear and detached
+  signatures, public-key/source assets, and root-owned archive-keyring package
+  without an npm dependency. Its verifier rechecks the exact public
+  fingerprint, both OpenPGP signatures, Release/index/package hashes, bootstrap
+  package contents, source definition, and APT marker. The Linux integration
+  test creates an ephemeral one-day key and minimal `.deb`, rejects package and
+  index tampering, then proves a fresh isolated APT client can follow a
+  latest-release-style redirect, authenticate the index, select the candidate,
+  and download byte-identical package content. Desktop's real packaged-main
+  probe proves only an observed Debian package plus the root-owned bootstrap
+  marker disables the private updater; direct Debian, AppImage, tar, Windows,
+  Store, and development policies remain pinned separately. `npm test`: 175
+  passed, zero failed, one native-Windows-only skip. No external or privileged
+  state was created.
+- [ ] **Step 10.2 — establish the real archive identity and wire both release
+  writers.** Kyle creates one dedicated signing key in his own terminal without
+  exposing it to chat; commit only its public key and fingerprint; store the
+  private export separately in the existing `manual-release` and
+  `automated-release` GitHub environments. Extend both native-build paths,
+  provenance, exact asset contracts, recovery logic, and nonpublishing rehearsal
+  so a release is published only with valid APT metadata signed by that exact
+  key. No package dependency code runs beside the signing secret.
+
+  **In progress 2026-08-26.** Kyle ran the dedicated key-creation helper
+  successfully. The working tree now contains only its public RSA-3072 identity
+  and canonical fingerprint
+  `30C663842E3433E94B793B79AD4514FE0C3F6F0C`; independent public-key inspection
+  confirms signing capability and expiry on 2029-08-26. The private identity
+  remains in its dedicated user-owned GnuPG directory. Both GitHub environments
+  currently report no stored secret names, so no private export has crossed
+  that boundary yet.
+
+  The pending implementation expands both workflows and the exact release
+  contract from nine native files to 17 native/APT files. The signing jobs have
+  read-only repository tokens, install no dependency code, erase their temporary
+  GnuPG homes, and feed independent signature verification before provenance or
+  publication. A manual dispatch now fails before dependency code unless it is
+  canonical `main`; that nonpublishing path uses the live main-only
+  `automated-release` environment, while real `v*` tags retain the live
+  reviewer-protected `manual-release` boundary. A new encrypted-backup helper
+  refuses repository destinations and overwrites, keeps plaintext inside pipes,
+  verifies the recovered fingerprint, and cleans failed partial output. Its fake
+  orchestration tests and a real disposable GnuPG overwrite/encryption probe
+  pass. The complete local suite currently passes 182 tests, fails zero, and
+  skips one native-Windows-only probe; both workflows parse as YAML, all changed
+  shell/JavaScript files parse, and `git diff --check` is clean. At that
+  checkpoint, the remaining gates were an off-machine encrypted recovery copy,
+  both protected environment secrets, and a 17-file nonpublishing workflow run
+  from the eventual canonical `main` commit.
+
+  **Private-material boundary completed 2026-08-27.** Kyle confirmed the
+  encrypted recovery file was created and copied off the working machine, with
+  its passphrase retained separately. He then ran the check-only GitHub helper
+  successfully and explicitly ran its mutating form. Independent read-only
+  GitHub queries now report exactly one
+  `MIRAFOLD_APT_SIGNING_PRIVATE_KEY` name in `manual-release` (updated
+  2026-08-27T15:11:30Z) and one in `automated-release` (updated one second
+  later); no value was read. The repository Actions variable list remains
+  empty, so automated publication is still dormant. The sole remaining Step
+  10.2 gate is the canonical-`main`, nonpublishing 17-file hosted rehearsal.
+- [ ] **Step 10.3 — publish and dogfood the real channel.** Through the normal
+  `next` → release branch → protected `main` → signed-tag process and Kyle's
+  explicit merge/publication approvals, publish a higher Desktop release. From
+  a clean anonymous path on this Ubuntu machine, install the bootstrap package,
+  refresh APT, run `sudo apt install mirafold-desktop`, launch the installed
+  application, exercise both native modules, verify APT ownership and clean
+  shutdown, and prove the website-ready installation instructions byte for
+  byte. Website-repository edits and any announcement remain separately scoped;
+  this Step supplies their exact tested copy and links.
+
+  **In progress 2026-08-27.** Feature PR
+  [#17](https://github.com/mirafold/mirafold-desktop/pull/17) merged into
+  protected `next` at `d013f78` only after Kyle's explicit approval. Its final
+  hosted run `33087093072` passed DCO, Linux CI in 31 seconds, and native
+  Windows CI in 3 minutes 1 second. The preceding run exposed three test-only
+  platform assumptions: two Linux Bash-helper probes passed a `/D:/...`
+  file-URL pathname to Git Bash, and the Debian main-process probe correctly
+  refused APT ownership under real `win32`. No product or workflow code changed;
+  follow-up `f76cb57` scoped those three probes to Linux, matching the existing
+  repository convention, and the fresh run passed.
+
+  `main` and `next` were then observed to have equivalent prior content under
+  divergent squash histories, with their direct tree difference containing
+  exactly the 27 reviewed APT feature files. The old runbook instruction to
+  merge `main` into a `next`-based release branch manufactured six conflicts
+  across files whose current content had already converged. That failed merge
+  was aborted before another approach. The clean `release/0.3.0` branch now
+  starts at `origin/main`; applying the direct binary tree difference from
+  `main` to `next` produced a staged tree byte-for-byte equal to `origin/next`,
+  and Desktop version `0.3.0` is prepared in both package manifests. The
+  canonical runbook now records this exact two-tree reconstruction and equality
+  gate. No release branch, tag, draft, public release, or installation has been
+  pushed yet.
+
 ### Audit and test-audit pass — 2026-08-14
 
 Completed 2026-08-14, on this same branch. A full security audit found one

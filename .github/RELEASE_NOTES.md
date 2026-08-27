@@ -3,24 +3,38 @@ Mirafold as a desktop app — no terminal, no Node, no npm.
 Pick a project folder, and Mirafold opens in its own window. Everything the
 `mirafold` npm package does, this does: it runs the same daemon, unmodified.
 
-## The one-time update bridge
+## Install on Ubuntu with APT
 
 <!-- Refresh this section before any manually tagged release. Automated Shell
      intake generates separate, version-bound notes from reviewed provenance. -->
 
-The older public `v0.1.1` application has no updater and cannot discover this
-release. Existing Desktop users must download and install this release once.
-After that bridge, each supported direct package checks the official Desktop
-release feed after startup and through **Help → Check for Updates…**. The Help
-menu displays the independent Desktop version and the exact Mirafold Shell
-version bundled inside it.
+This release adds Mirafold's signed Ubuntu APT repository. Ubuntu 24.04 on
+`amd64` is the tested target. Download its small repository-identity package
+once, install Mirafold by package name, and later releases arrive through
+Ubuntu's normal package-manager flow:
 
-Direct Windows, AppImage, and Debian installations download and verify a newer
-release in the background, then ask before stopping Mirafold and opening the
-platform installer. Choosing **Later** never installs on ordinary quit. An
-extracted Linux `.tar.gz` only announces the update and opens the official
-Releases page; it never changes the extracted files. Microsoft Store packaging
-does not exist yet and will use Store-managed updates when it does.
+```
+curl --fail --location --output /tmp/mirafold-archive-keyring_1.0_all.deb https://github.com/mirafold/mirafold-desktop/releases/latest/download/mirafold-archive-keyring_1.0_all.deb
+sudo apt install /tmp/mirafold-archive-keyring_1.0_all.deb
+sudo apt update
+sudo apt install mirafold-desktop
+```
+
+The repository key fingerprint is
+`30C663842E3433E94B793B79AD4514FE0C3F6F0C`. Its bootstrap package restricts
+that key to Mirafold's source with APT's `Signed-By` mechanism. APT verifies
+the signed index and exact `.deb` hash before installation. The Help menu says
+**Updates managed by APT** for this form, while a standalone downloaded `.deb`
+retains Mirafold's verified in-app updater.
+
+The older public `v0.1.1` application has no updater and cannot discover a
+successor. Existing `v0.1.1` users must install a current release once. Current
+direct Windows, AppImage, and standalone Debian installations check the
+official Desktop release feed after startup and through **Help → Check for
+Updates…**. Choosing **Later** never installs on ordinary quit. An extracted
+Linux `.tar.gz` only announces the update and opens the official Releases page;
+it never changes the extracted files. Microsoft Store packaging does not exist
+yet and will use Store-managed updates when it does.
 
 This release also includes the current process-lifecycle, navigation,
 permission, credential-redaction, packaged-runtime, and release-provenance
@@ -42,20 +56,21 @@ recovered session.
 
 | file | for |
 | --- | --- |
-| `.deb` | Debian, Ubuntu, Mint, Pop!_OS — double-click, or `sudo apt install ./Mirafold-*.deb` |
+| `mirafold-archive-keyring_1.0_all.deb` | Ubuntu 24.04 `amd64` — recommended one-time APT repository setup; then run `sudo apt install mirafold-desktop` |
+| `mirafold-desktop_*_amd64.deb` | standalone Debian-family install without adding the repository; double-click it or run `sudo apt install ./mirafold-desktop_*_amd64.deb` |
 | `.tar.gz` | everything else (Fedora, Arch, openSUSE…). Extract and run `./mirafold`. No dependencies. |
 | `.AppImage` | portable single file. This target needs FUSE 2 on the host; if it fails with `dlopen(): error loading libfuse.so.2`, install the distribution's FUSE 2 compatibility package or use the `.tar.gz` instead. |
 
-Once an updater-capable release is installed, AppImage and Debian-package
-users receive verified in-app downloads and an explicit restart choice. Debian
-installation requests administrator authorization through the operating
-system's available elevation helper; an AppImage replaces its user-owned file
-without it, with atomic staging and rollback protection. The extracted `.tar.gz`
-checks for new versions but changes no files: its notice opens the official
-Releases page for a manual replacement. The older public `v0.1.1` build cannot
-discover its successor, so moving from that build still requires one manual
-download. The updater refuses lower Desktop versions; a recovery release uses
-a new, higher Desktop version containing the restored known-good source.
+APT installations receive later versions through `apt upgrade` or Ubuntu's
+software updater. AppImage and standalone Debian-package users receive verified
+in-app downloads and an explicit restart choice. A standalone Debian update
+requests administrator authorization through the operating system's available
+elevation helper; an AppImage replaces its user-owned file without it, with
+atomic staging and rollback protection. The extracted `.tar.gz` checks for new
+versions but changes no files: its notice opens the official Releases page for
+a manual replacement. The updater refuses lower Desktop versions; a recovery
+release uses a new, higher Desktop version containing the restored known-good
+source.
 
 **Windows (beta)** — `Mirafold-Setup-*.exe`. It is configured as a visible,
 current-user installer with an editable destination. The hosted Windows probe

@@ -8,6 +8,7 @@ const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 const PROBE = String.raw`
 import { EventEmitter } from "node:events";
+import * as realFs from "node:fs";
 import { mock } from "node:test";
 import assert from "node:assert/strict";
 
@@ -19,12 +20,29 @@ const openedExternally = [];
 const permissionInstalls = { check: 0, request: 0 };
 let windowOpenHandler = null;
 const mode = process.env.MIRAFOLD_MAIN_PROBE_MODE;
+if (mode === "apt-managed") process.resourcesPath = "/fixture-resources";
 let folderDialogs = 0;
 let menuTemplate = null;
 let failStops = false;
 let quitCalls = 0;
 let releaseStaleStart;
 const staleStart = new Promise((resolve) => { releaseStaleStart = resolve; });
+const { default: realFsDefault, ...realFsNamed } = realFs;
+
+mock.module("node:fs", {
+  defaultExport: realFsDefault,
+  namedExports: {
+    ...realFsNamed,
+    existsSync(file) {
+      if (mode === "apt-managed" && file === "/usr/share/mirafold/apt-managed") return true;
+      return realFs.existsSync(file);
+    },
+    readFileSync(file, ...args) {
+      if (mode === "apt-managed" && String(file).endsWith("/package-type")) return "deb\n";
+      return realFs.readFileSync(file, ...args);
+    },
+  },
+});
 
 class FakeDaemon {
   constructor(onCrash) {
@@ -84,7 +102,7 @@ class FakeWindow extends EventEmitter {
 }
 
 const app = new EventEmitter();
-app.isPackaged = false;
+app.isPackaged = mode === "apt-managed";
 app.requestSingleInstanceLock = () => true;
 app.whenReady = () => Promise.resolve();
 app.getPath = () => "/fixture-home";
@@ -162,10 +180,17 @@ const developmentViewRoles = menuTemplate
   .filter(Boolean);
 assert.deepEqual(
   developmentViewRoles,
-  ["reload", "resetZoom", "zoomIn", "zoomOut", "togglefullscreen", "toggleDevTools"],
+  mode === "apt-managed"
+    ? ["resetZoom", "zoomIn", "zoomOut", "togglefullscreen"]
+    : ["reload", "resetZoom", "zoomIn", "zoomOut", "togglefullscreen", "toggleDevTools"],
 );
 
-if (mode === "packaged-menu") {
+if (mode === "apt-managed") {
+  const helpItem = menuTemplate.find((item) => item.label === "Help").submenu[0];
+  assert.equal(helpItem.label, "Updates managed by APT");
+  assert.equal(helpItem.enabled, false);
+  process.stdout.write("main lifecycle probe passed\n");
+} else if (mode === "packaged-menu") {
   mainModule.buildMenu(true);
   const packagedViewRoles = menuTemplate
     .find((item) => item.label === "View")
@@ -302,4 +327,10 @@ test("a daemon crash during the page load produces exactly one dialog", () => {
 
 test("the native menu auto-hides and packaged builds omit development commands", () => {
   runProbe("packaged-menu");
+});
+
+test("a packaged Debian install with the archive marker leaves updates to APT", {
+  skip: process.platform !== "linux",
+}, () => {
+  runProbe("apt-managed");
 });

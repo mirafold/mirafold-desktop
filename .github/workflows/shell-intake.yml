@@ -313,9 +313,76 @@ jobs:
           compression-level: 0
           retention-days: 7
 
+  apt:
+    name: sign reviewed Ubuntu APT repository
+    needs: [intake, test, build]
+    if: >-
+      needs.intake.outputs.changed == 'true' &&
+      (vars.MIRAFOLD_AUTOMATED_RELEASES == 'enabled' ||
+       github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    environment: automated-release
+    permissions:
+      contents: read
+    steps:
+      # This job receives the dedicated archive key but no write token. It
+      # installs no dependencies and runs only the reviewed standard-library
+      # repository helper plus Ubuntu's dpkg/GnuPG tools.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mirafold-release-linux
+          path: ${{ runner.temp }}/mirafold-apt-work
+
+      - name: Assemble and verify the signed APT repository
+        shell: bash
+        env:
+          MIRAFOLD_APT_SIGNING_PRIVATE_KEY: ${{ secrets.MIRAFOLD_APT_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$MIRAFOLD_APT_SIGNING_PRIVATE_KEY"
+          APT_KEY_HOME="$RUNNER_TEMP/mirafold-apt-signing"
+          cleanup_apt_key() {
+            gpgconf --homedir "$APT_KEY_HOME" --kill gpg-agent >/dev/null 2>&1 || true
+            rm -rf -- "$APT_KEY_HOME"
+          }
+          trap cleanup_apt_key EXIT
+          install -d -m 0700 "$APT_KEY_HOME"
+          export GNUPGHOME="$APT_KEY_HOME"
+          printf '%s' "$MIRAFOLD_APT_SIGNING_PRIVATE_KEY" \
+            | gpg --batch --no-options --import
+          unset MIRAFOLD_APT_SIGNING_PRIVATE_KEY
+          node scripts/apt-repository.mjs assemble \
+            "$RUNNER_TEMP/mirafold-apt-work" \
+            "$RUNNER_TEMP/mirafold-apt-work/mirafold-desktop_${{ needs.intake.outputs.desktop-version }}_amd64.deb" \
+            packaging/apt/mirafold-archive-keyring.gpg \
+            packaging/apt/fingerprint.txt
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mirafold-release-apt
+          path: |
+            ${{ runner.temp }}/mirafold-apt-work/Packages
+            ${{ runner.temp }}/mirafold-apt-work/Packages.gz
+            ${{ runner.temp }}/mirafold-apt-work/Release
+            ${{ runner.temp }}/mirafold-apt-work/InRelease
+            ${{ runner.temp }}/mirafold-apt-work/Release.gpg
+            ${{ runner.temp }}/mirafold-apt-work/mirafold-archive-keyring_1.0_all.deb
+            ${{ runner.temp }}/mirafold-apt-work/mirafold-archive-keyring.gpg
+            ${{ runner.temp }}/mirafold-apt-work/mirafold.sources
+          if-no-files-found: error
+          include-hidden-files: false
+          compression-level: 0
+          retention-days: 7
+
   attest:
     name: attest reviewed release provenance
-    needs: [intake, test, build]
+    needs: [intake, test, build, apt]
     if: >-
       needs.intake.outputs.changed == 'true' &&
       (vars.MIRAFOLD_AUTOMATED_RELEASES == 'enabled' ||
@@ -346,19 +413,26 @@ jobs:
           "$RUNNER_TEMP/mirafold-shell-intake-artifact"
 
       - name: Verify exact subjects before attesting
-        run: >-
-          node scripts/release-contract.mjs complete
-          "v${{ needs.intake.outputs.desktop-version }}"
-          "$RUNNER_TEMP/mirafold-release-assets"
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/apt-repository.mjs verify-approved \
+            "$RUNNER_TEMP/mirafold-release-assets" \
+            "${{ needs.intake.outputs.desktop-version }}" \
+            packaging/apt/mirafold-archive-keyring.gpg \
+            packaging/apt/fingerprint.txt
+          node scripts/release-contract.mjs complete \
+            "v${{ needs.intake.outputs.desktop-version }}" \
+            "$RUNNER_TEMP/mirafold-release-assets"
 
-      - name: Generate SLSA build provenance for all nine release files
+      - name: Generate SLSA build provenance for all 17 release files
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ runner.temp }}/mirafold-release-assets/*
 
   release:
     name: commit, tag, and publish reviewed release
-    needs: [intake, test, build, attest]
+    needs: [intake, test, build, apt, attest]
     if: >-
       needs.intake.outputs.changed == 'true' &&
       vars.MIRAFOLD_AUTOMATED_RELEASES == 'enabled'
@@ -390,6 +464,14 @@ jobs:
           pattern: mirafold-release-*
           path: ${{ runner.temp }}/mirafold-release-assets
           merge-multiple: true
+
+      - name: Verify the signed APT repository before any write
+        run: >-
+          node scripts/apt-repository.mjs verify-approved
+          "$RUNNER_TEMP/mirafold-release-assets"
+          "${{ needs.intake.outputs.desktop-version }}"
+          packaging/apt/mirafold-archive-keyring.gpg
+          packaging/apt/fingerprint.txt
 
       - name: Reconstruct and verify the exact release candidate
         id: prepare
