@@ -15,9 +15,9 @@ $probeClock = [System.Diagnostics.Stopwatch]::StartNew()
 function Write-ProbeStage {
   param([Parameter(Mandatory = $true)][string]$Stage)
   if ($env:MIRAFOLD_PROBE_DIAGNOSTICS -eq "1") {
-    [Console]::Out.WriteLine(
+    [Console]::Out.WriteLine((
       "[mirafold-probe-stage] windows-wrapper:{0}:{1}ms" -f $Stage, $probeClock.ElapsedMilliseconds
-    )
+    ))
   }
 }
 
