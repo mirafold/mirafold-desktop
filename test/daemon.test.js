@@ -11,7 +11,13 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { Daemon, daemonLaunchSpec, findStartupUrl } from "../src/daemon.js";
+import {
+  Daemon,
+  WINDOWS_WRAPPER_READY_MARKER,
+  createStartupDeadline,
+  daemonLaunchSpec,
+  findStartupUrl,
+} from "../src/daemon.js";
 import { CredentialSafeLineStream, appendStderr, redactCredentials } from "../src/daemon-output.js";
 import { LinuxProcessTreeTracker, terminateProcessTree } from "../src/process-tree.js";
 
@@ -22,6 +28,30 @@ function sanitizeChunks(chunks) {
   let output = "";
   for (const chunk of chunks) output += stream.push(chunk);
   return output + stream.end();
+}
+
+function fakeDeadlineClock() {
+  let nextId = 0;
+  const pending = new Map();
+  return {
+    scheduleTimeout(callback, delay) {
+      const id = ++nextId;
+      pending.set(id, { callback, delay });
+      return id;
+    },
+    cancelTimeout(id) {
+      pending.delete(id);
+    },
+    fire(id) {
+      const timer = pending.get(id);
+      assert.ok(timer, `timer ${id} is not pending`);
+      pending.delete(id);
+      timer.callback();
+    },
+    entries() {
+      return [...pending.entries()].map(([id, timer]) => ({ id, delay: timer.delay }));
+    },
+  };
 }
 
 test("stop() before the spawn prevents the daemon from starting", async () => {
@@ -83,6 +113,65 @@ test("the complete startup URL stays private and usable inside the process", () 
   const publicOutput = sanitizeChunks([first, second]);
   assert.ok(!publicOutput.includes("dummy-startup-token"), publicOutput);
   assert.ok(publicOutput.includes("http://127.0.0.1:5173/?token=<redacted>"), publicOutput);
+});
+
+test("Windows receives a fresh daemon URL deadline after its wrapper is ready", () => {
+  const clock = fakeDeadlineClock();
+  const failures = [];
+  const deadline = createStartupDeadline({
+    platform: "win32",
+    windowsWrapperTimeoutMs: 1234,
+    daemonUrlTimeoutMs: 5678,
+    onTimeout: (message) => failures.push(message),
+    scheduleTimeout: clock.scheduleTimeout,
+    cancelTimeout: clock.cancelTimeout,
+  });
+
+  assert.equal(deadline.phase, "windows-wrapper");
+  const [wrapperTimer] = clock.entries();
+  assert.equal(wrapperTimer.delay, 1234);
+  const split = Math.floor(WINDOWS_WRAPPER_READY_MARKER.length / 2);
+  assert.equal(deadline.observe(`ordinary output\r\n${WINDOWS_WRAPPER_READY_MARKER.slice(0, split)}`), false);
+  assert.deepEqual(clock.entries(), [wrapperTimer], "a partial marker must not reset the timer");
+  assert.equal(deadline.observe(`${WINDOWS_WRAPPER_READY_MARKER.slice(split)}\r\n`), true);
+  assert.equal(deadline.phase, "daemon-url");
+
+  const [daemonTimer] = clock.entries();
+  assert.equal(daemonTimer.delay, 5678);
+  assert.notEqual(daemonTimer.id, wrapperTimer.id, "wrapper readiness must arm a new timer");
+  clock.fire(daemonTimer.id);
+  assert.deepEqual(failures, ["the daemon started but never reported a URL"]);
+});
+
+test("startup identifies a Windows wrapper timeout without changing Linux", () => {
+  const windowsClock = fakeDeadlineClock();
+  const windowsFailures = [];
+  createStartupDeadline({
+    platform: "win32",
+    onTimeout: (message) => windowsFailures.push(message),
+    scheduleTimeout: windowsClock.scheduleTimeout,
+    cancelTimeout: windowsClock.cancelTimeout,
+  });
+  const [windowsTimer] = windowsClock.entries();
+  assert.equal(windowsTimer.delay, 120_000);
+  windowsClock.fire(windowsTimer.id);
+  assert.deepEqual(windowsFailures, ["the Windows daemon wrapper never became ready"]);
+
+  const linuxClock = fakeDeadlineClock();
+  const linuxFailures = [];
+  const linuxDeadline = createStartupDeadline({
+    platform: "linux",
+    onTimeout: (message) => linuxFailures.push(message),
+    scheduleTimeout: linuxClock.scheduleTimeout,
+    cancelTimeout: linuxClock.cancelTimeout,
+  });
+  const [linuxTimer] = linuxClock.entries();
+  assert.equal(linuxTimer.delay, 60_000);
+  assert.equal(linuxDeadline.phase, "daemon-url");
+  assert.equal(linuxDeadline.observe(`${WINDOWS_WRAPPER_READY_MARKER}\n`), false);
+  assert.deepEqual(linuxClock.entries(), [linuxTimer], "Windows readiness must not reset Linux");
+  linuxClock.fire(linuxTimer.id);
+  assert.deepEqual(linuxFailures, ["the daemon started but never reported a URL"]);
 });
 
 test("adjacent credentials are all redacted without changing ordinary text", () => {

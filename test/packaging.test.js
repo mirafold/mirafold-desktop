@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { WINDOWS_WRAPPER_READY_MARKER } from "../src/daemon.js";
 
 const require = createRequire(import.meta.url);
 const builderConfig = readFileSync(
@@ -96,6 +97,20 @@ test("packaging carries the daemon bootstrap and Windows kill-on-close wrapper",
   assert.ok(
     windowsJobSource.indexOf("AssignProcessToJobObject") < windowsJobSource.lastIndexOf("JobObjectProcessLauncher]::Run"),
     "the wrapper must establish Job assignment before resuming Electron",
+  );
+  const stopRegistration = windowsJobSource.indexOf("$stopRegistration =");
+  const readyMarker = windowsJobSource.indexOf(
+    `[Console]::Out.WriteLine("${WINDOWS_WRAPPER_READY_MARKER}")`,
+  );
+  const daemonLaunch = windowsJobSource.lastIndexOf("JobObjectProcessLauncher]::Run");
+  assert.ok(
+    stopRegistration !== -1 && stopRegistration < readyMarker && readyMarker < daemonLaunch,
+    "the wrapper-ready handshake must follow shutdown registration and precede daemon launch",
+  );
+  assert.equal(
+    windowsJobSource.split(WINDOWS_WRAPPER_READY_MARKER).length - 1,
+    1,
+    "the wrapper must emit exactly one readiness handshake",
   );
 });
 
