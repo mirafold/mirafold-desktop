@@ -329,6 +329,8 @@ test("the native menu auto-hides and packaged builds omit development commands",
   runProbe("packaged-menu");
 });
 
-test("a packaged Debian install with the archive marker leaves updates to APT", () => {
+test("a packaged Debian install with the archive marker leaves updates to APT", {
+  skip: process.platform !== "linux",
+}, () => {
   runProbe("apt-managed");
 });

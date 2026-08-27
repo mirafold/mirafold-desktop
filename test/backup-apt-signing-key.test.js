@@ -96,7 +96,9 @@ fi
   };
 }
 
-test("the backup helper encrypts and verifies without persisting plaintext", () => {
+test("the backup helper encrypts and verifies without persisting plaintext", {
+  skip: process.platform !== "linux",
+}, () => {
   const setup = fixture();
   try {
     const destination = join(setup.home, "mirafold-apt-signing-private-key-v1-backup.asc.gpg");
@@ -129,7 +131,9 @@ test("the backup helper encrypts and verifies without persisting plaintext", () 
   }
 });
 
-test("a failed encryption leaves neither a destination nor a partial file", () => {
+test("a failed encryption leaves neither a destination nor a partial file", {
+  skip: process.platform !== "linux",
+}, () => {
   const setup = fixture();
   try {
     const destination = join(setup.home, "failed-backup.asc.gpg");
