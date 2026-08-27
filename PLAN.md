@@ -749,9 +749,22 @@ A new higher release activates APT; no published asset is replaced or appended.
   and `33111480713`; batch-two IDs are `33111879563`, `33111879544`,
   `33111879542`, `33111879889`, `33111879691`, and `33111879266`. These were
   read-only manual CI dispatches. PR #19 subsequently passed DCO and both native
-  CI jobs and merged only the startup correction into protected `next`; the
-  candidate manifests remain diagnostic and no Mirafold `0.5.0` release or
-  asset was created. Public production remains immutable `v0.3.0`.
+  CI jobs and merged only the startup correction into protected `next`; at that
+  checkpoint the candidate manifests remained diagnostic and no Mirafold
+  `0.5.0` release or asset had been created. Public production remained
+  immutable `v0.3.0`.
+
+  **Real update branch prepared 2026-08-27.** After the v0.3.0 production state
+  was synchronized back into `next`, `npm run release:prepare -- 0.5.0` created
+  Desktop `0.3.1` plus Mirafold `0.5.0` on `feature/mirafold-0.5.0`. The command
+  independently rechecked npm `latest`, required npm `12.0.2`, regenerated the
+  lock with lifecycle scripts disabled, limited churn to Mirafold's dependency
+  closure, and produced the same two SHA-256 hashes recorded above. A clean
+  lockfile install contains 376 packages; `npm ls --all` passes, npm reports
+  zero vulnerabilities, all 376 registry signatures and 56 attestations verify,
+  and the 185-test suite passes 184 with only its native-Windows-on-Linux skip.
+  This branch creates no tag, release, or asset; public production remains
+  `v0.3.0` until the separately approved release process completes.
 
 ### Audit and test-audit pass — 2026-08-14
 
