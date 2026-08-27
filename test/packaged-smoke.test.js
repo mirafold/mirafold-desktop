@@ -262,7 +262,18 @@ test("the Windows packaged daemon smoke uses native tasklist and proves no Miraf
     spawn(command, args, options) {
       calls.push({ command, args, options });
       if (calls.length === 1) {
-        return { error: null, signal: null, status: 0, stderr: "", stdout: daemonSmokeText() };
+        return {
+          error: null,
+          signal: null,
+          status: 0,
+          stderr: "",
+          stdout: [
+            "[mirafold-probe-stage] windows-wrapper:started:0ms",
+            "[mirafold-probe-stage] bootstrap:shell-import-starting:2.5ms",
+            "[mirafold-probe-stage] bootstrap:started:not-a-time",
+            daemonSmokeText().trimEnd(),
+          ].join("\n") + "\n",
+        };
       }
       return {
         error: null,
@@ -276,6 +287,10 @@ test("the Windows packaged daemon smoke uses native tasklist and proves no Miraf
 
   assert.equal(result.executableProcessesAfterProbe, 0);
   assert.equal(result.windowsCrashTreeStopped, true);
+  assert.deepEqual(result.diagnosticStages, [
+    "[mirafold-probe-stage] windows-wrapper:started:0ms",
+    "[mirafold-probe-stage] bootstrap:shell-import-starting:2.5ms",
+  ]);
   assert.equal(
     calls[0].options.env.MIRAFOLD_PROBE_CRASH_OWNERSHIP,
     "1",
@@ -335,6 +350,7 @@ test("the native Windows runner proves ConPTY and Job-Object crash ownership", {
   });
   assert.equal(report.windowsCrashTreeStopped, true);
   assert.equal(report.executableProcessesAfterProbe, 0);
+  console.log(JSON.stringify({ mirafoldProbeStages: report.diagnosticStages }));
 });
 
 test("native build output paths are exact for Linux and Windows", () => {

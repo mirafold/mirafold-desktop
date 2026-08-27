@@ -15,6 +15,7 @@ import { invariant, readJson, stableVersion } from "./shared.mjs";
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const MARKER = "MIRAFOLD_PACKAGED_SMOKE=";
 const DAEMON_MARKER = "MIRAFOLD_PACKAGED_DAEMON_SMOKE=";
+const PROBE_STAGE_RE = /^\[mirafold-probe-stage\] (?:windows-wrapper|bootstrap):[a-z0-9-]+:\d+(?:\.\d+)?ms$/;
 function minimalEnvironment(appDirectory, additions = {}) {
   const env = {
     ELECTRON_RUN_AS_NODE: "1",
@@ -399,6 +400,12 @@ function parseMarkedReport(stdout, marker, label) {
   }
 }
 
+function probeStages(stdout) {
+  return String(stdout)
+    .split(/\r?\n/u)
+    .filter((line) => PROBE_STAGE_RE.test(line));
+}
+
 function spawnResult(result, label, { includeStdout = false } = {}) {
   if (result.error) {
     const diagnostic = String(result.stderr ?? "").trim().slice(-4000);
@@ -521,6 +528,7 @@ export function runPackagedDaemonProbe({
     });
     assertCredentialSafe(String(result.stdout), "packaged daemon stdout");
     assertCredentialSafe(String(result.stderr), "packaged daemon stderr");
+    const diagnosticStages = probeStages(result.stdout);
     spawnResult(result, "packaged daemon probe", { includeStdout: true });
     invariant(String(result.stderr).trim() === "", `packaged daemon wrote stderr: ${String(result.stderr).slice(-4000)}`);
     const report = parseMarkedReport(result.stdout, DAEMON_MARKER, "packaged daemon probe");
@@ -547,7 +555,7 @@ export function runPackagedDaemonProbe({
       invariant(report.windowsCrashTreeStopped === true, "packaged Windows crash tree was not stopped");
       const executableProcessesAfterProbe = windowsExecutableProcessCount(executable, spawn);
       invariant(executableProcessesAfterProbe === 0, `${executableProcessesAfterProbe} packaged Mirafold processes remained`);
-      return { ...report, executableProcessesAfterProbe };
+      return { ...report, executableProcessesAfterProbe, diagnosticStages };
     }
     return report;
   } finally {
