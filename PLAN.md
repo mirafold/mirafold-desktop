@@ -688,6 +688,45 @@ A new higher release activates APT; no published asset is replaced or appended.
   byte. Website-repository edits and any announcement remain separately scoped;
   this Step supplies their exact tested copy and links.
 
+  **Mirafold 0.5.0 pre-release gate — diagnosed and repaired 2026-08-27.** The
+  exact reviewed candidate is Desktop `0.3.1` plus Mirafold `0.5.0`; its
+  `package.json` SHA-256 is
+  `0f58bff55bc1be320b8dafcc28585497865dcfbcce7a7f4a9cbfceba562656a2`
+  and its `package-lock.json` SHA-256 is
+  `5b5b4b1ff64d0e764a256bed1756a42b82ae973c3dd09f1e6488bcaaf9bde508`.
+  The first proposed startup correction separated Windows wrapper preparation
+  from the daemon URL phase but bounded both at 60 seconds. Twelve unchanged
+  full CI runs at diagnostic commit
+  `95359b5bb39b19ef8f6f152107a6c9a6f3f77fa2` produced 12/12 Linux passes and
+  11/12 Windows passes. Run `33110421231` failed after 60.8 seconds with the
+  phase-specific `the Windows daemon wrapper never became ready` error; the
+  real package-smoke step was therefore skipped. Mirafold had not launched.
+  The successful native ownership probes lasted 52.6–72.3 seconds. This proves
+  the remaining boundary was PowerShell's runtime `Add-Type` compilation under
+  runner load, not Mirafold `0.5.0` import or daemon startup.
+
+  Final fix commit `ee752b48b60a7438d71465ddda2fed0c20ba4645`
+  emits one constant credential-free readiness line after Job Object setup and
+  stop-event registration, immediately before daemon launch. Windows wrapper
+  preparation now has a bounded 120 seconds; receipt of that line starts a
+  fresh 60-second daemon URL deadline. Linux retains its original single
+  60-second URL deadline. The native smoke's outer guards were expanded only
+  enough to let those inner bounds report their own failure.
+
+  The exact candidate at diagnostic commit
+  `f398e2df54143bd5e377c611943526f94fb2e6f8` passes the local 185-test suite
+  (184 passed, zero failed, one native-Windows-only skip), `npm ls --all`, a
+  zero-vulnerability npm audit, all 376 registry signatures, and 56
+  attestations. Twelve further full CI runs passed on both platforms: Windows
+  12/12 and Linux 12/12; native Windows ownership probes spanned 44.1–79.4
+  seconds and every real package smoke passed. Batch-one run IDs are
+  `33111480461`, `33111480498`, `33111480599`, `33111480638`, `33111480657`,
+  and `33111480713`; batch-two IDs are `33111879563`, `33111879544`,
+  `33111879542`, `33111879889`, `33111879691`, and `33111879266`. These were
+  read-only manual CI dispatches. The candidate manifests remain diagnostic,
+  no branch was merged, and no release or asset was created; public production
+  remains immutable `v0.3.0`.
+
 ### Audit and test-audit pass — 2026-08-14
 
 Completed 2026-08-14, on this same branch. A full security audit found one
