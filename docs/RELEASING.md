@@ -132,13 +132,34 @@ for the one-time bridge release.
 1. **Feature work**: branch off `next`, commit with `-s`, open a PR into
    `next`. Keep follow-ups on that PR; ask Kyle for merge approval when it
    appears ready. Repeat until `next` holds the release you want.
-2. **Fold in `main`** (only matters if Path A has published since `next` last
-   synced): `git switch -c release/x.y.z origin/next && git merge origin/main`.
-   The only expected conflict is `package.json`/`package-lock.json` versions —
-   keep the newer Shell pin, then apply the bump below.
-3. **Bump the Desktop version** in `package.json` and `package-lock.json`
-   (`npm version x.y.z --no-git-tag-version` does both) — commit
-   `release: vx.y.z` (signed off).
+2. **Reconstruct the exact reviewed staging tree on production's parent.** Make
+   sure the previous release's `main` → `next` sync is complete first; if Path A
+   has published since that sync, complete a new sync PR before continuing.
+   Then start from current production and apply the direct tree difference:
+
+   ```
+   git fetch origin
+   git switch -c release/x.y.z origin/main
+   git diff --binary origin/main origin/next | git apply --index
+   git diff --cached --quiet origin/next
+   git diff --quiet
+   ```
+
+   Both final commands must exit zero. This is intentionally a two-tree
+   reconstruction, not an ancestry merge: protected branches use squash merges,
+   so equivalent prior content has different commit ancestry. A normal merge
+   manufactured six conflicts during the `0.3.0` release even though direct
+   tree comparison proved the only content difference was the reviewed feature.
+3. **Bump the Desktop version** in `package.json` and `package-lock.json`, stage
+   those two release-specific changes, verify the complete staged patch, and
+   create one signed-off release commit:
+
+   ```
+   npm version x.y.z --no-git-tag-version
+   git add package.json package-lock.json
+   git diff --cached --check
+   git commit -s -m "release: vx.y.z"
+   ```
 4. **PR `release/x.y.z` → `main`**, merge on green.
 5. **Rehearse the exact merged commit without publishing:** manually dispatch
    the `Release` workflow from `main` with `fail_platform=none`. The workflow

@@ -2,7 +2,7 @@
   "name": "mirafold-desktop",
   "productName": "Mirafold",
   "desktopName": "mirafold.desktop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Mirafold as a desktop app — no terminal, no Node, no npm.",
   "license": "MIT",

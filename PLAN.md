@@ -632,7 +632,7 @@ A new higher release activates APT; no published asset is replaced or appended.
   Store, and development policies remain pinned separately. `npm test`: 175
   passed, zero failed, one native-Windows-only skip. No external or privileged
   state was created.
-- [ ] **Step 10.2 — establish the real archive identity and wire both release
+- [x] **Step 10.2 — establish the real archive identity and wire both release
   writers.** Kyle creates one dedicated signing key in his own terminal without
   exposing it to chat; commit only its public key and fingerprint; store the
   private export separately in the existing `manual-release` and
@@ -678,6 +678,22 @@ A new higher release activates APT; no published asset is replaced or appended.
   later); no value was read. The repository Actions variable list remains
   empty, so automated publication is still dormant. The sole remaining Step
   10.2 gate is the canonical-`main`, nonpublishing 17-file hosted rehearsal.
+
+  **Completed 2026-08-27.** Feature PR #17 passed DCO plus native Linux and
+  Windows CI and merged the reviewed APT implementation into `next`. Because
+  squash history made an ancestry merge conflict despite equivalent prior
+  content, `release/0.3.0` was reconstructed from `origin/main` plus the exact
+  binary tree difference to `origin/next`; equality gates proved its staged
+  product tree matched reviewed staging before the Desktop version bump. PR
+  #18 passed DCO and both native CI jobs and merged as protected `main` commit
+  `1e16d69955b251d8bbd8caccc54e394ef616ffde`. Canonical-main nonpublishing run
+  `33104838996` then passed source verification, exact prepared-source tests,
+  native Linux and Windows package smokes, production-key APT signing, all
+  17-file checks, and provenance; its publisher was event-gated and skipped.
+  Stable release `v0.3.0` was subsequently published with the complete 17
+  assets. The archive identity, both writer contracts, and the manual
+  publication path are therefore proven; live automated publication remains a
+  later explicit opt-in.
 - [ ] **Step 10.3 — publish and dogfood the real channel.** Through the normal
   `next` → release branch → protected `main` → signed-tag process and Kyle's
   explicit merge/publication approvals, publish a higher Desktop release. From
@@ -687,6 +703,14 @@ A new higher release activates APT; no published asset is replaced or appended.
   shutdown, and prove the website-ready installation instructions byte for
   byte. Website-repository edits and any announcement remain separately scoped;
   this Step supplies their exact tested copy and links.
+
+  **In progress 2026-08-27.** Kyle installed the public archive-keyring package
+  and `mirafold-desktop` through the real APT channel on Ubuntu, launched the
+  installed application, and observed its bundled Mirafold `0.3.7`. That proves
+  anonymous APT acquisition and launch of public Desktop `v0.3.0`; the native
+  module exercise and final website-ready instruction check remain open. The
+  stale Shell was expected release content, not an updater failure, and led to
+  the Mirafold `0.5.0` candidate gate below.
 
   **Mirafold 0.5.0 pre-release gate — diagnosed and repaired 2026-08-27.** The
   exact reviewed candidate is Desktop `0.3.1` plus Mirafold `0.5.0`; its
@@ -705,7 +729,8 @@ A new higher release activates APT; no published asset is replaced or appended.
   the remaining boundary was PowerShell's runtime `Add-Type` compilation under
   runner load, not Mirafold `0.5.0` import or daemon startup.
 
-  Final fix commit `ee752b48b60a7438d71465ddda2fed0c20ba4645`
+  Final fix source commit `ee752b48b60a7438d71465ddda2fed0c20ba4645`,
+  landed on `next` as `1d2aecfaff0267390ac2fbc549273228f3203165`,
   emits one constant credential-free readiness line after Job Object setup and
   stop-event registration, immediately before daemon launch. Windows wrapper
   preparation now has a bounded 120 seconds; receipt of that line starts a
@@ -723,9 +748,10 @@ A new higher release activates APT; no published asset is replaced or appended.
   `33111480461`, `33111480498`, `33111480599`, `33111480638`, `33111480657`,
   and `33111480713`; batch-two IDs are `33111879563`, `33111879544`,
   `33111879542`, `33111879889`, `33111879691`, and `33111879266`. These were
-  read-only manual CI dispatches. The candidate manifests remain diagnostic,
-  no branch was merged, and no release or asset was created; public production
-  remains immutable `v0.3.0`.
+  read-only manual CI dispatches. PR #19 subsequently passed DCO and both native
+  CI jobs and merged only the startup correction into protected `next`; the
+  candidate manifests remain diagnostic and no Mirafold `0.5.0` release or
+  asset was created. Public production remains immutable `v0.3.0`.
 
 ### Audit and test-audit pass — 2026-08-14
 
