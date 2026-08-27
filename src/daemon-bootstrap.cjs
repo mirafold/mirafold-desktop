@@ -8,6 +8,14 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
 const PID_LEDGER_ENV = "MIRAFOLD_DESKTOP_PID_LEDGER";
+const PROBE_DIAGNOSTICS_ENV = "MIRAFOLD_PROBE_DIAGNOSTICS";
+const probeStartedAt = process.hrtime.bigint();
+
+function writeProbeStage(stage) {
+  if (process.env[PROBE_DIAGNOSTICS_ENV] !== "1") return;
+  const elapsedMs = Number(process.hrtime.bigint() - probeStartedAt) / 1_000_000;
+  process.stdout.write(`[mirafold-probe-stage] bootstrap:${stage}:${elapsedMs.toFixed(1)}ms\n`);
+}
 
 function linuxProcessStartTime(pid) {
   const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -52,6 +60,7 @@ function installLinuxPtyOwnership(ledgerFile) {
 }
 
 async function main() {
+  writeProbeStage("started");
   const daemonEntry = process.argv[2];
   if (!daemonEntry) throw new Error("missing Mirafold daemon entry point");
 
@@ -63,7 +72,9 @@ async function main() {
   // Make Shell see the same argv shape it would receive if Electron had
   // launched its entry point directly rather than passing through this file.
   process.argv = [process.argv[0], daemonEntry, ...process.argv.slice(3)];
+  writeProbeStage("shell-import-starting");
   await import(pathToFileURL(path.resolve(daemonEntry)).href);
+  writeProbeStage("shell-import-returned");
 }
 
 if (require.main === module) {

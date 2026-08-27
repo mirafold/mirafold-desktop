@@ -92,10 +92,15 @@ const project = process.env.MIRAFOLD_PROBE_PROJECT;
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
 }
-function safeError(error) {
-  return String(error && (error.stack || error.message) || error)
+function safeText(value) {
+  return String(value ?? "")
     .replace(/([?&]token=)[^\s&"'<>]+/gi, "$1<redacted>")
     .replace(/(\bpairing code\s*:\s*)[A-Za-z0-9_-]+/gi, "$1<redacted>");
+}
+function safeError(error) {
+  const primary = safeText(error && (error.stack || error.message) || error);
+  const inner = safeText(error && error.stderr).trim();
+  return inner ? primary + "\n[daemon stderr]\n" + inner : primary;
 }
 async function request(url, timeout, headers = {}) {
   const response = await fetch(url, {
@@ -394,13 +399,21 @@ function parseMarkedReport(stdout, marker, label) {
   }
 }
 
-function spawnResult(result, label) {
+function spawnResult(result, label, { includeStdout = false } = {}) {
   if (result.error) {
     const diagnostic = String(result.stderr ?? "").trim().slice(-4000);
     throw new Error(`${label} could not run: ${result.error.message}${diagnostic ? `: ${diagnostic}` : ""}`);
   }
   invariant(result.signal === null, `${label} ended from signal ${result.signal}`);
-  invariant(result.status === 0, `${label} exited ${result.status}: ${String(result.stderr).slice(-4000)}`);
+  const diagnostic = [];
+  const stderr = String(result.stderr ?? "").trim().slice(-4000);
+  const stdout = includeStdout ? String(result.stdout ?? "").trim().slice(-4000) : "";
+  if (stderr) diagnostic.push(`[stderr]\n${stderr}`);
+  if (stdout) diagnostic.push(`[stdout]\n${stdout}`);
+  invariant(
+    result.status === 0,
+    `${label} exited ${result.status}${diagnostic.length ? `:\n${diagnostic.join("\n")}` : ""}`,
+  );
 }
 
 function validatePackagedPaths(executable, appDirectory) {
@@ -492,6 +505,7 @@ export function runPackagedDaemonProbe({
       encoding: "utf8",
       env: minimalEnvironment(appDirectory, {
         MIRAFOLD_PROBE_CRASH_OWNERSHIP: requireWindowsCrashOwnership ? "1" : "0",
+        MIRAFOLD_PROBE_DIAGNOSTICS: requireWindowsCrashOwnership ? "1" : "0",
         MIRAFOLD_PROBE_PROJECT: project,
         MIRAFOLD_LOG_FILE: "",
         MIRAFOLD_LOCAL_DISCOVERY: "off",
@@ -507,7 +521,7 @@ export function runPackagedDaemonProbe({
     });
     assertCredentialSafe(String(result.stdout), "packaged daemon stdout");
     assertCredentialSafe(String(result.stderr), "packaged daemon stderr");
-    spawnResult(result, "packaged daemon probe");
+    spawnResult(result, "packaged daemon probe", { includeStdout: true });
     invariant(String(result.stderr).trim() === "", `packaged daemon wrote stderr: ${String(result.stderr).slice(-4000)}`);
     const report = parseMarkedReport(result.stdout, DAEMON_MARKER, "packaged daemon probe");
     invariant(report?.urlContract?.protocol === "http:", "packaged daemon protocol differs");

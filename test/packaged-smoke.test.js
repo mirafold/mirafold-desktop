@@ -37,7 +37,7 @@ function daemonSmokeText() {
   })}\n`;
 }
 
-function fixture(t, { shellVersion = "0.3.7" } = {}) {
+function fixture(t, { daemonSource = null, shellVersion = "0.3.7" } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "mirafold-packaged-smoke-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const app = path.join(root, "resources", "app");
@@ -52,7 +52,7 @@ function fixture(t, { shellVersion = "0.3.7" } = {}) {
     type: "module",
   }));
   writeFileSync(path.join(app, "src", "main.js"), "// fixture\n");
-  writeFileSync(path.join(app, "src", "daemon.js"), `
+  writeFileSync(path.join(app, "src", "daemon.js"), daemonSource ?? `
 import http from "node:http";
 
 export class Daemon {
@@ -215,6 +215,40 @@ test("a packaged daemon timeout preserves the inner diagnostic", (t) => {
   );
 });
 
+test("a packaged daemon failure preserves safe startup stages and inner stderr", (t) => {
+  const { root, app } = fixture(t, {
+    daemonSource: `
+export class Daemon {
+  get running() { return false; }
+  start() {
+    process.stdout.write("[mirafold-probe-stage] bootstrap:shell-import-starting:12ms\\n");
+    const error = new Error("fixture daemon boot failed");
+    error.stderr = "inner diagnostic ?token=fixture-secret";
+    return Promise.reject(error);
+  }
+  stop() { return Promise.resolve(true); }
+}
+`,
+  });
+
+  assert.throws(
+    () => runPackagedDaemonProbe({
+      executable: process.execPath,
+      appDirectory: app,
+      temporaryDirectory: root,
+    }),
+    (error) => {
+      assert.match(error.message, /fixture daemon boot failed/);
+      assert.match(error.message, /\[daemon stderr\]/);
+      assert.match(error.message, /inner diagnostic \?token=<redacted>/);
+      assert.match(error.message, /\[stdout\]/);
+      assert.match(error.message, /bootstrap:shell-import-starting:12ms/);
+      assert.doesNotMatch(error.message, /fixture-secret/);
+      return true;
+    },
+  );
+});
+
 test("the Windows packaged daemon smoke uses native tasklist and proves no Mirafold image remains", (t) => {
   const { root, app } = fixture(t);
   const executable = path.join(root, "Mirafold.exe");
@@ -246,6 +280,11 @@ test("the Windows packaged daemon smoke uses native tasklist and proves no Miraf
     calls[0].options.env.MIRAFOLD_PROBE_CRASH_OWNERSHIP,
     "1",
     "the real Windows package must be told to prove Job-Object crash ownership",
+  );
+  assert.equal(
+    calls[0].options.env.MIRAFOLD_PROBE_DIAGNOSTICS,
+    "1",
+    "the native Windows probe must retain opt-in startup diagnostics",
   );
   assert.equal(calls[1].command, "tasklist.exe");
   assert.deepEqual(calls[1].args, ["/FI", "IMAGENAME eq Mirafold.exe", "/FO", "CSV", "/NH"]);

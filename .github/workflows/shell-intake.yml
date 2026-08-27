@@ -56,7 +56,10 @@ jobs:
         run: |
           set -euo pipefail
           test "$INTAKE_REPOSITORY" = "mirafold/mirafold-desktop"
-          test "$INTAKE_REF" = "refs/heads/main"
+          case "$INTAKE_REF" in
+            refs/heads/main|refs/heads/diagnostic/windows-shell-0.5.0-startup) ;;
+            *) exit 1 ;;
+          esac
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -200,7 +203,9 @@ jobs:
   build:
     name: build reviewed source (${{ matrix.name }})
     needs: [intake, test]
-    if: needs.intake.outputs.changed == 'true'
+    if: >-
+      needs.intake.outputs.changed == 'true' &&
+      github.ref == 'refs/heads/main'
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -312,6 +317,75 @@ jobs:
           include-hidden-files: false
           compression-level: 0
           retention-days: 7
+
+  diagnose-windows:
+    name: diagnose Windows startup (attempt ${{ matrix.attempt }})
+    needs: [intake, test]
+    if: >-
+      needs.intake.outputs.changed == 'true' &&
+      github.ref == 'refs/heads/diagnostic/windows-shell-0.5.0-startup'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        attempt: [1, 2, 3, 4, 5, 6]
+    env:
+      NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+      NPM_CONFIG_IGNORE_SCRIPTS: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Use the declared npm release toolchain
+        run: |
+          set -euo pipefail
+          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/mirafold-empty-npmrc"
+          echo "NPM_CONFIG_USERCONFIG=$NPM_CONFIG_USERCONFIG" >> "$GITHUB_ENV"
+          touch "$NPM_CONFIG_USERCONFIG"
+          chmod 600 "$NPM_CONFIG_USERCONFIG"
+          npm install --global npm@12.0.2 \
+            --ignore-scripts \
+            --audit=false \
+            --fund=false \
+            --registry=https://registry.npmjs.org
+          test "$(npm --version)" = "12.0.2"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mirafold-shell-intake
+          path: ${{ runner.temp }}/mirafold-shell-intake-artifact
+
+      - name: Apply reviewed package/version source
+        run: >-
+          node scripts/shell-intake.mjs apply
+          "$RUNNER_TEMP/mirafold-shell-intake-artifact"
+
+      - name: Install exact reviewed source without lifecycle scripts
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --audit=false --fund=false \
+            --registry=https://registry.npmjs.org
+          npm ls --all
+
+      - name: Run only the native Windows startup gate
+        run: >-
+          node --test --test-concurrency=1
+          --test-name-pattern="the native Windows runner proves ConPTY and Job-Object crash ownership"
+          test/packaged-smoke.test.js
+
+      - name: Recheck reviewed source after the diagnostic probe
+        run: >-
+          node scripts/shell-intake.mjs check
+          "$RUNNER_TEMP/mirafold-shell-intake-artifact"
 
   apt:
     name: sign reviewed Ubuntu APT repository

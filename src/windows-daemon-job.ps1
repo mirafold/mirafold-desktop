@@ -11,6 +11,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$probeClock = [System.Diagnostics.Stopwatch]::StartNew()
+function Write-ProbeStage {
+  param([Parameter(Mandatory = $true)][string]$Stage)
+  if ($env:MIRAFOLD_PROBE_DIAGNOSTICS -eq "1") {
+    [Console]::Out.WriteLine(
+      "[mirafold-probe-stage] windows-wrapper:{0}:{1}ms" -f $Stage, $probeClock.ElapsedMilliseconds
+    )
+  }
+}
+
+Write-ProbeStage "started"
+
 # The wrapper itself joins a kill-on-close Job Object before it starts
 # Electron. Windows then assigns every descendant to the same job by default.
 # If Electron crashes after a ConPTY child has detached from its ordinary
@@ -269,6 +281,7 @@ namespace MirafoldDesktop {
 "@
 
 Add-Type -TypeDefinition $jobObjectSource -Language CSharp
+Write-ProbeStage "interop-compiled"
 
 $job = [MirafoldDesktop.JobObjectNative]::CreateJobObject([IntPtr]::Zero, $null)
 if ($job -eq [IntPtr]::Zero) {
@@ -277,6 +290,7 @@ if ($job -eq [IntPtr]::Zero) {
     "Could not create the Mirafold daemon Job Object"
   )
 }
+Write-ProbeStage "job-created"
 
 $limits = [MirafoldDesktop.JOBOBJECT_EXTENDED_LIMIT_INFORMATION]::new()
 $limits.BasicLimitInformation.LimitFlags = 0x00002000
@@ -299,6 +313,7 @@ try {
 } finally {
   [Runtime.InteropServices.Marshal]::FreeHGlobal($limitsPointer)
 }
+Write-ProbeStage "job-configured"
 
 $assigned = [MirafoldDesktop.JobObjectNative]::AssignProcessToJobObject(
   $job,
@@ -310,20 +325,24 @@ if (-not $assigned) {
     "Could not assign the Mirafold daemon wrapper to its Job Object"
   )
 }
+Write-ProbeStage "wrapper-assigned"
 
 $stopEventName = $env:MIRAFOLD_DESKTOP_WINDOWS_STOP_EVENT
 if (-not $stopEventName -or -not $stopEventName.StartsWith("Local\MirafoldDesktopStop-")) {
   throw "Mirafold daemon stop event is missing or invalid"
 }
 $stopRegistration = [MirafoldDesktop.JobStopRegistration]::new($job, $stopEventName)
+Write-ProbeStage "stop-registered"
 
 try {
+  Write-ProbeStage "daemon-launching"
   $exitCode = [MirafoldDesktop.JobObjectProcessLauncher]::Run(
     $job,
     $ElectronExecutable,
     $BootstrapEntry,
     $DaemonEntry
   )
+  Write-ProbeStage ("daemon-exited-{0}" -f $exitCode)
   exit $exitCode
 } finally {
   $stopRegistration.Dispose()

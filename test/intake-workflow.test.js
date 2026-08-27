@@ -82,7 +82,7 @@ test("dependency and build jobs are read-only; only the isolated writer can push
   const header = workflow.slice(0, workflow.indexOf("\njobs:"));
   assert.match(header, /permissions:\s*\n\s+contents: read/);
   assert.doesNotMatch(header, /contents: write/);
-  for (const name of ["intake", "test", "build", "apt"]) {
+  for (const name of ["intake", "test", "build", "diagnose-windows", "apt"]) {
     const value = job(name);
     assert.match(value, /permissions:\s*\n\s+contents: read/);
     assert.match(value, /persist-credentials: false/);
@@ -94,10 +94,10 @@ test("dependency and build jobs are read-only; only the isolated writer can push
   assert.equal(workflow.match(/contents: write/g)?.length, 1);
 });
 
-test("manual intake is restricted to the canonical repository main branch before npm runs", () => {
+test("manual intake admits only canonical main or the exact temporary diagnostic branch before npm runs", () => {
   const intake = withoutComments(job("intake"));
   const repository = intake.indexOf('test "$INTAKE_REPOSITORY" = "mirafold/mirafold-desktop"');
-  const branch = intake.indexOf('test "$INTAKE_REF" = "refs/heads/main"');
+  const branch = intake.indexOf("refs/heads/main|refs/heads/diagnostic/windows-shell-0.5.0-startup");
   const npm = intake.indexOf("npm install --global");
   const prepare = intake.indexOf("shell-intake.mjs prepare");
   assert.ok(repository !== -1 && branch !== -1 && repository < npm && branch < npm);
@@ -106,13 +106,13 @@ test("manual intake is restricted to the canonical repository main branch before
 
 test("the workflow uses package.json's exact npm toolchain with scripts disabled", () => {
   assert.equal(packageMetadata.packageManager, "npm@12.0.2");
-  assert.equal(workflow.match(/npm install --global npm@12\.0\.2/g)?.length, 3);
-  assert.equal(workflow.match(/test "\$\(npm --version\)" = "12\.0\.2"/g)?.length, 3);
-  assert.equal(workflow.match(/NPM_CONFIG_IGNORE_SCRIPTS: "true"/g)?.length, 3);
-  assert.equal(workflow.match(/NPM_CONFIG_REGISTRY: https:\/\/registry\.npmjs\.org/g)?.length, 3);
+  assert.equal(workflow.match(/npm install --global npm@12\.0\.2/g)?.length, 4);
+  assert.equal(workflow.match(/test "\$\(npm --version\)" = "12\.0\.2"/g)?.length, 4);
+  assert.equal(workflow.match(/NPM_CONFIG_IGNORE_SCRIPTS: "true"/g)?.length, 4);
+  assert.equal(workflow.match(/NPM_CONFIG_REGISTRY: https:\/\/registry\.npmjs\.org/g)?.length, 4);
   assert.equal(
     workflow.match(/export NPM_CONFIG_USERCONFIG="\$RUNNER_TEMP\/mirafold-empty-npmrc"/g)?.length,
-    3,
+    4,
     "each npm job must create its isolated user config at step level",
   );
 });
@@ -174,7 +174,10 @@ test("the intake policy implementation loads no third-party code", () => {
 test("native Linux and Windows builds consume, test, smoke, and retain one reviewed candidate", () => {
   const value = withoutComments(job("build"));
   assert.match(value, /needs: \[intake, test\]/);
-  assert.match(value, /if: needs\.intake\.outputs\.changed == 'true'/);
+  assert.match(
+    value,
+    /if: >-\s*\n\s+needs\.intake\.outputs\.changed == 'true' &&\s*\n\s+github\.ref == 'refs\/heads\/main'/,
+  );
   assert.match(value, /name: linux\s*\n\s+os: ubuntu-latest\s*\n\s+args: --linux/);
   assert.match(value, /name: windows\s*\n\s+os: windows-latest\s*\n\s+args: --win/);
   const download = value.indexOf("name: mirafold-shell-intake");
@@ -205,6 +208,24 @@ test("native Linux and Windows builds consume, test, smoke, and retain one revie
   for (const pattern of ["dist/SHA256SUMS-*.txt", "dist/latest*.yml", "dist/*.blockmap", "dist/*.deb", "dist/*.tar.gz", "dist/*.AppImage", "dist/*.exe"]) {
     assert.ok(value.includes(pattern), `native artifact upload omits ${pattern}`);
   }
+});
+
+test("the temporary diagnosis uses six fresh read-only Windows runners and cannot build or publish", () => {
+  const value = withoutComments(job("diagnose-windows"));
+  assert.match(value, /needs: \[intake, test\]/);
+  assert.match(value, /github\.ref == 'refs\/heads\/diagnostic\/windows-shell-0\.5\.0-startup'/);
+  assert.match(value, /runs-on: windows-latest/);
+  assert.match(value, /attempt: \[1, 2, 3, 4, 5, 6\]/);
+  assert.match(value, /permissions:\s*\n\s+contents: read/);
+  assert.match(value, /persist-credentials: false/);
+  assert.doesNotMatch(value, /contents: write|id-token: write|secrets\./);
+  const download = value.indexOf("name: mirafold-shell-intake");
+  const apply = value.indexOf("shell-intake.mjs apply");
+  const install = value.indexOf("npm ci --ignore-scripts");
+  const probe = value.indexOf("--test-name-pattern=\"the native Windows runner proves ConPTY and Job-Object crash ownership\"");
+  const check = value.indexOf("shell-intake.mjs check");
+  assert.ok(download !== -1 && download < apply && apply < install && install < probe && probe < check);
+  assert.doesNotMatch(value, /electron-builder|apt-repository|release-coordinator|upload-artifact/);
 });
 
 for (const [platform, runner] of [["Linux", "ubuntu-latest"], ["Windows", "windows-latest"]]) {
