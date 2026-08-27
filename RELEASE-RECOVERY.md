@@ -7,22 +7,29 @@ the others.
 
 ## What identifies a release
 
-Every release candidate contains nine files: four Linux payload/metadata files,
-three Windows payload/metadata files, and one SHA-256 manifest for each
-platform. `scripts/release-contract.mjs` verifies the exact filenames, updater
-SHA-512 values and sizes, block maps, and both manifests before publication.
-Changing any payload after manifest generation makes publication fail.
+Every release candidate contains 17 files: the existing five Linux and four
+Windows payload/metadata/manifest files plus eight signed APT repository files.
+`scripts/release-contract.mjs` verifies the exact filenames, updater SHA-512
+values and sizes, block maps, and both platform manifests. The separate
+standard-library APT verifier checks the committed archive fingerprint, both
+OpenPGP signatures, Release/index/package hashes, and bootstrap-package
+contents before attestation and again before publication. Changing any payload
+after metadata generation makes publication fail.
 
-After both native build jobs finish, a separate GitHub Actions job verifies the
-merged nine-file set and asks GitHub to create SLSA build provenance for all
-nine digests. That job receives a short-lived OpenID Connect identity and
-attestation permission. It has no repository-write permission and no stored
-signing key. GitHub and Sigstore therefore provide the provenance identity;
-there is no long-lived provenance key for Kyle to buy, download, back up, or
-rotate.
+After both native build jobs finish, a read-only dependency-free job signs the
+APT metadata with the dedicated archive key. A separate GitHub Actions job then
+verifies the merged 17-file set and asks GitHub to create SLSA build provenance
+for all 17 digests. The provenance job receives a short-lived OpenID Connect
+identity and attestation permission. It has no repository-write permission and
+no archive private key. GitHub and Sigstore therefore provide the provenance
+identity; there is no long-lived provenance key for Kyle to buy, download, back
+up, or rotate. The APT archive key is a separate identity with its own backup
+and rotation duties documented in `docs/RELEASING.md`.
 
 This does **not** make the direct-download installers operating-system signed.
-The Windows NSIS installer and Linux packages remain unsigned. Windows
+The Windows NSIS installer and Linux executables remain without embedded code
+signatures. APT authenticates its repository metadata and `.deb` hash instead.
+Windows
 SmartScreen can consequently show an unrecognized-publisher warning. No
 Windows code-signing certificate or private signing key currently exists. A
 Microsoft Store package and its free Store-managed signing identity belong to
@@ -34,11 +41,23 @@ installer display a verified Windows publisher.
 
 ## Accounts and material Kyle must retain
 
-The automated Desktop repository has no npm publication token and no Desktop
-release secret. npm ownership and recovery belong to the upstream
+The automated Desktop repository has no npm publication token. Its one
+long-lived release secret is the dedicated APT archive private key, duplicated
+across the two protected release environments and backed up outside the working
+machine; losing it before an overlapping rotation breaks automatic trust for
+existing APT clients. npm ownership and recovery belong to the upstream
 `mirafold/mirafold` Shell release process. Desktop consumes the public package
 only after npm signature, provenance, source-repository, source-tag, source-
 commit, workflow-path, and builder checks pass.
+
+`scripts/backup-apt-signing-key.sh` creates the recovery file by piping the
+private export directly into GnuPG symmetric encryption, decrypts it only into
+a verification pipe, and installs the encrypted result outside the repository
+with owner-only permissions. Its passphrase must be retained separately and
+the encrypted file must be copied off the working machine before the private
+key is uploaded to GitHub. `scripts/configure-github-apt-secret.sh` then streams
+the private export to GitHub without printing it or writing an unencrypted
+copy.
 
 GitHub account recovery is the human root of trust. Before automated
 publication is enabled, Kyle should verify these privately in his own GitHub
@@ -64,18 +83,20 @@ publication from `mirafold/mirafold-desktop` even when the source is intact.
 
 The workflow-level default token is read-only. Dependency installation, tests,
 native packaging, manifest generation, and packaged smoke checks run without a
-repository-write token. The provenance job alone receives short-lived OpenID
-Connect and attestation permissions. The final writer alone receives
-`contents: write`, installs no dependencies, and re-verifies the exact release
-candidate.
+repository-write token. The APT signer receives the archive key but only a
+read-only token and installs no dependencies. The provenance job alone receives
+short-lived OpenID Connect and attestation permissions. The final writer alone
+receives `contents: write`, installs no dependencies, and re-verifies the exact
+release candidate and archive signature.
 
-The proposed `automated-release` environment accepts only `main` and has no
-reviewer, so routine verified Shell releases require no human action. The
-proposed `manual-release` environment accepts only `v*` tags and requires Kyle
-as reviewer; self-review remains allowed because this is a one-maintainer
-repository. Merely referencing these environment names in workflow source does
-not establish their protection rules; `.github/repository-hardening.json` is
-the exact desired remote state.
+The live `automated-release` environment accepts only `main` and has no
+reviewer, so a main-only nonpublishing rehearsal and routine verified Shell
+releases require no human approval. The live `manual-release` environment
+accepts only `v*` tags and requires Kyle as reviewer; self-review remains
+allowed because this is a one-maintainer repository. These policies were
+confirmed through GitHub's read-only API on 2026-08-26.
+`.github/repository-hardening.json` remains the exact desired remote state the
+reconciler audits.
 
 The `main-release-safety` ruleset requires a pull request, successful
 `test (linux)` and `test (windows)` checks from the GitHub Actions App and the
@@ -103,7 +124,7 @@ provenance covers the downloadable build outputs instead.
 ## Partial or failed publication
 
 The safe retry unit is the same GitHub Actions workflow run. Its immutable
-intake and native artifacts are retained for seven days.
+intake, native, and signed APT artifacts are retained for seven days.
 
 - Before the atomic branch/tag push succeeds, the public repository and release
   feed are unchanged.
@@ -155,7 +176,8 @@ Removing or changing the repository variable
 `MIRAFOLD_AUTOMATED_RELEASES` cannot publish a release. When it is absent or not
 exactly `enabled`, the write-capable automated job is skipped; intake, tests,
 and a manual rehearsal may still run. Leave it absent until the non-publishing
-rehearsal and repository hardening have both been accepted.
+17-file rehearsal, first signed APT release, and repository hardening have all
+been accepted.
 
 ## Exact external state boundary
 

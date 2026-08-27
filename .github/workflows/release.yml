@@ -22,9 +22,11 @@ name: Release
 # developer override, so the old claim that an unsigned app is categorically
 # unusable was inaccurate.
 #
-# Every GitHub-authored action is pinned to one reviewed commit. There are no
-# stored release secrets: publication uses the automatic GITHUB_TOKEN, while
-# provenance uses GitHub's short-lived OIDC identity.
+# Every GitHub-authored action is pinned to one reviewed commit. The dedicated
+# APT archive private key is the only stored release secret, scoped to the
+# protected manual-release environment and exposed only to a read-only signing
+# job that installs no project dependencies. Publication uses the automatic
+# GITHUB_TOKEN; provenance uses GitHub's short-lived OIDC identity.
 
 on:
   push:
@@ -110,6 +112,21 @@ jobs:
       - name: Stable tag ↔ version check
         if: github.event_name == 'push'
         run: node scripts/release-contract.mjs identity "${{ github.ref_name }}"
+
+      # Rehearsal needs the same production archive key as a real release, but
+      # the automated-release environment deliberately admits only main. Fail
+      # a branch-selected dispatch before dependency code or native packaging,
+      # then let main rehearse the complete signer/attestation path without a
+      # tag and without entering the publication job.
+      - name: Rehearsal must use canonical main
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          test "$RELEASE_REPOSITORY" = "mirafold/mirafold-desktop"
+          test "$RELEASE_REF" = "refs/heads/main"
 
       - name: Inject requested rehearsal failure
         if: >-
@@ -198,9 +215,75 @@ jobs:
           compression-level: 0
           retention-days: 7
 
+  apt:
+    name: sign Ubuntu APT repository
+    needs: build
+    runs-on: ubuntu-latest
+    # A production tag uses the reviewer-protected tag-only environment. A
+    # nonpublishing dispatch uses the existing main-only automated environment,
+    # after the build job's explicit canonical-main gate above.
+    environment: ${{ github.event_name == 'push' && 'manual-release' || 'automated-release' }}
+    permissions:
+      contents: read
+    steps:
+      # No dependency installation occurs here. The only repository code run
+      # beside the archive key imports Node's standard library and invokes the
+      # runner's Debian/GnuPG tools without executing package maintainer code.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linux
+          path: ${{ runner.temp }}/mirafold-apt-work
+
+      - name: Assemble and verify the signed APT repository
+        shell: bash
+        env:
+          MIRAFOLD_APT_SIGNING_PRIVATE_KEY: ${{ secrets.MIRAFOLD_APT_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$MIRAFOLD_APT_SIGNING_PRIVATE_KEY"
+          APT_KEY_HOME="$RUNNER_TEMP/mirafold-apt-signing"
+          cleanup_apt_key() {
+            gpgconf --homedir "$APT_KEY_HOME" --kill gpg-agent >/dev/null 2>&1 || true
+            rm -rf -- "$APT_KEY_HOME"
+          }
+          trap cleanup_apt_key EXIT
+          install -d -m 0700 "$APT_KEY_HOME"
+          export GNUPGHOME="$APT_KEY_HOME"
+          printf '%s' "$MIRAFOLD_APT_SIGNING_PRIVATE_KEY" \
+            | gpg --batch --no-options --import
+          unset MIRAFOLD_APT_SIGNING_PRIVATE_KEY
+          DESKTOP_VERSION="$(node -p "require('./package.json').version")"
+          node scripts/apt-repository.mjs assemble \
+            "$RUNNER_TEMP/mirafold-apt-work" \
+            "$RUNNER_TEMP/mirafold-apt-work/mirafold-desktop_${DESKTOP_VERSION}_amd64.deb" \
+            packaging/apt/mirafold-archive-keyring.gpg \
+            packaging/apt/fingerprint.txt
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: apt
+          path: |
+            ${{ runner.temp }}/mirafold-apt-work/Packages
+            ${{ runner.temp }}/mirafold-apt-work/Packages.gz
+            ${{ runner.temp }}/mirafold-apt-work/Release
+            ${{ runner.temp }}/mirafold-apt-work/InRelease
+            ${{ runner.temp }}/mirafold-apt-work/Release.gpg
+            ${{ runner.temp }}/mirafold-apt-work/mirafold-archive-keyring_1.0_all.deb
+            ${{ runner.temp }}/mirafold-apt-work/mirafold-archive-keyring.gpg
+            ${{ runner.temp }}/mirafold-apt-work/mirafold.sources
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
   attest:
     name: attest release provenance
-    needs: build
+    needs: [build, apt]
     runs-on: ubuntu-latest
     # OIDC and attestation writes exist only here, after dependency code and
     # native packaging have finished in separate read-only jobs.
@@ -219,18 +302,26 @@ jobs:
           merge-multiple: true
 
       - name: Verify exact subjects before attesting
-        run: >-
-          node scripts/release-contract.mjs artifacts
-          "${{ runner.temp }}/mirafold-release-assets"
+        shell: bash
+        run: |
+          set -euo pipefail
+          DESKTOP_VERSION="$(node -p "require('./package.json').version")"
+          node scripts/apt-repository.mjs verify-approved \
+            "$RUNNER_TEMP/mirafold-release-assets" \
+            "$DESKTOP_VERSION" \
+            packaging/apt/mirafold-archive-keyring.gpg \
+            packaging/apt/fingerprint.txt
+          node scripts/release-contract.mjs artifacts \
+            "$RUNNER_TEMP/mirafold-release-assets"
 
-      - name: Generate SLSA build provenance for all nine release files
+      - name: Generate SLSA build provenance for all 17 release files
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ runner.temp }}/mirafold-release-assets/*
 
   release:
     name: publish release
-    needs: [build, attest]
+    needs: [build, apt, attest]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: manual-release
@@ -252,8 +343,17 @@ jobs:
 
       # No npm install occurs in this job. The verifier is Node-standard-library
       # only, so dependency code never runs beside the repository-write token.
-      - name: Verify complete release set
-        run: node scripts/release-contract.mjs complete "${{ github.ref_name }}" artifacts
+      - name: Verify signed APT repository and complete release set
+        shell: bash
+        run: |
+          set -euo pipefail
+          DESKTOP_VERSION="$(node -p "require('./package.json').version")"
+          node scripts/apt-repository.mjs verify-approved \
+            artifacts "$DESKTOP_VERSION" \
+            packaging/apt/mirafold-archive-keyring.gpg \
+            packaging/apt/fingerprint.txt
+          node scripts/release-contract.mjs complete \
+            "${{ github.ref_name }}" artifacts
 
       - name: Publish complete GitHub Release atomically
         shell: bash

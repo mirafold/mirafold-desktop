@@ -11,6 +11,7 @@
 
 const DIAGNOSTIC_CHARS = 2000;
 export const DOWNLOAD_PAGE_URL = "https://github.com/mirafold/mirafold-desktop/releases/latest";
+export const APT_MANAGED_MARKER = "/usr/share/mirafold/apt-managed";
 
 /**
  * Decide which update mechanism this exact installed form can safely use.
@@ -26,10 +27,12 @@ export function desktopUpdateStrategy({
   platform,
   isAppImage = false,
   linuxPackageType = null,
+  isAptManaged = false,
 }) {
   if (isPackaged !== true) return "disabled";
   if (isWindowsStore === true) return "store";
   if (platform !== "linux") return "install";
+  if (linuxPackageType === "deb" && isAptManaged === true) return "apt";
   if (isAppImage || linuxPackageType === "deb") return "install";
   return "manual-download";
 }
@@ -79,7 +82,7 @@ function versionDetail(desktopVersion, shellVersion) {
  *   isWindowsStore: boolean,
  *   desktopVersion: string,
  *   shellVersion: string,
- *   updateStrategy?: "disabled"|"store"|"install"|"manual-download",
+ *   updateStrategy?: "disabled"|"store"|"apt"|"install"|"manual-download",
  *   loadUpdater: () => Promise<object>|object,
  *   showMessage: (options: object) => Promise<{response: number}>,
  *   openDownloadPage?: (url: string) => Promise<void>|void,
@@ -107,7 +110,7 @@ export function createDesktopUpdater(options) {
     logger = console,
   } = options;
 
-  if (!["disabled", "store", "install", "manual-download"].includes(updateStrategy)) {
+  if (!["disabled", "store", "apt", "install", "manual-download"].includes(updateStrategy)) {
     throw new TypeError(`unknown desktop update strategy ${updateStrategy}`);
   }
   if (updateStrategy === "manual-download" && typeof openDownloadPage !== "function") {
@@ -446,9 +449,11 @@ export function createDesktopUpdater(options) {
           click: () => void checkForUpdates(true),
         }
       : {
-          label: isWindowsStore
+          label: updateStrategy === "store"
             ? "Updates managed by Microsoft Store"
-            : "Updates available in the installed app",
+            : updateStrategy === "apt"
+              ? "Updates managed by APT"
+              : "Updates available in the installed app",
           enabled: false,
         };
 

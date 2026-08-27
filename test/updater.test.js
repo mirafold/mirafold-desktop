@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  APT_MANAGED_MARKER,
   DOWNLOAD_PAGE_URL,
   createDesktopUpdater,
   desktopUpdateStrategy,
@@ -99,9 +100,24 @@ function harness(overrides = {}) {
 
 test("the packaged Linux form selects its observed update mechanism", () => {
   const base = { isPackaged: true, isWindowsStore: false };
+  assert.equal(APT_MANAGED_MARKER, "/usr/share/mirafold/apt-managed");
   assert.equal(desktopUpdateStrategy({ ...base, platform: "win32" }), "install");
   assert.equal(desktopUpdateStrategy({ ...base, platform: "linux", isAppImage: true }), "install");
   assert.equal(desktopUpdateStrategy({ ...base, platform: "linux", linuxPackageType: "deb" }), "install");
+  assert.equal(
+    desktopUpdateStrategy({
+      ...base,
+      platform: "linux",
+      linuxPackageType: "deb",
+      isAptManaged: true,
+    }),
+    "apt",
+  );
+  assert.equal(
+    desktopUpdateStrategy({ ...base, platform: "linux", isAppImage: true, isAptManaged: true }),
+    "install",
+    "a machine-wide APT marker must not reclassify a portable AppImage",
+  );
   assert.equal(desktopUpdateStrategy({ ...base, platform: "linux" }), "manual-download");
   assert.equal(
     desktopUpdateStrategy({ ...base, platform: "linux", linuxPackageType: "unknown" }),
@@ -120,10 +136,12 @@ test("only packaged non-Store builds may construct the direct updater", async ()
   for (const state of [
     { isPackaged: false, isWindowsStore: false, strategy: "disabled", label: "Updates available in the installed app" },
     { isPackaged: true, isWindowsStore: true, strategy: "store", label: "Updates managed by Microsoft Store" },
+    { isPackaged: true, isWindowsStore: false, strategy: "apt", label: "Updates managed by APT" },
   ]) {
     let loadCalls = 0;
     const controller = createDesktopUpdater({
       ...state,
+      updateStrategy: state.strategy,
       desktopVersion: DESKTOP_VERSION,
       shellVersion: SHELL_VERSION,
       loadUpdater: async () => {

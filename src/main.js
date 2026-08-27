@@ -23,7 +23,7 @@ import {
   Menu,
   shell,
 } from "electron";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,7 +33,11 @@ import { daemonOriginFromUrl, navigationVerdict } from "./navigation.js";
 import { installPermissionGuards } from "./permissions.js";
 import { createSafeAppImageUpdater, createSafeNsisUpdater } from "./platform-updaters.js";
 import { lastFolder, setLastFolder } from "./state.js";
-import { createDesktopUpdater, desktopUpdateStrategy } from "./updater.js";
+import {
+  APT_MANAGED_MARKER,
+  createDesktopUpdater,
+  desktopUpdateStrategy,
+} from "./updater.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const LOADING = path.join(HERE, "loading.html");
@@ -271,6 +275,13 @@ function installedLinuxPackageType() {
   }
 }
 
+/** The root-owned archive-keyring package marks repository-managed installs. */
+function isAptManagedLinuxInstall() {
+  return process.platform === "linux"
+    && app.isPackaged
+    && existsSync(APT_MANAGED_MARKER);
+}
+
 /** A native message box parented to the window while one exists. */
 function showMessage(options) {
   return win && !win.isDestroyed()
@@ -452,6 +463,7 @@ if (!app.requestSingleInstanceLock()) {
       platform: process.platform,
       isAppImage: typeof process.env.APPIMAGE === "string",
       linuxPackageType: installedLinuxPackageType(),
+      isAptManaged: isAptManagedLinuxInstall(),
     });
     desktopUpdater = createDesktopUpdater({
       isPackaged: app.isPackaged,

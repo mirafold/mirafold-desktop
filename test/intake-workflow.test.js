@@ -33,6 +33,10 @@ const releaseContractSource = readFileSync(
   new URL("../scripts/release-contract.mjs", import.meta.url),
   "utf8",
 );
+const aptContractSource = readFileSync(
+  new URL("../scripts/apt-repository.mjs", import.meta.url),
+  "utf8",
+);
 
 function job(name) {
   const start = workflow.indexOf(`\n  ${name}:\n`);
@@ -78,7 +82,7 @@ test("dependency and build jobs are read-only; only the isolated writer can push
   const header = workflow.slice(0, workflow.indexOf("\njobs:"));
   assert.match(header, /permissions:\s*\n\s+contents: read/);
   assert.doesNotMatch(header, /contents: write/);
-  for (const name of ["intake", "test", "build"]) {
+  for (const name of ["intake", "test", "build", "apt"]) {
     const value = job(name);
     assert.match(value, /permissions:\s*\n\s+contents: read/);
     assert.match(value, /persist-credentials: false/);
@@ -210,25 +214,63 @@ for (const [platform, runner] of [["Linux", "ubuntu-latest"], ["Windows", "windo
     const release = withoutComments(job("release"));
     assert.match(build, /fail-fast: false/);
     assert.ok(build.includes(`os: ${runner}`), `${platform} matrix runner is missing`);
-    assert.match(attest, /needs: \[intake, test, build\]/);
+    assert.match(job("apt"), /needs: \[intake, test, build\]/);
+    assert.match(attest, /needs: \[intake, test, build, apt\]/);
     assert.doesNotMatch(attest, /always\(\)/);
-    assert.match(release, /needs: \[intake, test, build, attest\]/);
+    assert.match(release, /needs: \[intake, test, build, apt, attest\]/);
     assert.doesNotMatch(release, /always\(\)/);
   });
 }
 
 test("the automated writer is dormant until explicitly enabled after every read-only gate", () => {
   const value = job("release");
-  assert.match(value, /needs: \[intake, test, build, attest\]/);
+  assert.match(value, /needs: \[intake, test, build, apt, attest\]/);
   assert.match(value, /needs\.intake\.outputs\.changed == 'true'/);
   assert.match(value, /vars\.MIRAFOLD_AUTOMATED_RELEASES == 'enabled'/);
   assert.match(value, /environment: automated-release/);
   assert.match(value, /concurrency:\s*\n\s+group: mirafold-desktop-publication\s*\n\s+cancel-in-progress: false/);
 });
 
-test("provenance is isolated, verifies the reviewed nine-file candidate, and cannot publish", () => {
-  const value = withoutComments(job("attest"));
+test("the archive key is isolated from dependencies and repository write access", () => {
+  const value = withoutComments(job("apt"));
   assert.match(value, /needs: \[intake, test, build\]/);
+  assert.match(value, /needs\.intake\.outputs\.changed == 'true'/);
+  assert.match(value, /vars\.MIRAFOLD_AUTOMATED_RELEASES == 'enabled'/);
+  assert.match(value, /github\.event_name == 'workflow_dispatch'/);
+  assert.match(value, /environment: automated-release/);
+  assert.match(value, /permissions:\s*\n\s+contents: read/);
+  assert.doesNotMatch(value, /contents: write/);
+  assert.match(value, /persist-credentials: false/);
+  assert.match(value, /secrets\.MIRAFOLD_APT_SIGNING_PRIVATE_KEY/);
+  assert.equal(workflow.match(/secrets\.MIRAFOLD_APT_SIGNING_PRIVATE_KEY/g)?.length, 1);
+  assert.doesNotMatch(job("release"), /MIRAFOLD_APT_SIGNING_PRIVATE_KEY/);
+  assert.doesNotMatch(value, /\bnpm\s+(?:ci|install|test|run)\b/);
+  assert.doesNotMatch(value, /\bnpx\b/);
+  const download = value.indexOf("name: mirafold-release-linux");
+  const importKey = value.indexOf("gpg --batch --no-options --import");
+  const assemble = value.indexOf("apt-repository.mjs assemble");
+  const upload = value.indexOf("uses: actions/upload-artifact@");
+  assert.ok(download !== -1 && download < importKey && importKey < assemble && assemble < upload);
+  assert.match(value, /name: mirafold-release-apt/);
+  assert.match(value, /unset MIRAFOLD_APT_SIGNING_PRIVATE_KEY/);
+  assert.match(value, /trap cleanup_apt_key EXIT/);
+  for (const name of [
+    "Packages",
+    "Packages.gz",
+    "Release",
+    "InRelease",
+    "Release.gpg",
+    "mirafold-archive-keyring_1.0_all.deb",
+    "mirafold-archive-keyring.gpg",
+    "mirafold.sources",
+  ]) {
+    assert.ok(value.includes(`/mirafold-apt-work/${name}`), `APT artifact upload omits ${name}`);
+  }
+});
+
+test("provenance is isolated, verifies the reviewed 17-file candidate, and cannot publish", () => {
+  const value = withoutComments(job("attest"));
+  assert.match(value, /needs: \[intake, test, build, apt\]/);
   assert.match(value, /needs\.intake\.outputs\.changed == 'true'/);
   assert.match(value, /vars\.MIRAFOLD_AUTOMATED_RELEASES == 'enabled'/);
   assert.match(value, /github\.event_name == 'workflow_dispatch'/);
@@ -240,10 +282,12 @@ test("provenance is isolated, verifies the reviewed nine-file candidate, and can
   const intakeDownload = value.indexOf("name: mirafold-shell-intake");
   const assetDownload = value.indexOf("pattern: mirafold-release-*");
   const apply = value.indexOf("shell-intake.mjs apply");
+  const aptVerify = value.indexOf("apt-repository.mjs verify-approved");
   const verify = value.indexOf("release-contract.mjs complete");
   const attest = value.indexOf("uses: actions/attest@");
   assert.ok(intakeDownload !== -1 && intakeDownload < assetDownload && assetDownload < apply);
-  assert.ok(apply < verify && verify < attest);
+  assert.ok(apply < aptVerify && aptVerify < verify && verify < attest);
+  assert.match(value, /all 17 release files/);
   assert.match(value, /subject-path: \$\{\{ runner\.temp \}\}\/mirafold-release-assets\/\*/);
   assert.doesNotMatch(value, /\bnpm\s+(?:ci|install|test|run)\b/);
   assert.doesNotMatch(value, /\bnpx\b/);
@@ -253,7 +297,14 @@ test("the write-capable job loads no installed dependency code", () => {
   const writer = withoutComments(job("release"));
   assert.doesNotMatch(writer, /\bnpm\s+(?:ci|install|test|run)\b/);
   assert.doesNotMatch(writer, /\bnpx\b/);
-  const imports = [coordinatorSource, intakeSource, preparationSource, releaseContractSource, sharedSource]
+  const imports = [
+    coordinatorSource,
+    intakeSource,
+    preparationSource,
+    releaseContractSource,
+    aptContractSource,
+    sharedSource,
+  ]
     .flatMap((source) => [...source.matchAll(/\bfrom\s+["']([^"']+)["']/g)].map((match) => match[1]));
   assert.deepEqual(
     imports.filter((specifier) => !specifier.startsWith("node:") && !specifier.startsWith("./")),
@@ -263,6 +314,7 @@ test("the write-capable job loads no installed dependency code", () => {
 
 test("the writer pushes branch and annotated tag together, then publishes only a verified draft", () => {
   const value = withoutComments(job("release"));
+  const aptVerify = value.indexOf("apt-repository.mjs verify-approved");
   const prepare = value.indexOf("release-coordinator.mjs prepare");
   const preflight = value.indexOf("release-coordinator.mjs remote");
   const commit = value.indexOf('commit -s -m "$RELEASE_COMMIT_SUBJECT"');
@@ -278,7 +330,7 @@ test("the writer pushes branch and annotated tag together, then publishes only a
   const publish = value.indexOf('gh release edit "$RELEASE_TAG"');
   const publicLookup = value.indexOf("releases/tags/$RELEASE_TAG");
   const verifyPublic = value.indexOf("release-contract.mjs published");
-  assert.ok(prepare !== -1 && prepare < preflight && preflight < commit);
+  assert.ok(aptVerify !== -1 && aptVerify < prepare && prepare < preflight && preflight < commit);
   assert.ok(commit < tag && tag < local && local < push && push < remote);
   assert.ok(remote < notes && notes < draft && draft < upload && upload < draftLookup && draftLookup < verifyDraft);
   assert.ok(verifyDraft < publish && publish < publicLookup && publicLookup < verifyPublic);
