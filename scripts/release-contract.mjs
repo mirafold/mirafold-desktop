@@ -23,13 +23,14 @@ import {
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync, inflateRawSync } from "node:zlib";
+import { expectedAptAssets } from "./apt-repository.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(HERE);
 const NUMBER = "(?:0|[1-9]\\d*)";
 export const STABLE_VERSION_RE = new RegExp(`^${NUMBER}\\.${NUMBER}\\.${NUMBER}$`);
 
-const RELEASE_CANDIDATE_RE = /^(?:latest.*\.yml|SHA256SUMS-(?:linux|windows)\.txt|.+\.(?:AppImage|deb|exe|blockmap)|.+\.tar\.gz)$/;
+const RELEASE_CANDIDATE_RE = /^(?:Packages(?:\.gz)?|InRelease|Release(?:\.gpg)?|mirafold-archive-keyring\.gpg|mirafold\.sources|latest.*\.yml|SHA256SUMS-(?:linux|windows)\.txt|.+\.(?:AppImage|deb|exe|blockmap)|.+\.tar\.gz)$/;
 const TOP_LEVEL_KEYS = new Set(["version", "files", "path", "sha512", "releaseDate"]);
 const FILE_KEYS = new Set(["url", "sha512", "size", "blockMapSize", "isAdminRightsRequired"]);
 
@@ -69,7 +70,9 @@ export function expectedReleaseAssets(version, platform = "complete") {
     ],
   };
   invariant(platform === "linux" || platform === "windows" || platform === "complete", `unknown release platform ${platform}`);
-  return (platform === "complete" ? [...sets.linux, ...sets.windows] : sets[platform]).sort();
+  return (platform === "complete"
+    ? [...sets.linux, ...sets.windows, ...expectedAptAssets()]
+    : sets[platform]).sort();
 }
 
 export function platformManifestName(platform) {

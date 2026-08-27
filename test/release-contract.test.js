@@ -29,6 +29,7 @@ import {
   verifyPlatformArtifacts,
   verifyPlatformPayloadArtifacts,
 } from "../scripts/release-contract.mjs";
+import { expectedAptAssets } from "../scripts/apt-repository.mjs";
 
 const VERSION = "1.2.3";
 const TAG = `v${VERSION}`;
@@ -129,6 +130,9 @@ async function writeComplete(directory) {
     }
     rmSync(platformDirectory, { recursive: true });
   }
+  for (const name of expectedAptAssets()) {
+    writeFileSync(path.join(directory, name), `complete tiny APT fixture: ${name}\n`);
+  }
 }
 
 async function temporaryDirectory(run) {
@@ -189,7 +193,9 @@ test("the complete release-writer contract runs without installed dependency cod
     mkdirSync(isolatedScripts, { recursive: true });
     await writeComplete(assets);
     const isolatedContract = path.join(isolatedScripts, "release-contract.mjs");
+    const isolatedAptContract = path.join(isolatedScripts, "apt-repository.mjs");
     copyFileSync(new URL("../scripts/release-contract.mjs", import.meta.url), isolatedContract);
+    copyFileSync(new URL("../scripts/apt-repository.mjs", import.meta.url), isolatedAptContract);
     assert.equal(existsSync(path.join(directory, "isolated", "node_modules")), false);
 
     const writerContract = await import(pathToFileURL(isolatedContract).href);

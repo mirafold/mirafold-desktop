@@ -24,6 +24,7 @@ import {
   verifyReleaseNotes,
 } from "../scripts/release-coordinator.mjs";
 import { expectedReleaseAssets } from "../scripts/release-contract.mjs";
+import { expectedAptAssets } from "../scripts/apt-repository.mjs";
 
 const VERSION = "1.2.4";
 const SHELL_VERSION = "0.3.8";
@@ -152,6 +153,9 @@ function writeCompleteAssets(directory, version) {
       .filter((name) => name !== manifestName)
       .map((name) => `${digest("sha256", readFileSync(path.join(directory, name)), "hex")}  ${name}`);
     writeFileSync(path.join(directory, manifestName), `${lines.join("\n")}\n`);
+  }
+  for (const name of expectedAptAssets()) {
+    writeFileSync(path.join(directory, name), `tiny APT payload: ${name}\n`);
   }
 }
 
