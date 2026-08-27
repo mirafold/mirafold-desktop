@@ -44,11 +44,14 @@ const WINDOWS_DAEMON_JOB = path.join(HERE, "windows-daemon-job.ps1");
 const PID_LEDGER_ENV = "MIRAFOLD_DESKTOP_PID_LEDGER";
 const WINDOWS_STOP_EVENT_ENV = "MIRAFOLD_DESKTOP_WINDOWS_STOP_EVENT";
 
-// How long to wait for the daemon to announce its URL before calling the boot a
-// failure. Generous: a cold start can pay for filesystem crawling on a large
-// repo. The failure path shows the daemon's own stderr, so an overrun is
-// diagnosable rather than mysterious.
-const BOOT_TIMEOUT_MS = 60_000;
+// Windows first compiles and configures its kill-on-close Job Object wrapper,
+// then launches the actual daemon. Runtime Add-Type compilation crossed one
+// minute under a loaded hosted Windows runner, so wrapper preparation receives
+// a separate two-minute bound. The actual daemon retains its original
+// one-minute URL deadline on every platform.
+const WINDOWS_WRAPPER_TIMEOUT_MS = 120_000;
+const DAEMON_URL_TIMEOUT_MS = 60_000;
+export const WINDOWS_WRAPPER_READY_MARKER = "MIRAFOLD_DESKTOP_WINDOWS_WRAPPER_READY";
 
 /**
  * Absolute path to the daemon entry point.
@@ -127,6 +130,72 @@ const URL_RE = /http:\/\/127\.0\.0\.1:\d+\/\S*(?=\s)/;
 /** Return the daemon's complete private startup URL, or null while incomplete. */
 export function findStartupUrl(text) {
   return text.match(URL_RE)?.[0] ?? null;
+}
+
+/**
+ * Own the bounded pre-URL startup phases without tying them to wall-clock
+ * sleeps in tests. The Windows wrapper emits one constant, credential-free
+ * line only after its Job Object and stop event are ready; that handshake
+ * starts a fresh daemon URL deadline. Other platforms keep one URL deadline.
+ */
+export function createStartupDeadline({
+  platform = process.platform,
+  windowsWrapperTimeoutMs = WINDOWS_WRAPPER_TIMEOUT_MS,
+  daemonUrlTimeoutMs = DAEMON_URL_TIMEOUT_MS,
+  onTimeout,
+  scheduleTimeout = setTimeout,
+  cancelTimeout = clearTimeout,
+} = {}) {
+  if (typeof onTimeout !== "function") throw new TypeError("startup timeout callback is required");
+  if (!Number.isFinite(windowsWrapperTimeoutMs) || windowsWrapperTimeoutMs <= 0) {
+    throw new TypeError("Windows wrapper timeout must be positive");
+  }
+  if (!Number.isFinite(daemonUrlTimeoutMs) || daemonUrlTimeoutMs <= 0) {
+    throw new TypeError("daemon URL timeout must be positive");
+  }
+
+  let phase = platform === "win32" ? "windows-wrapper" : "daemon-url";
+  let markerTail = "";
+  let timer = null;
+
+  const timeoutMessage = (armedPhase) => armedPhase === "windows-wrapper"
+    ? "the Windows daemon wrapper never became ready"
+    : "the daemon started but never reported a URL";
+  const phaseTimeoutMs = () => phase === "windows-wrapper"
+    ? windowsWrapperTimeoutMs
+    : daemonUrlTimeoutMs;
+  const arm = () => {
+    if (timer !== null) cancelTimeout(timer);
+    const armedPhase = phase;
+    timer = scheduleTimeout(() => {
+      timer = null;
+      onTimeout(timeoutMessage(armedPhase));
+    }, phaseTimeoutMs());
+  };
+
+  arm();
+  return {
+    observe(text) {
+      if (phase !== "windows-wrapper") return false;
+      const combined = markerTail + String(text);
+      if (!combined.split(/\r?\n/u).includes(WINDOWS_WRAPPER_READY_MARKER)) {
+        markerTail = combined.slice(-(WINDOWS_WRAPPER_READY_MARKER.length + 2));
+        return false;
+      }
+      phase = "daemon-url";
+      markerTail = "";
+      arm();
+      return true;
+    },
+    clear() {
+      if (timer === null) return;
+      cancelTimeout(timer);
+      timer = null;
+    },
+    get phase() {
+      return phase;
+    },
+  };
 }
 
 export class Daemon {
@@ -225,17 +294,17 @@ export class Daemon {
     const url = await new Promise((resolve, reject) => {
       let tail = "";
       let settled = false;
+      let deadline = null;
       const done = (fn, arg) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
+        deadline?.clear();
         fn(arg);
       };
 
-      const timer = setTimeout(
-        () => done(reject, new Error("the daemon started but never reported a URL")),
-        BOOT_TIMEOUT_MS,
-      );
+      deadline = createStartupDeadline({
+        onTimeout: (message) => done(reject, new Error(message)),
+      });
 
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", (text) => {
@@ -243,6 +312,7 @@ export class Daemon {
         // the private text because the token is what makes the URL usable.
         forwardStdout(safeStdout.push(text));
         if (settled) return;
+        deadline.observe(text);
         tail = (tail + text).slice(-4096); // one boot line, bounded
         const startupUrl = findStartupUrl(tail);
         if (startupUrl) {

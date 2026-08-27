@@ -632,7 +632,7 @@ A new higher release activates APT; no published asset is replaced or appended.
   Store, and development policies remain pinned separately. `npm test`: 175
   passed, zero failed, one native-Windows-only skip. No external or privileged
   state was created.
-- [ ] **Step 10.2 — establish the real archive identity and wire both release
+- [x] **Step 10.2 — establish the real archive identity and wire both release
   writers.** Kyle creates one dedicated signing key in his own terminal without
   exposing it to chat; commit only its public key and fingerprint; store the
   private export separately in the existing `manual-release` and
@@ -678,6 +678,22 @@ A new higher release activates APT; no published asset is replaced or appended.
   later); no value was read. The repository Actions variable list remains
   empty, so automated publication is still dormant. The sole remaining Step
   10.2 gate is the canonical-`main`, nonpublishing 17-file hosted rehearsal.
+
+  **Completed 2026-08-27.** Feature PR #17 passed DCO plus native Linux and
+  Windows CI and merged the reviewed APT implementation into `next`. Because
+  squash history made an ancestry merge conflict despite equivalent prior
+  content, `release/0.3.0` was reconstructed from `origin/main` plus the exact
+  binary tree difference to `origin/next`; equality gates proved its staged
+  product tree matched reviewed staging before the Desktop version bump. PR
+  #18 passed DCO and both native CI jobs and merged as protected `main` commit
+  `1e16d69955b251d8bbd8caccc54e394ef616ffde`. Canonical-main nonpublishing run
+  `33104838996` then passed source verification, exact prepared-source tests,
+  native Linux and Windows package smokes, production-key APT signing, all
+  17-file checks, and provenance; its publisher was event-gated and skipped.
+  Stable release `v0.3.0` was subsequently published with the complete 17
+  assets. The archive identity, both writer contracts, and the manual
+  publication path are therefore proven; live automated publication remains a
+  later explicit opt-in.
 - [ ] **Step 10.3 — publish and dogfood the real channel.** Through the normal
   `next` → release branch → protected `main` → signed-tag process and Kyle's
   explicit merge/publication approvals, publish a higher Desktop release. From
@@ -688,29 +704,67 @@ A new higher release activates APT; no published asset is replaced or appended.
   byte. Website-repository edits and any announcement remain separately scoped;
   this Step supplies their exact tested copy and links.
 
-  **In progress 2026-08-27.** Feature PR
-  [#17](https://github.com/mirafold/mirafold-desktop/pull/17) merged into
-  protected `next` at `d013f78` only after Kyle's explicit approval. Its final
-  hosted run `33087093072` passed DCO, Linux CI in 31 seconds, and native
-  Windows CI in 3 minutes 1 second. The preceding run exposed three test-only
-  platform assumptions: two Linux Bash-helper probes passed a `/D:/...`
-  file-URL pathname to Git Bash, and the Debian main-process probe correctly
-  refused APT ownership under real `win32`. No product or workflow code changed;
-  follow-up `f76cb57` scoped those three probes to Linux, matching the existing
-  repository convention, and the fresh run passed.
+  **In progress 2026-08-27.** Kyle installed the public archive-keyring package
+  and `mirafold-desktop` through the real APT channel on Ubuntu, launched the
+  installed application, and observed its bundled Mirafold `0.3.7`. That proves
+  anonymous APT acquisition and launch of public Desktop `v0.3.0`; the native
+  module exercise and final website-ready instruction check remain open. The
+  stale Shell was expected release content, not an updater failure, and led to
+  the Mirafold `0.5.0` candidate gate below.
 
-  `main` and `next` were then observed to have equivalent prior content under
-  divergent squash histories, with their direct tree difference containing
-  exactly the 27 reviewed APT feature files. The old runbook instruction to
-  merge `main` into a `next`-based release branch manufactured six conflicts
-  across files whose current content had already converged. That failed merge
-  was aborted before another approach. The clean `release/0.3.0` branch now
-  starts at `origin/main`; applying the direct binary tree difference from
-  `main` to `next` produced a staged tree byte-for-byte equal to `origin/next`,
-  and Desktop version `0.3.0` is prepared in both package manifests. The
-  canonical runbook now records this exact two-tree reconstruction and equality
-  gate. No release branch, tag, draft, public release, or installation has been
-  pushed yet.
+  **Mirafold 0.5.0 pre-release gate — diagnosed and repaired 2026-08-27.** The
+  exact reviewed candidate is Desktop `0.3.1` plus Mirafold `0.5.0`; its
+  `package.json` SHA-256 is
+  `0f58bff55bc1be320b8dafcc28585497865dcfbcce7a7f4a9cbfceba562656a2`
+  and its `package-lock.json` SHA-256 is
+  `5b5b4b1ff64d0e764a256bed1756a42b82ae973c3dd09f1e6488bcaaf9bde508`.
+  The first proposed startup correction separated Windows wrapper preparation
+  from the daemon URL phase but bounded both at 60 seconds. Twelve unchanged
+  full CI runs at diagnostic commit
+  `95359b5bb39b19ef8f6f152107a6c9a6f3f77fa2` produced 12/12 Linux passes and
+  11/12 Windows passes. Run `33110421231` failed after 60.8 seconds with the
+  phase-specific `the Windows daemon wrapper never became ready` error; the
+  real package-smoke step was therefore skipped. Mirafold had not launched.
+  The successful native ownership probes lasted 52.6–72.3 seconds. This proves
+  the remaining boundary was PowerShell's runtime `Add-Type` compilation under
+  runner load, not Mirafold `0.5.0` import or daemon startup.
+
+  Final fix source commit `ee752b48b60a7438d71465ddda2fed0c20ba4645`,
+  landed on `next` as `1d2aecfaff0267390ac2fbc549273228f3203165`,
+  emits one constant credential-free readiness line after Job Object setup and
+  stop-event registration, immediately before daemon launch. Windows wrapper
+  preparation now has a bounded 120 seconds; receipt of that line starts a
+  fresh 60-second daemon URL deadline. Linux retains its original single
+  60-second URL deadline. The native smoke's outer guards were expanded only
+  enough to let those inner bounds report their own failure.
+
+  The exact candidate at diagnostic commit
+  `f398e2df54143bd5e377c611943526f94fb2e6f8` passes the local 185-test suite
+  (184 passed, zero failed, one native-Windows-only skip), `npm ls --all`, a
+  zero-vulnerability npm audit, all 376 registry signatures, and 56
+  attestations. Twelve further full CI runs passed on both platforms: Windows
+  12/12 and Linux 12/12; native Windows ownership probes spanned 44.1–79.4
+  seconds and every real package smoke passed. Batch-one run IDs are
+  `33111480461`, `33111480498`, `33111480599`, `33111480638`, `33111480657`,
+  and `33111480713`; batch-two IDs are `33111879563`, `33111879544`,
+  `33111879542`, `33111879889`, `33111879691`, and `33111879266`. These were
+  read-only manual CI dispatches. PR #19 subsequently passed DCO and both native
+  CI jobs and merged only the startup correction into protected `next`; at that
+  checkpoint the candidate manifests remained diagnostic and no Mirafold
+  `0.5.0` release or asset had been created. Public production remained
+  immutable `v0.3.0`.
+
+  **Real update branch prepared 2026-08-27.** After the v0.3.0 production state
+  was synchronized back into `next`, `npm run release:prepare -- 0.5.0` created
+  Desktop `0.3.1` plus Mirafold `0.5.0` on `feature/mirafold-0.5.0`. The command
+  independently rechecked npm `latest`, required npm `12.0.2`, regenerated the
+  lock with lifecycle scripts disabled, limited churn to Mirafold's dependency
+  closure, and produced the same two SHA-256 hashes recorded above. A clean
+  lockfile install contains 376 packages; `npm ls --all` passes, npm reports
+  zero vulnerabilities, all 376 registry signatures and 56 attestations verify,
+  and the 185-test suite passes 184 with only its native-Windows-on-Linux skip.
+  This branch creates no tag, release, or asset; public production remains
+  `v0.3.0` until the separately approved release process completes.
 
 ### Audit and test-audit pass — 2026-08-14
 
