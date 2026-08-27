@@ -317,6 +317,12 @@ if (-not $stopEventName -or -not $stopEventName.StartsWith("Local\MirafoldDeskto
 }
 $stopRegistration = [MirafoldDesktop.JobStopRegistration]::new($job, $stopEventName)
 
+# Desktop gives the daemon its own URL deadline only after this wrapper has
+# established the kill-on-close boundary and registered graceful shutdown.
+# The line is constant and carries no project path, URL, or credential.
+[Console]::Out.WriteLine("MIRAFOLD_DESKTOP_WINDOWS_WRAPPER_READY")
+[Console]::Out.Flush()
+
 try {
   $exitCode = [MirafoldDesktop.JobObjectProcessLauncher]::Run(
     $job,
