@@ -22,20 +22,44 @@ normal environment. The app has no credential-entry screen and never asks you
 to send credentials anywhere; if no live agent path is available, demo mode
 shows the interface with scripted replies.
 
+## Install on Ubuntu with APT
+
+Ubuntu 24.04 on `amd64` is the tested APT target. Install Mirafold's repository
+identity once, then install the application by package name:
+
+```
+curl --fail --location --output /tmp/mirafold-archive-keyring_1.0_all.deb https://github.com/mirafold/mirafold-desktop/releases/latest/download/mirafold-archive-keyring_1.0_all.deb
+sudo apt install /tmp/mirafold-archive-keyring_1.0_all.deb
+sudo apt update
+sudo apt install mirafold-desktop
+```
+
+The small first package installs only Mirafold's public archive key, a deb822
+APT source restricted to that key, and a root-owned marker that tells the app
+APT owns its updates. Its public fingerprint is
+`30C663842E3433E94B793B79AD4514FE0C3F6F0C`. The source points at the latest
+stable GitHub Release, whose signed `Release` metadata binds the package index
+and the exact Desktop `.deb`. After setup, normal `apt upgrade` and Ubuntu's
+software updater can deliver later Mirafold versions. The Releases page remains
+the direct-download path for AppImage, tar, Windows, and a standalone `.deb`.
+
 ## How updates work
 
 The public `v0.1.1` build predates the updater, so it cannot discover a newer
-release. Install the first updater-capable release manually once. After that,
-Mirafold checks for a newer Desktop release after startup and through **Help →
-Check for Updates…**. A Desktop release carries its own exact Mirafold Shell
-version; the Help menu shows both versions separately. It never installs a
-different Shell package from npm on an end user's machine.
+release. Install `v0.2.0` or later manually once if you use a direct-download
+form. Those forms check for a newer Desktop release after startup and through
+**Help → Check for Updates…**. An APT-managed installation instead leaves all
+checks and installation to APT and says **Updates managed by APT** in Help. A
+Desktop release carries its own exact Mirafold Shell version; the Help menu
+shows both versions separately. It never installs a different Shell package
+from npm on an end user's machine.
 
 | installed form | when a newer release exists |
 | --- | --- |
 | direct Windows `.exe` | Downloads and verifies the complete NSIS installer, asks before restarting, stops the complete daemon/agent process tree, then opens the visible per-user installer and requests that the new version reopen. Mirafold waits for Windows to acknowledge that launch; a launch failure restores the working session without quitting it. The automated Windows probe proves a silent current-user install with no machine-wide registration; the visible installer and elevation behavior still await the human protocol below. |
 | `.AppImage` | Downloads and verifies the new AppImage, asks before restarting, and stops the complete daemon/agent process tree. It stages the replacement beside its destination, retains the current executable until the new file launches, and rolls a custom-filename replacement back if launch fails. No administrator access is needed. |
-| `.deb` | Downloads and verifies the new Debian package, asks before restarting, stops the complete daemon/agent process tree, then requests administrator authorization through the available system elevation helper before running `dpkg -i`. The local probe selected `pkexec`; the exact authorization dialog depends on the Linux desktop. |
+| APT-installed `.deb` | APT verifies the archive signature and package hashes, then owns installation and updates like any other repository package. Mirafold's private updater is disabled for this form. |
+| standalone downloaded `.deb` | Downloads and verifies the new Debian package, asks before restarting, stops the complete daemon/agent process tree, then requests administrator authorization through the available system elevation helper before running `dpkg -i`. The local probe selected `pkexec`; the exact authorization dialog depends on the Linux desktop. |
 | extracted `.tar.gz` | Shows a native notice and opens the official HTTPS Releases page. It never downloads an installer or changes the extracted tree; close Mirafold and replace it manually. |
 | Microsoft Store package | Not offered yet. Once one exists, it will use the Store's update channel; the app's GitHub updater is disabled for that package. |
 
@@ -128,7 +152,7 @@ need no bridge.
 | `src/navigation.js` | what the window is allowed to load, and what goes to the browser |
 | `src/permissions.js` | deny every Chromium permission check and request |
 | `src/platform-updaters.js` | atomic AppImage replacement and acknowledged NSIS launch |
-| `src/updater.js` | update policy for direct installers, Store packages, and Linux tar archives |
+| `src/updater.js` | update policy for APT, direct installers, Store packages, and Linux tar archives |
 | `src/login-env.js` | recover the login shell's `PATH` so agent CLIs are findable |
 | `src/state.js` | remember the last-opened folder |
 | `electron-builder.yml` | packaging targets, with the reasoning as comments |
@@ -213,12 +237,12 @@ install if that heartbeat can still run after Desktop's shutdown proof.
 After every read-only gate succeeds, a separate job reconstructs the same
 candidate without installing dependencies. It permits only the reviewed
 package/lock change, advances `main` and one annotated Desktop tag through one
-atomic Git push, creates a draft release, uploads all nine Linux/Windows
-payload, updater, and SHA-256-manifest files, and verifies the remote title,
-notes, names, sizes, and GitHub-calculated SHA-256 digests before the release
-can become public and `latest`.
+atomic Git push, creates a draft release, uploads all 17 native and signed APT
+files, and verifies the remote title, notes, names, sizes, and
+GitHub-calculated SHA-256 digests before the release can become public and
+`latest`.
 Before that writer can run, an isolated short-lived GitHub identity creates
-SLSA build provenance for the exact nine digests; dependency and build jobs
+SLSA build provenance for the exact 17 digests; dependency and build jobs
 never receive its OpenID Connect or attestation permissions. A stale `main`, a
 conflicting tag, or a different candidate fails closed. A retry recognizes the
 exact prior commit, tag, complete draft, or complete public release and resumes
@@ -228,10 +252,10 @@ artifacts.
 
 Publication is intentionally dormant: the repository Actions variable
 `MIRAFOLD_AUTOMATED_RELEASES` must equal the literal value `enabled` before the
-write job can run. Keep it absent through the one-time updater bridge release
-and the non-publishing rehearsal. Once that gate is deliberately enabled,
-ordinary Shell releases require no Desktop source edit, version command, tag,
-installer build, or GitHub Release action from a maintainer.
+write job can run. Keep it absent through the first signed APT release and its
+non-publishing rehearsal. Once that gate is deliberately enabled, ordinary
+Shell releases require no Desktop source edit, version command, tag, installer
+build, or GitHub Release action from a maintainer.
 
 `npm run update:probe:linux OLD_APPIMAGE NEW_RELEASE_DIR` is the local-only,
 disposable proof of the real Linux update paths. It serves a freshly built
@@ -251,13 +275,17 @@ updates, either native build failing, stale `main`, a duplicate run, every safe
 retry state, publication isolation, and the exact Shell identity carried from
 reviewed intake into the proposed native package. Each scenario must prove its
 named evidence test really ran — Node counts a test file itself as one passing
-test, so a bare pass count would accept a renamed or deleted scenario test. A manual dispatch of the
-`Release` workflow is the separate native Linux/Windows rehearsal: it builds,
-smoke-checks, verifies, retains, and attests the nine files, while the event gate
-keeps its only `contents: write` publication job skipped. Its build jobs use
-the same script-free pinned npm toolchain and signature/advisory gates as
-Shell intake, so the manual tag path and the automated path package identical,
-registry-verified bytes. Its manual form also
+test, so a bare pass count would accept a renamed or deleted scenario test. A
+manual dispatch of the `Release` workflow from canonical `main` is the separate
+native Linux/Windows rehearsal: it builds, smoke-checks, verifies, retains,
+signs with the production archive identity, and attests the 17 files, while the
+event gate keeps its only `contents: write` publication job skipped. The
+signer uses the existing `automated-release` environment, whose live branch
+policy admits only `main`; a real `v*` tag instead uses the reviewer-protected
+`manual-release` environment. Its build jobs use the same script-free pinned
+npm toolchain and signature/advisory gates as Shell intake, so the manual tag
+path and the automated path package identical, registry-verified bytes. Its
+manual form also
 accepts `fail_platform=linux` or `fail_platform=windows`; the selected native
 leg fails before dependency code, proving that either platform failure prevents
 provenance and publication while the other matrix leg is still allowed to run.
@@ -274,11 +302,9 @@ pull requests, while the Dependabot policy requests weekly review of npm
 dependencies and those action pins. The exact proposed repository rules,
 release environments, free security settings, account responsibilities, and
 break-glass recovery procedure are in
-[RELEASE-RECOVERY.md](RELEASE-RECOVERY.md). The live non-publishing rehearsal
-has passed, but those external GitHub settings remain unapplied. Applying them
-is a separate repository-administration action after this work reaches `main`;
-the local reconciler refuses to activate the ruleset before both named CI
-checks have succeeded there.
+[RELEASE-RECOVERY.md](RELEASE-RECOVERY.md). The local reconciler validates and
+audits those settings and refuses to activate the branch ruleset before both
+named CI checks have succeeded on `main`.
 
 Building installers:
 
@@ -318,7 +344,12 @@ deliberate decisions behind the points below.
 
 ## Signing status
 
-Nothing here is code-signed yet.
+The direct-download executables are not operating-system code-signed. The APT
+repository is separately OpenPGP-signed: APT verifies fingerprint
+`30C663842E3433E94B793B79AD4514FE0C3F6F0C`, then verifies the signed index and
+the `.deb` hash before installation. That archive signature authenticates the
+repository; it does not make Windows display a verified publisher or add an
+embedded code signature to the Linux executable.
 
 - **Direct Windows downloads** are unsigned. Microsoft Defender SmartScreen
   can show **Windows protected your PC** because every new unsigned file starts
