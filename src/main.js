@@ -29,7 +29,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createBeforeQuitHandler } from "./app-lifecycle.js";
 import { Daemon } from "./daemon.js";
-import { daemonOriginFromUrl, navigationVerdict } from "./navigation.js";
+import { redactCredentials } from "./daemon-output.js";
+import { daemonOriginFromUrl, navigationVerdict, popupVerdict } from "./navigation.js";
 import { installPermissionGuards } from "./permissions.js";
 import { createSafeAppImageUpdater, createSafeNsisUpdater } from "./platform-updaters.js";
 import { lastFolder, setLastFolder } from "./state.js";
@@ -53,6 +54,30 @@ let quitting = false;
 let bootSeq = 0;
 let folderChangePromise = null;
 let desktopUpdater = null;
+
+/**
+ * Start a Promise-returning Electron action from a synchronous event handler.
+ * Do not log the URL or Error: either may contain the daemon's auth token.
+ */
+function runBackgroundAction(action, failureMessage) {
+  let result;
+  try {
+    result = action();
+  } catch {
+    console.error(failureMessage);
+    return;
+  }
+  void Promise.resolve(result).catch(() => {
+    console.error(failureMessage);
+  });
+}
+
+/** Keep native error dialogs bounded and safe to screenshot or share. */
+function safeErrorDetail(error) {
+  const message = redactCredentials(String(error?.message ?? error ?? "")).slice(-2000);
+  const stderr = redactCredentials(String(error?.stderr ?? "")).slice(-2000);
+  return [message, "", stderr].join("\n").trim();
+}
 
 /**
  * Ask for a project folder. Mirafold sessions run in the daemon's working
@@ -94,14 +119,32 @@ function createWindow() {
     },
   });
 
-  // The shell needs no Chromium permission grants. Install both halves of
-  // Electron's permission policy before this session loads any content.
-  installPermissionGuards(win.webContents.session);
+  // Install both halves of Electron's default-deny permission policy before
+  // this session loads any content. The policy reads daemonOrigin at request
+  // time so its sole notification grant follows daemon restarts without ever
+  // covering the loading screen, another window, or the prior daemon.
+  installPermissionGuards(win.webContents.session, {
+    trustedWebContents: win.webContents,
+    getDaemonOrigin: () => daemonOrigin,
+  });
 
-  // Links in agent output belong in the user's real browser, not in a second
-  // window of this app with no address bar and no way to see where it went.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+  // Mirafold's exact new-session link asks for a new browser tab. Desktop owns
+  // one window, so keep that request in the window, where it retains this
+  // launch's authenticated renderer state. Every other web popup, including a
+  // same-daemon link in agent output, belongs in the user's real browser.
+  win.webContents.setWindowOpenHandler(({ url, postBody }) => {
+    const verdict = popupVerdict(url, daemonOrigin, postBody != null);
+    if (verdict === "same-window") {
+      runBackgroundAction(
+        () => win.loadURL(url),
+        "Mirafold could not open the requested session in its window.",
+      );
+    } else if (verdict === "external") {
+      runBackgroundAction(
+        () => shell.openExternal(url),
+        "Mirafold could not open the requested page in the system browser.",
+      );
+    }
     return { action: "deny" };
   });
 
@@ -113,7 +156,12 @@ function createWindow() {
     const verdict = navigationVerdict(event.url, LOADING, daemonOrigin);
     if (verdict === "allow") return;
     event.preventDefault();
-    if (event.isMainFrame && verdict === "external") void shell.openExternal(event.url);
+    if (event.isMainFrame && verdict === "external") {
+      runBackgroundAction(
+        () => shell.openExternal(event.url),
+        "Mirafold could not open the requested page in the system browser.",
+      );
+    }
   };
   win.webContents.on("will-frame-navigate", guardNavigation);
   win.webContents.on("will-redirect", guardNavigation);
@@ -135,6 +183,10 @@ function createWindow() {
  * `bootSeq` makes the newest boot the only one allowed to touch shared state or
  * talk to the user. Every stale path also stops the particular Daemon it
  * created; sequence ownership alone is not process ownership.
+ *
+ * @returns {Promise<boolean|undefined>} true only after a working daemon page
+ *   finishes loading; every superseded, failed, or quitting path returns no
+ *   success signal
  */
 async function boot() {
   if (quitting || !win) return;
@@ -143,7 +195,12 @@ async function boot() {
   const current = () => seq === bootSeq && !quitting && win !== null;
 
   daemonOrigin = null;
-  await win.loadFile(LOADING);
+  try {
+    await win.loadFile(LOADING);
+  } catch (err) {
+    if (!current()) return;
+    return onLoadingScreenFailure(err);
+  }
   if (!current()) return;
 
   const booting = new Daemon((info) => onDaemonCrash(booting, info));
@@ -204,6 +261,7 @@ async function boot() {
     return;
   }
   win.setTitle(`Mirafold — ${path.basename(dir)}`);
+  return true;
 }
 
 /** Swap the open project: stop this daemon, start another elsewhere. */
@@ -324,7 +382,7 @@ async function onBootFailure(err) {
     type: "error",
     title: "Mirafold couldn't start",
     message: "The Mirafold daemon failed to start.",
-    detail: [err.message, "", (err.stderr ?? "").slice(-2000)].join("\n").trim(),
+    detail: safeErrorDetail(err),
     buttons: ["Try again", "Choose another folder", "Quit"],
     defaultId: 0,
     cancelId: 2,
@@ -339,6 +397,29 @@ async function onBootFailure(err) {
   }
   quitting = true;
   app.quit();
+}
+
+/** A packaged app without its local loading page cannot safely start a daemon. */
+async function onLoadingScreenFailure(err) {
+  daemonOrigin = null;
+  if (quitting || !win) return;
+  try {
+    await showMessage({
+      type: "error",
+      title: "Mirafold couldn't start",
+      message: "The Mirafold desktop interface could not be loaded.",
+      detail: safeErrorDetail(err),
+      buttons: ["Quit"],
+      defaultId: 0,
+    });
+  } catch {
+    // Do not let a second native failure turn the original startup failure
+    // into an unhandled rejection. The app still has no usable interface.
+    console.error("Mirafold could not show its startup failure dialog.");
+  } finally {
+    quitting = true;
+    app.quit();
+  }
 }
 
 async function onDaemonCleanupFailure(action) {
@@ -486,7 +567,8 @@ if (!app.requestSingleInstanceLock()) {
     // this app asks. Leaving an empty window up would be worse than exiting.
     if (!folder) return app.quit();
     createWindow();
-    await boot();
+    const booted = await boot();
+    if (booted !== true || quitting || !win) return;
     // Updating is background work. A missing feed or network failure is logged
     // and never delays or tears down a working Mirafold session.
     void desktopUpdater.start();

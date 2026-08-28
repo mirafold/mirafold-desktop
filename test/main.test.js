@@ -17,14 +17,25 @@ const rememberedFolders = [];
 const messages = [];
 const windows = [];
 const openedExternally = [];
+const unhandledRejections = [];
+const backgroundErrors = [];
 const permissionInstalls = { check: 0, request: 0 };
+let permissionCheckHandler = null;
+let permissionRequestHandler = null;
 let windowOpenHandler = null;
 const mode = process.env.MIRAFOLD_MAIN_PROBE_MODE;
 if (mode === "apt-managed") process.resourcesPath = "/fixture-resources";
+if (mode === "navigation-rejection" || mode === "loading-file-failure") {
+  process.on("unhandledRejection", (error) => { unhandledRejections.push(error); });
+}
+if (mode === "navigation-rejection") {
+  console.error = (...args) => { backgroundErrors.push(args); };
+}
 let folderDialogs = 0;
 let menuTemplate = null;
 let failStops = false;
 let quitCalls = 0;
+let updaterStarts = 0;
 let releaseStaleStart;
 const staleStart = new Promise((resolve) => { releaseStaleStart = resolve; });
 const { default: realFsDefault, ...realFsNamed } = realFs;
@@ -55,6 +66,13 @@ class FakeDaemon {
   async start(folder) {
     this.folder = folder;
     this.running = true;
+    if (
+      mode === "boot-failure-quit"
+      || (mode === "boot-failure-retry" && daemonInstances.indexOf(this) === 0)
+    ) {
+      this.running = false;
+      throw new Error("fixture daemon startup failure");
+    }
     if (daemonInstances.indexOf(this) === 2) await staleStart;
     return "http://127.0.0.1:" + (4100 + daemonInstances.indexOf(this)) + "/?token=fixture ";
   }
@@ -72,17 +90,39 @@ class FakeWindow extends EventEmitter {
     super();
     this.options = options;
     this.destroyed = false;
+    this.loadedUrls = [];
     this.webContents = new EventEmitter();
     this.webContents.session = {
-      setPermissionCheckHandler() { permissionInstalls.check += 1; },
-      setPermissionRequestHandler() { permissionInstalls.request += 1; },
+      setPermissionCheckHandler(handler) {
+        permissionInstalls.check += 1;
+        permissionCheckHandler = handler;
+      },
+      setPermissionRequestHandler(handler) {
+        permissionInstalls.request += 1;
+        permissionRequestHandler = handler;
+      },
     };
     this.webContents.setWindowOpenHandler = (handler) => { windowOpenHandler = handler; };
     windows.push(this);
   }
 
-  async loadFile() {}
-  async loadURL() {
+  async loadFile() {
+    if (mode === "loading-file-failure") {
+      throw new Error("fixture loading screen failure");
+    }
+  }
+  async loadURL(url) {
+    this.loadedUrls.push(url);
+    if (mode === "page-load-failure") {
+      const failure = new Error(
+        "ERR_FAILED (-2) loading 'http://127.0.0.1:4100/?token=dummy-dialog-token'",
+      );
+      failure.stderr = "pairing code: dummy-pairing-code";
+      throw failure;
+    }
+    if (mode === "navigation-rejection" && url.includes("?new=1")) {
+      throw new Error("fixture popup navigation rejection with ?token=secret");
+    }
     if (mode !== "crash-during-load") return;
     // The v0.1.1 bug's exact ordering: the daemon dies right after reporting
     // its URL, so the page load REJECTS FIRST and the crash callback lands
@@ -117,7 +157,14 @@ const dialog = {
     return { canceled: false, filePaths: ["/next-project"] };
   },
   async showMessageBox(...args) {
-    if (mode !== "cleanup-failure" && mode !== "crash-during-load") {
+    if (
+      mode !== "cleanup-failure"
+      && mode !== "crash-during-load"
+      && mode !== "boot-failure-quit"
+      && mode !== "boot-failure-retry"
+      && mode !== "loading-file-failure"
+      && mode !== "page-load-failure"
+    ) {
       throw new Error("no error dialog was expected");
     }
     messages.push(args);
@@ -125,6 +172,8 @@ const dialog = {
     // the expected crash dialog (1) and also Quit (2) on the boot-failure
     // dialog that only a regression would show, so a broken guard terminates
     // instead of looping through folder pickers.
+    if (mode === "boot-failure-retry") return { response: 0 };
+    if (mode === "boot-failure-quit" || mode === "page-load-failure") return { response: 2 };
     if (mode !== "crash-during-load") return { response: 0 };
     return { response: args[1].title === "Mirafold stopped" ? 1 : 2 };
   },
@@ -137,7 +186,12 @@ const Menu = {
   setApplicationMenu() {},
 };
 const shell = {
-  async openExternal(url) { openedExternally.push(url); },
+  async openExternal(url) {
+    openedExternally.push(url);
+    if (mode === "navigation-rejection") {
+      throw new Error("fixture external-open rejection");
+    }
+  },
   async openPath() { return ""; },
 };
 
@@ -153,6 +207,22 @@ mock.module(new URL("./src/state.js", import.meta.url).href, {
     setLastFolder: (folder) => rememberedFolders.push(folder),
   },
 });
+const realUpdater = await import(new URL("./src/updater.js?main-probe-real", import.meta.url));
+mock.module(new URL("./src/updater.js", import.meta.url).href, {
+  namedExports: {
+    ...realUpdater,
+    createDesktopUpdater(options) {
+      const updater = realUpdater.createDesktopUpdater(options);
+      return {
+        ...updater,
+        start() {
+          updaterStarts += 1;
+          return Promise.resolve(null);
+        },
+      };
+    },
+  },
+});
 
 const mainModule = await import(new URL("./src/main.js?folder-race-probe", import.meta.url));
 
@@ -165,8 +235,19 @@ async function waitFor(predicate, message) {
 }
 
 await waitFor(
-  () => menuTemplate !== null && daemonInstances.length === 1
-    && (mode === "crash-during-load" || daemonInstances[0].running),
+  () => menuTemplate !== null && (
+    mode === "loading-file-failure"
+      ? quitCalls === 1 || unhandledRejections.length === 1
+      : mode === "boot-failure-retry"
+        ? daemonInstances.length === 2 && daemonInstances[1].running
+        : daemonInstances.length === 1
+        && (
+          mode === "crash-during-load"
+          || mode === "boot-failure-quit"
+          || mode === "page-load-failure"
+          || daemonInstances[0].running
+        )
+  ),
   "initial daemon did not finish booting",
 );
 assert.equal(windows[0].options.autoHideMenuBar, true, "the native menu bar must start hidden");
@@ -184,6 +265,16 @@ assert.deepEqual(
     ? ["resetZoom", "zoomIn", "zoomOut", "togglefullscreen"]
     : ["reload", "resetZoom", "zoomIn", "zoomOut", "togglefullscreen", "toggleDevTools"],
 );
+
+if (
+  mode !== "crash-during-load"
+  && mode !== "boot-failure-quit"
+  && mode !== "page-load-failure"
+  && mode !== "loading-file-failure"
+) {
+  await waitFor(() => updaterStarts === 1, "a successful boot did not start the updater");
+  assert.equal(updaterStarts, 1, "a successful boot must start the updater exactly once");
+}
 
 if (mode === "apt-managed") {
   const helpItem = menuTemplate.find((item) => item.label === "Help").submenu[0];
@@ -211,6 +302,47 @@ if (mode === "apt-managed") {
   assert.equal(messages[0][1].title, "Mirafold stopped");
   assert.equal(daemonInstances.length, 1, "no replacement daemon may start after Quit");
   assert.equal(daemonInstances[0].running, false);
+  assert.equal(updaterStarts, 0, "the updater must not start before the deferred crash report settles");
+  process.stdout.write("main lifecycle probe passed\n");
+} else if (mode === "boot-failure-quit") {
+  await waitFor(() => quitCalls === 1, "Quit from the boot-failure dialog did not settle");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(messages.length, 1, "the failed boot must show exactly one dialog");
+  assert.equal(messages[0][1].title, "Mirafold couldn't start");
+  assert.equal(daemonInstances.length, 1, "Quit must not launch a replacement daemon");
+  assert.equal(daemonInstances[0].running, false);
+  assert.equal(updaterStarts, 0, "the updater must not start after the user chose Quit");
+  process.stdout.write("main lifecycle probe passed\n");
+} else if (mode === "boot-failure-retry") {
+  assert.equal(messages.length, 1, "the first failed boot must show exactly one dialog");
+  assert.equal(messages[0][1].title, "Mirafold couldn't start");
+  assert.equal(daemonInstances.length, 2, "Try again must launch one replacement daemon");
+  assert.equal(daemonInstances[0].running, false, "the failed daemon must remain stopped");
+  assert.equal(daemonInstances[1].running, true, "the retried daemon must be running");
+  assert.equal(quitCalls, 0, "a successful retry must keep the app open");
+  assert.equal(updaterStarts, 1, "the successful retry must start the updater exactly once");
+  process.stdout.write("main lifecycle probe passed\n");
+} else if (mode === "page-load-failure") {
+  await waitFor(() => quitCalls === 1, "Quit from the page-load failure dialog did not settle");
+  assert.equal(messages.length, 1, "the page-load failure must show exactly one dialog");
+  assert.equal(messages[0][1].title, "Mirafold couldn't start");
+  const detail = messages[0][1].detail;
+  assert.doesNotMatch(detail, /dummy-dialog-token/, "the daemon token escaped into the dialog");
+  assert.doesNotMatch(detail, /dummy-pairing-code/, "the pairing code escaped into the dialog");
+  assert.match(detail, /token=<redacted>/, "the token location should remain intelligible");
+  assert.match(detail, /pairing code: <redacted>/, "the pairing-code location should remain intelligible");
+  assert.equal(daemonInstances[0].running, false, "the failed page-load daemon must be stopped");
+  assert.equal(updaterStarts, 0, "the updater must not start after a page-load failure");
+  process.stdout.write("main lifecycle probe passed\n");
+} else if (mode === "loading-file-failure") {
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(unhandledRejections, [], "the loading-screen failure must be handled");
+  assert.equal(quitCalls, 1, "a missing loading screen must quit cleanly");
+  assert.equal(messages.length, 1, "the loading-screen failure must show exactly one dialog");
+  assert.equal(messages[0][1].title, "Mirafold couldn't start");
+  assert.equal(messages[0][1].message, "The Mirafold desktop interface could not be loaded.");
+  assert.equal(daemonInstances.length, 0, "no daemon may start without the loading interface");
+  assert.equal(updaterStarts, 0, "the updater must not start after a loading-screen failure");
   process.stdout.write("main lifecycle probe passed\n");
 } else if (mode === "cleanup-failure") {
   failStops = true;
@@ -231,7 +363,58 @@ if (mode === "apt-managed") {
 // nothing in the window-open handler each left the entire suite green.
 assert.equal(permissionInstalls.check, 1, "the permission check handler was not installed");
 assert.equal(permissionInstalls.request, 1, "the permission request handler was not installed");
+assert.equal(
+  permissionCheckHandler(
+    windows[0].webContents,
+    "notifications",
+    "http://127.0.0.1:4100/",
+    { requestingUrl: "http://127.0.0.1:4100/session/1", isMainFrame: true },
+  ),
+  true,
+  "the active daemon window must receive notification permission",
+);
+let notificationRequestAllowed = null;
+permissionRequestHandler(
+  windows[0].webContents,
+  "notifications",
+  (allowed) => { notificationRequestAllowed = allowed; },
+  { requestingUrl: "http://127.0.0.1:4100/session/1", isMainFrame: true },
+);
+assert.equal(notificationRequestAllowed, true, "the active daemon's notification request must be allowed");
 assert.equal(typeof windowOpenHandler, "function", "no window-open handler was installed");
+const sameDaemonNewSession = "http://127.0.0.1:4100/?new=1";
+assert.deepEqual(windowOpenHandler({ url: sameDaemonNewSession }), { action: "deny" });
+await waitFor(
+  () => windows[0].loadedUrls.at(-1) === sameDaemonNewSession,
+  "a same-daemon new-session popup must replace the current desktop view",
+);
+assert.deepEqual(openedExternally, [], "a same-daemon popup must not escape to the system browser");
+const loadsAfterNewSession = windows[0].loadedUrls.length;
+const sameDaemonMarkdownLink = "http://127.0.0.1:4100/";
+assert.deepEqual(windowOpenHandler({ url: sameDaemonMarkdownLink }), { action: "deny" });
+await new Promise((resolve) => setImmediate(resolve));
+assert.equal(
+  windows[0].loadedUrls.length,
+  loadsAfterNewSession,
+  "a same-origin rendered link must not replace the desktop view",
+);
+assert.deepEqual(
+  openedExternally,
+  [sameDaemonMarkdownLink],
+  "a same-origin rendered link belongs in the system browser",
+);
+openedExternally.length = 0;
+assert.deepEqual(
+  windowOpenHandler({ url: sameDaemonNewSession, postBody: { data: [] } }),
+  { action: "deny" },
+);
+await new Promise((resolve) => setImmediate(resolve));
+assert.equal(
+  windows[0].loadedUrls.length,
+  loadsAfterNewSession,
+  "a new-window POST must not be converted into a bodyless in-window GET",
+);
+assert.deepEqual(openedExternally, [], "a new-window POST must not be forwarded without its body");
 assert.deepEqual(windowOpenHandler({ url: "https://example.com/" }), { action: "deny" });
 assert.deepEqual(windowOpenHandler({ url: "javascript:alert(1)" }), { action: "deny" });
 assert.deepEqual(
@@ -258,6 +441,19 @@ assert.deepEqual(
   "external main-frame navigations open in the real browser; subframes are simply refused",
 );
 openedExternally.length = 0;
+
+if (mode === "navigation-rejection") {
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(unhandledRejections, [], "navigation failures must not escape as unhandled rejections");
+  const navigationErrors = backgroundErrors.filter((args) => (
+    String(args[0]).startsWith("Mirafold could not")
+  ));
+  assert.equal(navigationErrors.length, 5, "each failed background navigation must be reported once");
+  assert.ok(
+    navigationErrors.every((args) => !args.join(" ").includes("token=secret")),
+    "background diagnostics must not expose authenticated daemon URLs",
+  );
+}
 
 openFolder();
 openFolder();
@@ -313,7 +509,7 @@ function runProbe(mode) {
   assert.match(result.stdout, /main lifecycle probe passed/);
 }
 
-test("rapid folder changes coalesce and a superseded successful boot retires itself", () => {
+test("a successful boot starts one updater while later folder changes remain serialized", () => {
   runProbe("race");
 });
 
@@ -323,6 +519,26 @@ test("an unproven daemon stop starts no replacement and forces a safe quit", () 
 
 test("a daemon crash during the page load produces exactly one dialog", () => {
   runProbe("crash-during-load");
+});
+
+test("choosing Quit after a boot failure does not start the updater", () => {
+  runProbe("boot-failure-quit");
+});
+
+test("a successful retry after a boot failure starts the updater exactly once", () => {
+  runProbe("boot-failure-retry");
+});
+
+test("a page-load failure cannot expose daemon credentials in its dialog", () => {
+  runProbe("page-load-failure");
+});
+
+test("a loading-screen failure is reported and quits without an unhandled rejection", () => {
+  runProbe("loading-file-failure");
+});
+
+test("rejected popup and external navigation promises are handled", () => {
+  runProbe("navigation-rejection");
 });
 
 test("the native menu auto-hides and packaged builds omit development commands", () => {

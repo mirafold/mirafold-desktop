@@ -77,3 +77,40 @@ export function navigationVerdict(rawUrl, loadingFile, daemonOrigin = null) {
   // to act on it.
   return "block";
 }
+
+/**
+ * Decide what Desktop should do with a request for a new renderer window.
+ * Shell's status-bar control uses exactly `/?new=1` (plus an optional fragment
+ * carrying its relay handoff), and that is the only popup Desktop folds back
+ * into its one window. Every other web popup belongs in the system browser,
+ * including same-origin links rendered from agent output. A form submission is
+ * refused because opening only its URL would silently discard the POST body.
+ *
+ * @param {string} rawUrl resolved popup URL supplied by Electron
+ * @param {string|null} daemonOrigin active daemon's canonical origin
+ * @param {boolean} hasPostBody whether Electron supplied form POST data
+ * @returns {"same-window"|"external"|"block"}
+ */
+export function popupVerdict(rawUrl, daemonOrigin = null, hasPostBody = false) {
+  if (hasPostBody) return "block";
+
+  let target;
+  try {
+    target = new URL(rawUrl);
+  } catch {
+    return "block";
+  }
+
+  if (target.protocol !== "http:" && target.protocol !== "https:") return "block";
+  if (
+    daemonOrigin !== null
+    && target.origin === daemonOrigin
+    && target.username === ""
+    && target.password === ""
+    && target.pathname === "/"
+    && target.search === "?new=1"
+  ) {
+    return "same-window";
+  }
+  return "external";
+}

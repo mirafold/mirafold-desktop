@@ -288,10 +288,6 @@ test("process-tree termination resolves only after the leader and its child are 
     },
   );
 
-  // terminateProcessTree deliberately unrefs its polling timers so an ordinary
-  // app quit is never held open. Keep this isolated test process alive while
-  // awaiting the same Promise an update installation awaits behind a window.
-  const keepAlive = setInterval(() => {}, 1000);
   let grandchildPid = null;
   try {
     const deadline = Date.now() + 5000;
@@ -306,7 +302,6 @@ test("process-tree termination resolves only after the leader and its child are 
     assert.equal(processExists(leader.pid), false, "tree leader is gone when the Promise resolves");
     assert.equal(processExists(grandchildPid), false, "tree child is gone when the Promise resolves");
   } finally {
-    clearInterval(keepAlive);
     if (processExists(leader.pid)) await terminateProcessTree(leader.pid);
     if (grandchildPid && processExists(grandchildPid)) {
       try {

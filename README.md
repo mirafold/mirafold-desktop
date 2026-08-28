@@ -150,7 +150,7 @@ need no bridge.
 | `src/process-tree.js` | track and stop the daemon's whole process tree, and prove it is gone |
 | `src/windows-daemon-job.ps1` | own the Windows daemon tree with a kill-on-close Job Object |
 | `src/navigation.js` | what the window is allowed to load, and what goes to the browser |
-| `src/permissions.js` | deny every Chromium permission check and request |
+| `src/permissions.js` | deny Chromium permissions except notifications from the active daemon's main frame |
 | `src/platform-updaters.js` | atomic AppImage replacement and acknowledged NSIS launch |
 | `src/updater.js` | update policy for APT, direct installers, Store packages, and Linux tar archives |
 | `src/login-env.js` | recover the login shell's `PATH` so agent CLIs are findable |
