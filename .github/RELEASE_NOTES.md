@@ -3,41 +3,35 @@ Mirafold as a desktop app — no terminal, no Node, no npm.
 Pick a project folder, and Mirafold opens in its own window. Everything the
 `mirafold` npm package does, this does: it runs the same daemon, unmodified.
 
-## What changed in Desktop 0.3.1
+## What changed in Desktop 0.3.2
 
-Desktop 0.3.1 updates its bundled Mirafold Shell from `0.3.7` to `0.5.0`.
-The complete Shell change is the exact upstream comparison from the
-[`0.3.7` package commit to the `0.5.0` package commit](https://github.com/mirafold/mirafold/compare/1723a2d6f5f2d08159d1acf7c5d496d3420882d9...0e6430e734c309c3da5189b33b47b745b788ce8f).
-Highlights include:
+Desktop 0.3.2 keeps the bundled Mirafold Shell at `0.5.0` and fixes Desktop's
+session, notification, and startup behavior:
 
-- Review a project's uncommitted changes beside the conversation. The
-  read-only Changes view groups repositories, navigates and selects hunks,
-  tracks review progress, refreshes live, resizes on desktop, and fills the
-  workspace drawer on a phone.
-- Use OpenCode alongside Claude Code, Codex, and Gemini CLI, including remote
-  OpenCode session creation from a paired browser or phone.
-- Drop files into a session. Mirafold stages their bytes in the operating
-  system's temporary directory, never the working tree, and puts safely quoted
-  paths into the prompt for the agent to read.
-- Opt into operating-system notifications when a hidden session asks for
-  permission or finishes a turn. Notifications remain off until enabled.
-- See supported Claude Code and OpenCode subagents as live, expandable decks
-  with their state, current action, narration, and tool activity.
-- Read streamed prose and rich components as a responsive live document, and
-  navigate back through submitted inputs without losing the current draft.
-
-Desktop's own Windows launcher now gives the native Job Object wrapper up to
-two minutes to become ready, then gives the Mirafold daemon a fresh one-minute
-deadline to report its private startup URL. This keeps both startup phases
-bounded without letting a slow PowerShell preparation consume the daemon's
-deadline. Linux startup behavior is unchanged.
+- **New sessions stay authenticated.** Shell's exact **New session** control
+  now opens in the existing Desktop window instead of an external browser that
+  does not possess the daemon's private launch token. Ordinary links still
+  open in the system browser, and new-window form submissions are refused
+  rather than silently losing their POST body.
+- **Operating-system notifications work without broadening permissions.** The
+  active daemon's main frame may use Shell's opt-in notifications. Every other
+  Chromium permission, another window, a subframe, an external origin, and a
+  prior daemon origin remain denied.
+- **Startup and updating agree on success.** The Desktop updater starts exactly
+  once after a working session loads, including after a successful retry. It
+  does not start after a failed boot, a crash during initial page load, or a
+  user choosing **Quit**.
+- **Failure paths are controlled and credential-safe.** Rejected popup and
+  external-navigation actions no longer escape as unhandled promises. Startup
+  dialogs redact daemon tokens and relay pairing codes, and a missing local
+  loading interface reports one error and quits before launching a daemon.
 
 ## Install on Ubuntu with APT
 
 <!-- Refresh this section before any manually tagged release. Automated Shell
      intake generates separate, version-bound notes from reviewed provenance. -->
 
-Mirafold's signed Ubuntu APT repository is already live. Desktop 0.3.1 is an
+Mirafold's signed Ubuntu APT repository is already live. Desktop 0.3.2 is an
 ordinary package update on that channel, not a new repository setup. Ubuntu
 24.04 on `amd64` is the tested target. Existing APT users need no new bootstrap
 package: after `sudo apt update`, Ubuntu's Software Updater or
@@ -67,9 +61,9 @@ Linux `.tar.gz` only announces the update and opens the official Releases page;
 it never changes the extracted files. Microsoft Store packaging does not exist
 yet and will use Store-managed updates when it does.
 
-Desktop 0.3.1 retains the process-lifecycle, navigation, permission,
+Desktop 0.3.2 retains the process-lifecycle, navigation, permission,
 credential-redaction, packaged-runtime, and release-provenance protections
-shipped in Desktop 0.3.0. A failed check leaves the current session running.
+shipped in earlier releases. A failed check leaves the current session running.
 Installation does not begin unless the daemon and its agent process tree are
 confirmed stopped, including Linux pseudo-terminal children registered
 synchronously when they enter separate process groups. Electron's Node-mode
