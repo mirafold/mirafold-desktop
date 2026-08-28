@@ -6,7 +6,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { daemonOriginFromUrl, navigationVerdict } from "../src/navigation.js";
+import {
+  daemonOriginFromUrl,
+  navigationVerdict,
+  popupVerdict,
+} from "../src/navigation.js";
 
 // Built the way main.js builds it (path.join on the app directory) so the
 // fixture is a real path on whichever platform the suite runs — a hardcoded
@@ -98,4 +102,44 @@ test("schemes the OS would act on are never handed onwards", () => {
   ]) {
     assert.equal(navigationVerdict(url, LOADING, DAEMON_ORIGIN), "block", url);
   }
+});
+
+test("only Shell's exact new-session GET popup stays in the desktop window", () => {
+  assert.equal(
+    popupVerdict("http://127.0.0.1:31337/?new=1", DAEMON_ORIGIN),
+    "same-window",
+  );
+  assert.equal(
+    popupVerdict(
+      "http://127.0.0.1:31337/?new=1#code=private&relay=wss%3A%2F%2Frelay.example",
+      DAEMON_ORIGIN,
+    ),
+    "same-window",
+  );
+
+  for (const url of [
+    "http://127.0.0.1:31337/",
+    "http://127.0.0.1:31337/session/1",
+    "http://127.0.0.1:31337/?new=1&extra=1",
+    "http://user@127.0.0.1:31337/?new=1",
+    "http://127.0.0.1:41337/?new=1",
+    "https://mirafold.com/?new=1",
+  ]) {
+    assert.equal(popupVerdict(url, DAEMON_ORIGIN), "external", url);
+  }
+
+  for (const url of [
+    "javascript:alert(1)",
+    "mailto:someone@example.com",
+    "file:///tmp/page.html",
+    "not a url",
+  ]) {
+    assert.equal(popupVerdict(url, DAEMON_ORIGIN), "block", url);
+  }
+
+  assert.equal(
+    popupVerdict("http://127.0.0.1:31337/?new=1", DAEMON_ORIGIN, true),
+    "block",
+    "a form POST must not be converted into a bodyless GET",
+  );
 });
