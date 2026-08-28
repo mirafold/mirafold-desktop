@@ -187,17 +187,33 @@ for the one-time bridge release.
    Release page shows all 17 files and `latest`; download one installer
    anonymously and check its SHA-256 against `SHA256SUMS-<platform>.txt`.
 8. **Close the loop — do not skip**: bring `main` back into `next` so the
-   next cycle's release branch does not conflict:
+   next cycle's release branch does not conflict. Keep `next` closed to new
+   merges from the time the release branch is reconstructed until this sync
+   merges; if it advanced, stop and reconcile that staging work explicitly.
+
+   Do not point the sync branch directly at `origin/main`. Squash/rebase merges
+   give equivalent content different ancestry, so that shortcut can expose old
+   production commits as new pull-request commits and fail DCO. Instead, start
+   on current `next`, reconstruct the exact production tree in the index, and
+   certify that reconstruction with one new signed-off commit:
 
    ```
    git fetch origin
-   git push origin origin/main:refs/heads/sync/main-into-next-vx.y.z
+   git switch -c sync/main-into-next-vx.y.z origin/next
+   git diff --binary origin/next origin/main | git apply --index
+   git diff --cached --quiet origin/main
+   git diff --quiet
+   git diff --cached --check
+   git commit -s -m "sync: main into next after vx.y.z"
+   git push -u origin sync/main-into-next-vx.y.z
    gh pr create --base next --head sync/main-into-next-vx.y.z \
      --title "sync: main into next after vx.y.z" --body "Release sync. No review needed beyond green checks."
    ```
 
-   Merge it on green (squash is fine — the content is what matters). Do the
-   same sync whenever Path A has published and you are about to cut a manual
+   Both quiet comparisons must exit zero: the index equals production and the
+   working tree equals the index. Review the staged patch, then merge the PR on
+   green (squash or rebase is fine — the content is what matters). Do the same
+   sync whenever Path A has published and you are about to cut a manual
    release; step 2 handles the case where you forgot.
 9. Delete the merged `feature/*`, `release/*`, and `sync/*` branches
    (`delete_branch_on_merge` does most of this).
