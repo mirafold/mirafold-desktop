@@ -74,6 +74,17 @@ session. On Linux, that proof includes pseudo-terminal children that create
 their own sessions and process groups rather than remaining in the daemon's
 group.
 
+## Interface size
+
+Mirafold Desktop scales the whole interface with the same controls as a web
+browser. Press **Ctrl + Plus** to zoom in, **Ctrl + Minus** to zoom out, and
+**Ctrl + 0** for Actual Size. The native menu has the same commands under
+**View**; on Linux and Windows, press **Alt** to reveal the normally hidden menu
+bar. Scale moves through deliberate levels from 50% to 300%, and Mirafold
+remembers the choice on this device across restarts and project changes. The
+preference lives in Electron's per-user application data, never in the open
+project folder.
+
 The exact Windows checks that automation cannot perform are in
 [WINDOWS-TESTING.md](WINDOWS-TESTING.md). The separate free Store path, its
 account boundary, and everything that remains unimplemented are recorded in
@@ -149,12 +160,13 @@ need no bridge.
 | `src/daemon-output.js` | credential-redacting, memory-bounded handling of the daemon's output |
 | `src/process-tree.js` | track and stop the daemon's whole process tree, and prove it is gone |
 | `src/windows-daemon-job.ps1` | own the Windows daemon tree with a kill-on-close Job Object |
+| `src/interface-scale.js` | validate, step, and reapply the device-level whole-interface scale |
 | `src/navigation.js` | what the window is allowed to load, and what goes to the browser |
 | `src/permissions.js` | deny Chromium permissions except notifications from the active daemon's main frame |
 | `src/platform-updaters.js` | atomic AppImage replacement and acknowledged NSIS launch |
 | `src/updater.js` | update policy for APT, direct installers, Store packages, and Linux tar archives |
 | `src/login-env.js` | recover the login shell's `PATH` so agent CLIs are findable |
-| `src/state.js` | remember the last-opened folder |
+| `src/state.js` | remember the last-opened folder and interface scale |
 | `electron-builder.yml` | packaging targets, with the reasoning as comments |
 
 ## Development

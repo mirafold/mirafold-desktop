@@ -30,10 +30,20 @@ import { fileURLToPath } from "node:url";
 import { createBeforeQuitHandler } from "./app-lifecycle.js";
 import { Daemon } from "./daemon.js";
 import { redactCredentials } from "./daemon-output.js";
+import {
+  createInterfaceScaleController,
+  DEFAULT_INTERFACE_SCALE,
+  interfaceScaleShortcut,
+} from "./interface-scale.js";
 import { daemonOriginFromUrl, navigationVerdict, popupVerdict } from "./navigation.js";
 import { installPermissionGuards } from "./permissions.js";
 import { createSafeAppImageUpdater, createSafeNsisUpdater } from "./platform-updaters.js";
-import { lastFolder, setLastFolder } from "./state.js";
+import {
+  interfaceScale as savedInterfaceScale,
+  lastFolder,
+  setInterfaceScale,
+  setLastFolder,
+} from "./state.js";
 import {
   APT_MANAGED_MARKER,
   createDesktopUpdater,
@@ -54,6 +64,7 @@ let quitting = false;
 let bootSeq = 0;
 let folderChangePromise = null;
 let desktopUpdater = null;
+let interfaceScaleController = null;
 
 /**
  * Start a Promise-returning Electron action from a synchronous event handler.
@@ -116,7 +127,23 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Start at the remembered size before first paint; the load listener
+      // below reapplies it when a new daemon port creates a new origin.
+      zoomFactor: interfaceScaleController?.scale ?? DEFAULT_INTERFACE_SCALE,
     },
+  });
+
+  win.webContents.on("did-finish-load", () => interfaceScaleController?.apply());
+  win.webContents.on("before-input-event", (event, input) => {
+    const command = interfaceScaleShortcut(input);
+    if (command === null) return;
+    // This event precedes Electron's menu accelerators. Consuming it prevents
+    // the displayed accelerator from applying the same command a second time,
+    // while also accepting browsers' unshifted Ctrl/Cmd+= convention.
+    event.preventDefault();
+    if (command === "in") interfaceScaleController?.zoomIn();
+    else if (command === "out") interfaceScaleController?.zoomOut();
+    else interfaceScaleController?.reset();
   });
 
   // Install both halves of Electron's default-deny permission policy before
@@ -509,9 +536,21 @@ export function buildMenu(isPackaged = app.isPackaged) {
         label: "View",
         submenu: [
           ...(!isPackaged ? [{ role: "reload" }] : []),
-          { role: "resetZoom" },
-          { role: "zoomIn" },
-          { role: "zoomOut" },
+          {
+            label: "Zoom In",
+            accelerator: "CmdOrCtrl+Plus",
+            click: () => interfaceScaleController?.zoomIn(),
+          },
+          {
+            label: "Zoom Out",
+            accelerator: "CmdOrCtrl+-",
+            click: () => interfaceScaleController?.zoomOut(),
+          },
+          {
+            label: "Actual Size",
+            accelerator: "CmdOrCtrl+0",
+            click: () => interfaceScaleController?.reset(),
+          },
           { type: "separator" },
           { role: "togglefullscreen" },
           ...(!isPackaged ? [{ role: "toggleDevTools" }] : []),
@@ -538,6 +577,14 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(async () => {
+    interfaceScaleController = createInterfaceScaleController({
+      initialScale: savedInterfaceScale(),
+      applyScale(scale) {
+        if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
+        win.webContents.setZoomFactor(scale);
+      },
+      persistScale: setInterfaceScale,
+    });
     const updateStrategy = desktopUpdateStrategy({
       isPackaged: app.isPackaged,
       isWindowsStore: process.windowsStore === true,
