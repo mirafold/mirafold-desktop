@@ -2,7 +2,7 @@
   "name": "mirafold-desktop",
   "productName": "Mirafold",
   "desktopName": "mirafold.desktop",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "description": "Mirafold as a desktop app — no terminal, no Node, no npm.",
   "license": "MIT",
@@ -32,7 +32,7 @@
   },
   "dependencies": {
     "electron-updater": "6.8.9",
-    "mirafold": "0.5.0"
+    "mirafold": "0.6.0"
   },
   "devDependencies": {
     "@noble/hashes": "2.3.0",
