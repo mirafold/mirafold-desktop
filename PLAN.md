@@ -766,6 +766,66 @@ A new higher release activates APT; no published asset is replaced or appended.
   This branch creates no tag, release, or asset; public production remains
   `v0.3.0` until the separately approved release process completes.
 
+### Phase 11 — persistent desktop interface scale
+
+Started 2026-08-29 at Kyle's request. This is one normal-sized feature Phase;
+its single Step is one independently executable pass. The outcome is familiar
+browser-style whole-interface zoom in the Desktop window, including native
+menu commands, keyboard shortcuts, and a device-persisted scale that survives
+restarts and the daemon's changing loopback origin.
+
+**Verified starting state (2026-08-29):** `src/main.js` already places
+Electron's generic `resetZoom`, `zoomIn`, and `zoomOut` roles in the hidden
+native View menu. No source symbol reads, validates, or persists an interface
+scale; `src/state.js` stores only `lastFolder`. Every daemon boot reports a
+fresh port and therefore a fresh origin. Electron documents its default zoom
+policy as origin-scoped, so the existing role delegation does not establish
+the device-level persistence this feature requires.
+
+**Approved boundary:** modify `src/main.js`, `src/state.js`, their focused
+tests, `README.md`, and this plan. Create one small pure interface-scale module
+and its focused test. Add no package: this is small main-process and JSON-state
+glue, while a dependency would add installed bytes, transitive code, and alert
+surface without supplying protocol depth or security hardening. Preserve the
+100% first-run default, window size, daemon and published Shell behavior,
+renderer isolation, navigation and permission policy, project selection,
+updaters, release machinery, package versions, and packaging. No deployment,
+tag, release, or external state change belongs to this Phase.
+
+- [x] **Step 11.1 — implement and prove persistent browser-style zoom.** Give
+  the native View menu explicit Actual Size, Zoom In, and Zoom Out commands
+  with the standard `CmdOrCtrl+0`, `CmdOrCtrl+Plus`, and `CmdOrCtrl+-`
+  accelerators. Scale the whole Chromium page through the main process, clamp
+  changes to deliberate browser-like levels from 50% through 300%, persist
+  only validated values in Electron's per-user state, start the window at the
+  remembered value without a 100% flash, and reapply that value after every
+  completed navigation. Prove stepping, bounds, reset, invalid-state fallback,
+  cross-field state preservation, menu wiring, navigation reapplication, and
+  unchanged security settings; document the user controls and run focused plus
+  complete tests.
+
+  **Completed 2026-08-29.** New pure `src/interface-scale.js` owns the exact
+  50%–300% browser-like levels, invalid-value fallback, bounded stepping, and
+  cross-platform shortcut mapping. `src/main.js` replaces the generic
+  origin-scoped roles with explicit native commands, accepts both Plus and the
+  browser-compatible Equals-key alias, consumes each shortcut before the menu
+  can duplicate it, supplies the saved factor as the page default, and reapplies
+  it after every completed load. `src/state.js` validates the new number and
+  preserves it alongside `lastFolder` in the existing per-user JSON file; no
+  state moves into the project or renderer.
+
+  Focused interface-scale/main-process verification passes 16/16. The complete
+  suite passes 198 tests, fails zero, and skips only the existing
+  native-Windows-on-Linux probe. An isolated real Electron 43.4.0 X11 probe
+  observed 125% on the loaded page, menu-driven 150%, 150% reapplied after a
+  cross-origin navigation, and Actual Size restoring 100%. `npm run pack`
+  succeeds; the packaged module is byte-identical to source; and the packaged
+  smoke loads both native modules, completes the authenticated daemon handshake,
+  and proves process-tree shutdown. `node --check src/main.js` and
+  `git diff --check` pass. README now gives the literal shortcuts and hidden-menu
+  access. No dependency, package version, daemon/Shell behavior, security
+  boundary, release setting, tag, deployment, or external state changed.
+
 ### Audit and test-audit pass — 2026-08-14
 
 Completed 2026-08-14, on this same branch. A full security audit found one

@@ -116,10 +116,15 @@ version bump, tags it, pushes commit and tag atomically to `main` (the ruleset
 bypass), and publishes the verified 17-file GitHub Release. Retries resume;
 nothing partial ever becomes visible.
 
-It is dormant until the repository variable `MIRAFOLD_AUTOMATED_RELEASES` is
-exactly `enabled`. It stays dormant through the first signed APT release and
-its nonpublishing rehearsal (Path B, below), so routine publication cannot
-start before the new repository channel exists and has been exercised.
+It publishes only while the repository variable `MIRAFOLD_AUTOMATED_RELEASES`
+is exactly `enabled`. It was kept dormant through the first signed APT release
+(0.3.2) and its nonpublishing rehearsals (Path B, below), so routine
+publication could not start before the new repository channel existed and had
+been exercised; **the variable was set 2026-08-30 and Path A is live.** The
+scheduler is best-effort (polls can land an hour or more apart), so a Shell
+release that should not wait can be carried immediately with **Actions → Shell
+intake → Run workflow** on `main` — the manual run publishes only because the
+variable is set.
 
 `README.md` → *Automated Shell releases* has the full contract;
 `RELEASE-RECOVERY.md` has the failure and retry states.
