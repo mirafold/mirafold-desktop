@@ -262,12 +262,14 @@ without creating a second Desktop version. For an interrupted writer, re-run
 the failed jobs in the same workflow run so it retains the original commit and
 artifacts.
 
-Publication is intentionally dormant: the repository Actions variable
-`MIRAFOLD_AUTOMATED_RELEASES` must equal the literal value `enabled` before the
-write job can run. Keep it absent through the first signed APT release and its
-non-publishing rehearsal. Once that gate is deliberately enabled, ordinary
-Shell releases require no Desktop source edit, version command, tag, installer
-build, or GitHub Release action from a maintainer.
+Publication is gated on the repository Actions variable
+`MIRAFOLD_AUTOMATED_RELEASES`, which must equal the literal value `enabled`
+before the write job can run. It was kept absent through the first signed APT
+release (0.3.2) and its non-publishing rehearsals, and **has been `enabled`
+since 2026-08-30**: ordinary Shell releases now require no Desktop source
+edit, version command, tag, installer build, or GitHub Release action from a
+maintainer. Deleting the variable stops publication again (intake, tests, and
+rehearsals keep running); a release already published stays published.
 
 `npm run update:probe:linux OLD_APPIMAGE NEW_RELEASE_DIR` is the local-only,
 disposable proof of the real Linux update paths. It serves a freshly built
