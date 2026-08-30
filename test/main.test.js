@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 
 const daemonInstances = [];
 const rememberedFolders = [];
+const rememberedScales = [];
 const messages = [];
 const windows = [];
 const openedExternally = [];
@@ -91,6 +92,7 @@ class FakeWindow extends EventEmitter {
     this.options = options;
     this.destroyed = false;
     this.loadedUrls = [];
+    this.appliedScales = [];
     this.webContents = new EventEmitter();
     this.webContents.session = {
       setPermissionCheckHandler(handler) {
@@ -102,6 +104,8 @@ class FakeWindow extends EventEmitter {
         permissionRequestHandler = handler;
       },
     };
+    this.webContents.isDestroyed = () => false;
+    this.webContents.setZoomFactor = (scale) => { this.appliedScales.push(scale); };
     this.webContents.setWindowOpenHandler = (handler) => { windowOpenHandler = handler; };
     windows.push(this);
   }
@@ -110,6 +114,7 @@ class FakeWindow extends EventEmitter {
     if (mode === "loading-file-failure") {
       throw new Error("fixture loading screen failure");
     }
+    this.webContents.emit("did-finish-load");
   }
   async loadURL(url) {
     this.loadedUrls.push(url);
@@ -123,7 +128,10 @@ class FakeWindow extends EventEmitter {
     if (mode === "navigation-rejection" && url.includes("?new=1")) {
       throw new Error("fixture popup navigation rejection with ?token=secret");
     }
-    if (mode !== "crash-during-load") return;
+    if (mode !== "crash-during-load") {
+      this.webContents.emit("did-finish-load");
+      return;
+    }
     // The v0.1.1 bug's exact ordering: the daemon dies right after reporting
     // its URL, so the page load REJECTS FIRST and the crash callback lands
     // afterwards — boot() must stay silent and let the crash report own the
@@ -203,7 +211,9 @@ mock.module(new URL("./src/daemon.js", import.meta.url).href, {
 });
 mock.module(new URL("./src/state.js", import.meta.url).href, {
   namedExports: {
+    interfaceScale: () => mode === "zoom" ? 1.25 : 1,
     lastFolder: () => "/initial-project",
+    setInterfaceScale: (scale) => rememberedScales.push(scale),
     setLastFolder: (folder) => rememberedFolders.push(folder),
   },
 });
@@ -251,6 +261,11 @@ await waitFor(
   "initial daemon did not finish booting",
 );
 assert.equal(windows[0].options.autoHideMenuBar, true, "the native menu bar must start hidden");
+assert.equal(
+  windows[0].options.webPreferences.zoomFactor,
+  mode === "zoom" ? 1.25 : 1,
+  "the remembered scale must be present before the window's first paint",
+);
 assert.deepEqual(menuTemplate.map((item) => item.label), ["Project", "Edit", "View", "Help"]);
 const projectMenu = menuTemplate.find((item) => item.label === "Project");
 assert.equal(projectMenu.submenu[0].label, "Open Project Folder…");
@@ -262,8 +277,19 @@ const developmentViewRoles = menuTemplate
 assert.deepEqual(
   developmentViewRoles,
   mode === "apt-managed"
-    ? ["resetZoom", "zoomIn", "zoomOut", "togglefullscreen"]
-    : ["reload", "resetZoom", "zoomIn", "zoomOut", "togglefullscreen", "toggleDevTools"],
+    ? ["togglefullscreen"]
+    : ["reload", "togglefullscreen", "toggleDevTools"],
+);
+const zoomCommands = menuTemplate
+  .find((item) => item.label === "View")
+  .submenu.filter((item) => ["Zoom In", "Zoom Out", "Actual Size"].includes(item.label));
+assert.deepEqual(
+  zoomCommands.map(({ label, accelerator }) => ({ label, accelerator })),
+  [
+    { label: "Zoom In", accelerator: "CmdOrCtrl+Plus" },
+    { label: "Zoom Out", accelerator: "CmdOrCtrl+-" },
+    { label: "Actual Size", accelerator: "CmdOrCtrl+0" },
+  ],
 );
 
 if (
@@ -289,8 +315,39 @@ if (mode === "apt-managed") {
     .filter(Boolean);
   assert.deepEqual(
     packagedViewRoles,
-    ["resetZoom", "zoomIn", "zoomOut", "togglefullscreen"],
+    ["togglefullscreen"],
     "packaged builds must not present reload or developer tools as product commands",
+  );
+  process.stdout.write("main lifecycle probe passed\n");
+} else if (mode === "zoom") {
+  assert.deepEqual(
+    windows[0].appliedScales,
+    [1.25, 1.25],
+    "both the loading page and daemon page must receive the remembered scale",
+  );
+  let shortcutPreventions = 0;
+  const shortcutEvent = { preventDefault: () => { shortcutPreventions += 1; } };
+  windows[0].webContents.emit("before-input-event", shortcutEvent, {
+    type: "keyDown",
+    key: "=",
+    code: "Equal",
+    control: true,
+    meta: false,
+    alt: false,
+    isComposing: false,
+  });
+  assert.equal(shortcutPreventions, 1, "the browser Ctrl+= alias must be owned exactly once");
+  zoomCommands.find((item) => item.label === "Actual Size").click();
+  zoomCommands.find((item) => item.label === "Zoom In").click();
+  zoomCommands.find((item) => item.label === "Zoom Out").click();
+  assert.deepEqual(windows[0].appliedScales.slice(-4), [1.5, 1, 1.1, 1]);
+  assert.deepEqual(rememberedScales, [1.5, 1, 1.1, 1]);
+  windows[0].webContents.emit("did-finish-load");
+  assert.equal(windows[0].appliedScales.at(-1), 1);
+  assert.deepEqual(
+    rememberedScales,
+    [1.5, 1, 1.1, 1],
+    "reapplying after navigation must not rewrite persisted state",
   );
   process.stdout.write("main lifecycle probe passed\n");
 } else if (mode === "crash-during-load") {
@@ -543,6 +600,10 @@ test("rejected popup and external navigation promises are handled", () => {
 
 test("the native menu auto-hides and packaged builds omit development commands", () => {
   runProbe("packaged-menu");
+});
+
+test("browser-style zoom starts at, changes, persists, and reapplies the interface scale", () => {
+  runProbe("zoom");
 });
 
 test("a packaged Debian install with the archive marker leaves updates to APT", {
