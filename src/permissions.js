@@ -1,7 +1,10 @@
 // The Mirafold page is an ordinary web page. It needs networking to its own
-// daemon and the notification grant used by the shell's opt-in operating-system
-// notifications, but it does not need Chromium grants such as camera,
-// microphone, location, MIDI, USB, or clipboard access.
+// daemon, the notification grant used by the shell's opt-in operating-system
+// notifications, and the sanitized clipboard WRITE the shell's copy buttons
+// make on a user click (Electron gates navigator.clipboard.writeText on
+// `clipboard-sanitized-write`; denied, every copy button was a dead click —
+// 2026-08-31). It does not need Chromium grants such as camera, microphone,
+// location, MIDI, USB, or clipboard READ.
 //
 // Keep both Electron permission paths explicit. Electron documents that the
 // check and request handlers must be implemented together for a complete
@@ -9,10 +12,11 @@
 // Electron's defaults.
 
 /**
- * Install the renderer's default-deny permission policy on a Session. The one
- * grant is notifications from the active daemon's main frame in the active
- * Mirafold window. This small adapter is dependency-free and injectable so the
- * actual handler wiring can be tested without launching Electron.
+ * Install the renderer's default-deny permission policy on a Session. The two
+ * grants — notifications and the sanitized clipboard write — go only to the
+ * active daemon's main frame in the active Mirafold window. This small adapter
+ * is dependency-free and injectable so the actual handler wiring can be tested
+ * without launching Electron.
  *
  * @param {{
  *   setPermissionCheckHandler: (handler: (...args: unknown[]) => boolean) => void,
@@ -26,9 +30,10 @@
 export function installPermissionGuards(electronSession, options = {}) {
   const { trustedWebContents, getDaemonOrigin } = options;
 
-  const allowNotification = (webContents, permission, rawUrls, isMainFrame) => {
+  const GRANTED = new Set(["notifications", "clipboard-sanitized-write"]);
+  const allowTrustedFrame = (webContents, permission, rawUrls, isMainFrame) => {
     if (
-      permission !== "notifications"
+      !GRANTED.has(permission)
       || trustedWebContents == null
       || webContents !== trustedWebContents
       || isMainFrame !== true
@@ -50,7 +55,7 @@ export function installPermissionGuards(electronSession, options = {}) {
   };
 
   electronSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => (
-    allowNotification(
+    allowTrustedFrame(
       webContents,
       permission,
       [requestingOrigin, details?.requestingUrl],
@@ -58,7 +63,7 @@ export function installPermissionGuards(electronSession, options = {}) {
     )
   ));
   electronSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    callback(allowNotification(
+    callback(allowTrustedFrame(
       webContents,
       permission,
       [details?.requestingUrl],

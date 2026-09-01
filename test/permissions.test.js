@@ -65,7 +65,7 @@ test("both Electron permission paths default to denying every request", () => {
   }
 });
 
-test("only the active daemon's main frame may use notifications", () => {
+test("only the active daemon's main frame may use notifications and the sanitized clipboard write", () => {
   const activeWebContents = {};
   const otherWebContents = {};
   let daemonOrigin = null;
@@ -92,6 +92,29 @@ test("only the active daemon's main frame may use notifications", () => {
   assert.equal(
     requestDecision(requestHandler, activeWebContents, "notifications", currentRequestDetails),
     true,
+  );
+  // The shell's copy buttons write the clipboard on a user click through
+  // navigator.clipboard.writeText, which Electron gates on this permission.
+  for (const [name, decide] of [
+    ["check", () => checkHandler(activeWebContents, "clipboard-sanitized-write", "http://127.0.0.1:31337/", currentCheckDetails)],
+    ["request", () => requestDecision(requestHandler, activeWebContents, "clipboard-sanitized-write", currentRequestDetails)],
+  ]) {
+    assert.equal(decide(), true, `clipboard-sanitized-write ${name}: the active daemon's main frame may write`);
+  }
+  assert.equal(
+    checkHandler(otherWebContents, "clipboard-sanitized-write", "http://127.0.0.1:31337/", currentCheckDetails),
+    false,
+    "another webContents must not inherit the clipboard grant",
+  );
+  assert.equal(
+    checkHandler(activeWebContents, "clipboard-sanitized-write", "http://127.0.0.1:31337/", { requestingUrl: currentUrl, isMainFrame: false }),
+    false,
+    "a subframe (an artifact, a diagram) must not inherit the clipboard grant",
+  );
+  assert.equal(
+    checkHandler(activeWebContents, "clipboard-sanitized-write", "https://example.com/", { requestingUrl: "https://example.com/", isMainFrame: true }),
+    false,
+    "an external origin must not inherit the clipboard grant",
   );
 
   for (const permission of [
