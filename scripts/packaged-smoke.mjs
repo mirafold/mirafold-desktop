@@ -14,6 +14,7 @@ import { invariant, readJson, stableVersion } from "./shared.mjs";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const MARKER = "MIRAFOLD_PACKAGED_SMOKE=";
+const MCP_MARKER = "MIRAFOLD_PACKAGED_MCP_SMOKE=";
 const DAEMON_MARKER = "MIRAFOLD_PACKAGED_DAEMON_SMOKE=";
 function minimalEnvironment(appDirectory, additions = {}) {
   const env = {
@@ -74,6 +75,333 @@ process.stdout.write(${JSON.stringify(MARKER)} + JSON.stringify({
   nodePtyLoaded: true,
   watcherLoaded: true,
 }) + "\n");
+`;
+
+// Runs the packaged Shell's compiled stdio server through the packaged
+// Electron executable. The parent immediately drops Electron's Node-mode
+// switch, then gives it back only to the one MCP child. This is the process
+// boundary that differs from a normal browser-launched Shell.
+const MCP_CHILD_PROBE = String.raw`
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+const { createRequire } = require("node:module");
+const { pathToFileURL } = require("node:url");
+
+const app = process.env.MIRAFOLD_PACKAGED_APP;
+const project = process.env.MIRAFOLD_PROBE_PROJECT;
+const AMBIENT_MARKER = "MIRAFOLD_PACKAGED_AMBIENT_SMOKE=";
+function invariant(condition, message) {
+  if (!condition) throw new Error(message);
+}
+function safeError(error) {
+  return String(error && (error.stack || error.message) || error)
+    .replace(/([?&]token=)[^\s&"'<>]+/gi, "$1<redacted>")
+    .replace(/(\bpairing code\s*:\s*)[A-Za-z0-9_-]+/gi, "$1<redacted>");
+}
+function processExists(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error && error.code !== "ESRCH";
+  }
+}
+async function waitForExit(pid, timeout) {
+  const deadline = Date.now() + timeout;
+  while (processExists(pid) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return !processExists(pid);
+}
+function forceStop(pid) {
+  if (!pid || !processExists(pid)) return;
+  if (process.platform === "win32") {
+    spawnSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+      timeout: 10000,
+      windowsHide: true,
+    });
+    return;
+  }
+  try { process.kill(pid, "SIGKILL"); } catch {}
+}
+async function within(promise, label, timeout = 15000) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(label + " timed out after " + timeout + "ms")), timeout);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function waitFor(condition, label, timeout = 15000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const value = condition();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(label + " timed out after " + timeout + "ms");
+}
+function openSocket(WebSocket, url, origin) {
+  const messages = [];
+  const socket = new WebSocket(url, { headers: { Origin: origin } });
+  socket.on("message", (data) => {
+    try { messages.push(JSON.parse(String(data))); } catch {}
+  });
+  return within(new Promise((resolve, reject) => {
+    socket.once("open", () => resolve({ socket, messages }));
+    socket.once("error", reject);
+  }), "packaged daemon WebSocket open");
+}
+function packagedRelative(file, label) {
+  const relative = path.relative(app, file);
+  invariant(relative && relative !== ".." && !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative),
+    label + " escaped the packaged app");
+  invariant(fs.statSync(file).isFile(), label + " is not a file");
+  return relative.split(path.sep).join("/");
+}
+function verifyBootstrapAmbient() {
+  const probe = path.join(project, "ambient-environment-probe.cjs");
+  fs.writeFileSync(probe, [
+    'const { spawnSync } = require("node:child_process");',
+    'const options = { env: process.env, encoding: "utf8", windowsHide: true };',
+    'const child = process.platform === "win32"',
+    '  ? spawnSync(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", "set ELECTRON_RUN_AS_NODE"], options)',
+    '  : spawnSync("/usr/bin/env", [], options);',
+    'if (child.error) throw child.error;',
+    'if (child.signal !== null) throw new Error("ordinary child ended from " + child.signal);',
+    'if (process.platform === "win32" && child.status !== 0 && child.status !== 1)',
+    '  throw new Error("ordinary Windows child exited " + child.status);',
+    'if (process.platform !== "win32" && child.status !== 0)',
+    '  throw new Error("ordinary Linux child exited " + child.status);',
+    'const childHasNodeMode = process.platform === "win32"',
+    '  ? child.status === 0',
+    '  : String(child.stdout).split(/\\r?\\n/).some((line) => line.startsWith("ELECTRON_RUN_AS_NODE="));',
+    'process.stdout.write("MIRAFOLD_PACKAGED_AMBIENT_SMOKE=" + JSON.stringify({',
+    '  daemonRunAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null,',
+    '  ordinaryChildRunAsNode: childHasNodeMode ? "present" : null,',
+    '}) + "\\n");',
+    '',
+  ].join("\n"));
+
+  const result = spawnSync(
+    process.execPath,
+    [path.join(app, "src", "daemon-bootstrap.cjs"), probe],
+    {
+      cwd: project,
+      encoding: "utf8",
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      maxBuffer: 1024 * 1024,
+      shell: false,
+      timeout: 30000,
+      windowsHide: true,
+    },
+  );
+  invariant(!result.error, "packaged ambient probe could not run: " + result.error?.message);
+  invariant(result.signal === null, "packaged ambient probe ended from " + result.signal);
+  invariant(result.status === 0, "packaged ambient probe exited " + result.status + ": " + String(result.stderr).slice(-2000));
+  invariant(String(result.stderr).trim() === "", "packaged ambient probe wrote stderr: " + String(result.stderr).slice(-2000));
+  const reports = String(result.stdout).trim().split(/\r?\n/).filter((line) => line.startsWith(AMBIENT_MARKER));
+  invariant(reports.length === 1, "packaged ambient probe returned " + reports.length + " reports instead of one");
+  const report = JSON.parse(reports[0].slice(AMBIENT_MARKER.length));
+  invariant(report.daemonRunAsNode === null, "packaged daemon inherited Electron Node mode");
+  invariant(report.ordinaryChildRunAsNode === null, "ordinary daemon child inherited Electron Node mode");
+  return report;
+}
+
+(async () => {
+  invariant(app && path.isAbsolute(app), "packaged app path is not absolute");
+  invariant(project && path.isAbsolute(project), "probe project path is not absolute");
+  invariant(fs.statSync(project).isDirectory(), "probe project is not a directory");
+  invariant(process.env.ELECTRON_RUN_AS_NODE === "1", "packaged MCP probe did not enter Electron Node mode");
+  delete process.env.ELECTRON_RUN_AS_NODE;
+
+  const requireApp = createRequire(path.join(app, "package.json"));
+  const daemonModule = path.join(app, "src", "daemon.js");
+  invariant(fs.statSync(daemonModule).isFile(), "packaged Desktop daemon module is missing");
+  const imported = await import(pathToFileURL(daemonModule).href);
+  invariant(typeof imported.Daemon === "function", "packaged Desktop daemon class is missing");
+  const WsModule = requireApp("ws");
+  const WebSocket = WsModule.WebSocket || WsModule;
+  const { Client } = requireApp("@modelcontextprotocol/sdk/client/index.js");
+  const { StdioClientTransport } = requireApp("@modelcontextprotocol/sdk/client/stdio.js");
+
+  const agentEnvReport = path.join(project, "gemini-agent-environment.txt");
+  let fakeGemini;
+  if (process.platform === "win32") {
+    fakeGemini = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "where.exe");
+  } else {
+    fakeGemini = path.join(project, "fake-gemini");
+    fs.writeFileSync(fakeGemini, [
+      "#!/bin/sh",
+      'if [ -n "$ELECTRON_RUN_AS_NODE" ]; then',
+      '  printf present > "$MIRAFOLD_AGENT_ENV_REPORT"',
+      "else",
+      '  printf absent > "$MIRAFOLD_AGENT_ENV_REPORT"',
+      "fi",
+      "exit 64",
+      "",
+    ].join("\n"));
+    fs.chmodSync(fakeGemini, 0o700);
+  }
+  invariant(fs.statSync(fakeGemini).isFile(), "fake Gemini executable is missing");
+  process.env.GEMINI_API_KEY = "mirafold-packaged-smoke-no-inference";
+  process.env.MIRAFOLD_GEMINI_BIN = fakeGemini;
+  process.env.MIRAFOLD_AGENT_ENV_REPORT = agentEnvReport;
+  process.env.MIRAFOLD_LOG_FILE = "";
+  process.env.MIRAFOLD_LOCAL_DISCOVERY = "off";
+  process.env.MIRAFOLD_RELAY_URL = "off";
+  process.env.MIRAFOLD_SESSION_DIR = path.join(project, "sessions");
+  process.env.MIRAFOLD_WORKSPACE_TRUST_FILE = path.join(project, "workspace-trust.json");
+
+  let crash = null;
+  const daemon = new imported.Daemon((info) => { crash = info; });
+  let socket = null;
+  try {
+    const rawUrl = await daemon.start(project);
+    const parsed = new URL(rawUrl);
+    const socketUrl = new URL(rawUrl);
+    socketUrl.protocol = "ws:";
+    socketUrl.pathname = "/ws";
+    const opened = await openSocket(WebSocket, socketUrl, parsed.origin);
+    socket = opened.socket;
+    const messages = opened.messages;
+    await waitFor(() => messages.find((message) => message.type === "agents"), "packaged daemon agents hello");
+    socket.send(JSON.stringify({ type: "create", agent: "gemini-cli", cwd: project }));
+    await waitFor(() => messages.find((message) => message.type === "session_created"), "packaged Gemini session creation");
+    socket.send(JSON.stringify({ type: "prompt", text: "write the packaged renderer launch config" }));
+
+    const settingsFile = path.join(project, ".gemini", "settings.json");
+    let trustAnswered = false;
+    await waitFor(() => {
+      if (fs.existsSync(settingsFile)) return true;
+      const permission = messages.find((message) => message.type === "permission_request");
+      if (permission && !trustAnswered) {
+        trustAnswered = true;
+        socket.send(JSON.stringify({ type: "permission_response", id: permission.id, allow: true }));
+      }
+      return false;
+    }, "packaged Gemini render-MCP settings");
+
+    const settings = JSON.parse(fs.readFileSync(settingsFile, "utf8"));
+    const launch = settings?.mcpServers?.mirafold;
+    invariant(launch && typeof launch === "object", "packaged Gemini settings omitted Mirafold MCP");
+    invariant(launch.command === process.execPath, "packaged adapter did not select the Electron executable");
+    invariant(Array.isArray(launch.args) && launch.args.length === 1, "packaged adapter render-MCP args differ");
+    const renderMcp = launch.args[0];
+    const renderMcpEntry = packagedRelative(renderMcp, "render-MCP entry");
+    const childOverrides = launch.env === undefined ? {} : launch.env;
+    invariant(childOverrides && typeof childOverrides === "object" && !Array.isArray(childOverrides),
+      "packaged adapter MCP environment is not an object");
+    const adapterEnvKeys = Object.keys(childOverrides).sort();
+    const adapterEnvPresent = childOverrides.ELECTRON_RUN_AS_NODE === "1";
+
+    const transport = new StdioClientTransport({
+      command: launch.command,
+      args: launch.args,
+      cwd: project,
+      env: { ...process.env, ...childOverrides },
+      stderr: "pipe",
+    });
+    let stderr = "";
+    transport.stderr.setEncoding("utf8");
+    transport.stderr.on("data", (chunk) => { stderr = (stderr + chunk).slice(-4000); });
+    const client = new Client({ name: "mirafold-packaged-smoke", version: "0.0.0" });
+    let childPid = null;
+    let initialized = false;
+    let tools = [];
+    let renderIdValid = false;
+    let probeError = null;
+    let closeError = null;
+    try {
+      await within(client.connect(transport), "MCP initialize");
+      initialized = true;
+      childPid = transport.pid;
+      invariant(Number.isInteger(childPid) && childPid > 0, "render-MCP transport reported no child PID");
+      tools = (await within(client.listTools(), "MCP tools/list")).tools;
+      const result = await within(client.callTool({
+        name: "render_card",
+        arguments: { title: "Packaged MCP smoke", body: "Electron child mode is isolated." },
+      }), "MCP tools/call render_card");
+      const renderId = result?.structuredContent?.renderId;
+      renderIdValid = typeof renderId === "string" && /^[A-Za-z0-9_.:-]{1,128}$/.test(renderId);
+    } catch (error) {
+      probeError = error;
+    } finally {
+      childPid ??= transport.pid;
+      try { await client.close(); } catch (error) { closeError = error; }
+    }
+
+    let rendererStopped = childPid ? await waitForExit(childPid, 5000) : true;
+    if (!rendererStopped && childPid) {
+      forceStop(childPid);
+      rendererStopped = await waitForExit(childPid, 5000);
+    }
+    if (probeError) {
+      throw new Error(
+        safeError(probeError)
+          + (stderr.trim() ? "\nrender-MCP stderr: " + stderr.trim() : "")
+          + "\ncommand=" + launch.command
+          + "\nargs=" + JSON.stringify(launch.args)
+          + "\nchildEnvKeys=" + JSON.stringify(adapterEnvKeys)
+          + "\nrendererStopped=" + rendererStopped,
+      );
+    }
+    invariant(!closeError, "MCP client close failed: " + safeError(closeError));
+    invariant(initialized, "MCP initialize did not complete");
+    invariant(adapterEnvPresent, "packaged adapter omitted the render-MCP Electron child override");
+    invariant(adapterEnvKeys.length === 1 && adapterEnvKeys[0] === "ELECTRON_RUN_AS_NODE",
+      "packaged adapter supplied unexpected render-MCP environment keys: " + JSON.stringify(adapterEnvKeys));
+    invariant(tools.length === 18, "render-MCP advertised " + tools.length + " tools instead of 18");
+    invariant(tools.some((tool) => tool.name === "render_card"), "render-MCP omitted render_card");
+    invariant(renderIdValid, "render_card returned an invalid render ID");
+    invariant(transport.pid === null, "render-MCP transport retained its child PID after close");
+    invariant(rendererStopped, "render-MCP child remained after close");
+    invariant(stderr.trim() === "", "render-MCP wrote stderr: " + stderr.trim());
+    invariant(process.env.ELECTRON_RUN_AS_NODE === undefined, "MCP child mode leaked into the probe environment");
+    const ambient = verifyBootstrapAmbient();
+    let agentRunAsNode = ambient.ordinaryChildRunAsNode;
+    if (process.platform !== "win32") {
+      await waitFor(() => fs.existsSync(agentEnvReport), "packaged Gemini agent environment report", 5000);
+      agentRunAsNode = fs.readFileSync(agentEnvReport, "utf8") === "present" ? "present" : null;
+    }
+    invariant(agentRunAsNode === null, "packaged Gemini agent inherited Electron Node mode");
+
+    socket.close();
+    socket = null;
+    const stopped = await daemon.stop();
+    invariant(stopped === true, "Desktop could not stop the packaged MCP probe daemon tree");
+    invariant(crash === null, "packaged MCP probe daemon reported a crash");
+
+    process.stdout.write(${JSON.stringify(MCP_MARKER)} + JSON.stringify({
+      renderMcpEntry,
+      adapterEnvPresent,
+      adapterEnvKeys,
+      initialized: true,
+      tools: tools.length,
+      hasRenderCard: true,
+      renderIdValid: true,
+      rendererStopped: true,
+      daemonTreeStopped: true,
+      probeRunAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null,
+      daemonRunAsNode: ambient.daemonRunAsNode,
+      agentRunAsNode,
+      ordinaryChildRunAsNode: ambient.ordinaryChildRunAsNode,
+    }) + "\n");
+  } finally {
+    if (socket) socket.close();
+    if (daemon.running) await daemon.stop();
+  }
+})().catch((error) => {
+  process.stderr.write(safeError(error) + "\n");
+  process.exitCode = 1;
+});
 `;
 
 // Runs inside the packaged Electron executable under ELECTRON_RUN_AS_NODE.
@@ -443,6 +771,62 @@ export function runPackagedNodeProbe({
   return report;
 }
 
+export function runPackagedMcpProbe({
+  executable,
+  appDirectory,
+  spawn = spawnSync,
+  temporaryDirectory = tmpdir(),
+} = {}) {
+  validatePackagedPaths(executable, appDirectory);
+  invariant(typeof temporaryDirectory === "string" && path.isAbsolute(temporaryDirectory), "probe temp path must be absolute");
+  invariant(lstatSync(temporaryDirectory).isDirectory(), "probe temp path must be a directory");
+
+  const probeRoot = mkdtempSync(path.join(temporaryDirectory, "mirafold-packaged-mcp-"));
+  const project = path.join(probeRoot, "project");
+  mkdirSync(project);
+  try {
+    const result = spawn(executable, ["--eval", MCP_CHILD_PROBE], {
+      cwd: project,
+      encoding: "utf8",
+      env: minimalEnvironment(appDirectory, { MIRAFOLD_PROBE_PROJECT: project }),
+      maxBuffer: 4 * 1024 * 1024,
+      shell: false,
+      timeout: 90000,
+      windowsHide: true,
+    });
+    assertCredentialSafe(String(result.stdout), "packaged MCP stdout");
+    assertCredentialSafe(String(result.stderr), "packaged MCP stderr");
+    spawnResult(result, "packaged MCP probe");
+    invariant(String(result.stderr).trim() === "", `packaged MCP probe wrote stderr: ${String(result.stderr).slice(-4000)}`);
+    const report = parseMarkedReport(result.stdout, MCP_MARKER, "packaged MCP probe");
+    invariant(
+      typeof report.renderMcpEntry === "string"
+        && report.renderMcpEntry.endsWith("/mirafold/dist-server/render-mcp.js"),
+      "packaged render-MCP entry differs",
+    );
+    invariant(report.adapterEnvPresent === true, "packaged adapter omitted the render-MCP child environment");
+    invariant(
+      Array.isArray(report.adapterEnvKeys)
+        && report.adapterEnvKeys.length === 1
+        && report.adapterEnvKeys[0] === "ELECTRON_RUN_AS_NODE",
+      "packaged adapter render-MCP environment keys differ",
+    );
+    invariant(report.initialized === true, "packaged render-MCP did not initialize");
+    invariant(report.tools === 18, "packaged render-MCP tool count differs");
+    invariant(report.hasRenderCard === true, "packaged render-MCP omitted render_card");
+    invariant(report.renderIdValid === true, "packaged render_card ID is invalid");
+    invariant(report.rendererStopped === true, "packaged render-MCP process remained");
+    invariant(report.daemonTreeStopped === true, "packaged MCP probe daemon tree remained");
+    invariant(report.probeRunAsNode === null, "packaged MCP child mode leaked into its parent");
+    invariant(report.daemonRunAsNode === null, "packaged daemon ambient environment kept Electron Node mode");
+    invariant(report.agentRunAsNode === null, "packaged Gemini agent inherited Electron Node mode");
+    invariant(report.ordinaryChildRunAsNode === null, "ordinary daemon child inherited Electron Node mode");
+    return report;
+  } finally {
+    rmSync(probeRoot, { recursive: true, force: true });
+  }
+}
+
 function windowsExecutableProcessCount(executable, spawn) {
   const imageName = path.basename(executable);
   const env = minimalEnvironment(path.dirname(executable));
@@ -556,6 +940,12 @@ export function verifyPackagedPaths({
     expectedShellVersion,
     spawn,
   });
+  const renderMcp = runPackagedMcpProbe({
+    executable,
+    appDirectory,
+    spawn,
+    temporaryDirectory,
+  });
   const daemonLifecycle = runPackagedDaemonProbe({
     executable,
     appDirectory,
@@ -563,7 +953,7 @@ export function verifyPackagedPaths({
     platform,
     temporaryDirectory,
   });
-  return { ...identity, daemonLifecycle };
+  return { ...identity, renderMcp, daemonLifecycle };
 }
 
 export function packagedPaths(platform, outputDirectory) {
