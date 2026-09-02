@@ -32,6 +32,7 @@ test("release notes reject Markdown-equivalent duplicate version rows", () => {
     "- Mirafold **Desktop** `0.1.0`",
     "- **Mirafold Desktop** `0.1.0`",
     "- Mirafold [Desktop](https://example.invalid) `0.1.0`",
+    "- Mira**fold Desktop** `0.1.0`",
   ]) {
     assert.throws(
       () => verifyReleaseNotes(`${exact}\n${duplicate}\n`, "1.2.3", "4.5.6"),
