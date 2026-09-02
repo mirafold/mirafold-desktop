@@ -189,8 +189,12 @@ test("the packaged MCP smoke requires the real initialize/list/call and isolated
   assert.match(calls[0].args[1], /client\.listTools\(\)/);
   assert.match(calls[0].args[1], /client\.callTool/);
   assert.match(calls[0].args[1], /settings\?\.mcpServers\?\.mirafold/);
+  assert.match(calls[0].args[1], /fake-gemini\.exe/);
+  assert.match(calls[0].args[1], /File\.WriteAllText\(report/);
+  assert.doesNotMatch(calls[0].args[1], /where\.exe/);
   assert.equal(calls[0].options.env.ELECTRON_RUN_AS_NODE, "1");
   assert.equal(calls[0].options.env.MIRAFOLD_PROBE_PROJECT, calls[0].options.cwd);
+  assert.equal(calls[0].options.timeout, 480_000);
   assert.equal(report.initialized, true);
   assert.equal(report.adapterEnvPresent, true);
   assert.deepEqual(report.adapterEnvKeys, ["ELECTRON_RUN_AS_NODE"]);

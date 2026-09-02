@@ -16,6 +16,11 @@ const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const MARKER = "MIRAFOLD_PACKAGED_SMOKE=";
 const MCP_MARKER = "MIRAFOLD_PACKAGED_MCP_SMOKE=";
 const DAEMON_MARKER = "MIRAFOLD_PACKAGED_DAEMON_SMOKE=";
+// Native Windows can legitimately consume 120s compiling the fake agent,
+// 120s preparing Desktop's Job wrapper, 60s waiting for the daemon URL, then
+// the bounded WebSocket/MCP probes and process-tree shutdown. Keep this outer
+// kill switch beyond the sum of those inner contracts.
+const MCP_PROBE_TIMEOUT_MS = 480_000;
 function minimalEnvironment(appDirectory, additions = {}) {
   const env = {
     ELECTRON_RUN_AS_NODE: "1",
@@ -166,6 +171,78 @@ function packagedRelative(file, label) {
   invariant(fs.statSync(file).isFile(), label + " is not a file");
   return relative.split(path.sep).join("/");
 }
+function prepareFakeGemini() {
+  if (process.platform !== "win32") {
+    const executable = path.join(project, "fake-gemini");
+    fs.writeFileSync(executable, [
+      "#!/bin/sh",
+      'if [ -n "$ELECTRON_RUN_AS_NODE" ]; then',
+      '  printf present > "$MIRAFOLD_AGENT_ENV_REPORT"',
+      "else",
+      '  printf absent > "$MIRAFOLD_AGENT_ENV_REPORT"',
+      "fi",
+      "exit 64",
+      "",
+    ].join("\n"));
+    fs.chmodSync(executable, 0o700);
+    return executable;
+  }
+
+  // A .cmd file cannot be launched directly by child_process.spawn() without
+  // a shell. Build one tiny native fixture instead, using the Windows
+  // PowerShell/C# toolchain that the packaged daemon already requires for its
+  // Job Object wrapper. The executable ignores Gemini's arguments and records
+  // the environment it actually received from the adapter.
+  const source = path.join(project, "fake-gemini.cs");
+  const executable = path.join(project, "fake-gemini.exe");
+  fs.writeFileSync(source, [
+    "using System;",
+    "using System.IO;",
+    "public static class MirafoldFakeGemini {",
+    "  public static int Main(string[] args) {",
+    '    string report = Environment.GetEnvironmentVariable("MIRAFOLD_AGENT_ENV_REPORT");',
+    "    if (String.IsNullOrEmpty(report)) return 65;",
+    '    string mode = Environment.GetEnvironmentVariable("ELECTRON_RUN_AS_NODE");',
+    '    File.WriteAllText(report, String.IsNullOrEmpty(mode) ? "absent" : "present");',
+    "    return 64;",
+    "  }",
+    "}",
+    "",
+  ].join("\n"));
+  const powershell = path.join(
+    process.env.SystemRoot || "C:\\Windows",
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe",
+  );
+  const compiled = spawnSync(powershell, [
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    "$ErrorActionPreference = 'Stop'; Add-Type -Path $env:MIRAFOLD_FAKE_GEMINI_SOURCE -OutputAssembly $env:MIRAFOLD_FAKE_GEMINI_OUTPUT -OutputType ConsoleApplication",
+  ], {
+    cwd: project,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      MIRAFOLD_FAKE_GEMINI_SOURCE: source,
+      MIRAFOLD_FAKE_GEMINI_OUTPUT: executable,
+    },
+    maxBuffer: 1024 * 1024,
+    shell: false,
+    timeout: 120_000,
+    windowsHide: true,
+  });
+  invariant(!compiled.error, "fake Gemini compilation failed: " + compiled.error?.message);
+  invariant(compiled.signal === null, "fake Gemini compilation ended from " + compiled.signal);
+  invariant(compiled.status === 0,
+    "fake Gemini compilation exited " + compiled.status + ": " + String(compiled.stderr).slice(-2000));
+  return executable;
+}
 function verifyBootstrapAmbient() {
   const probe = path.join(project, "ambient-environment-probe.cjs");
   fs.writeFileSync(probe, [
@@ -233,23 +310,7 @@ function verifyBootstrapAmbient() {
   const { StdioClientTransport } = requireApp("@modelcontextprotocol/sdk/client/stdio.js");
 
   const agentEnvReport = path.join(project, "gemini-agent-environment.txt");
-  let fakeGemini;
-  if (process.platform === "win32") {
-    fakeGemini = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "where.exe");
-  } else {
-    fakeGemini = path.join(project, "fake-gemini");
-    fs.writeFileSync(fakeGemini, [
-      "#!/bin/sh",
-      'if [ -n "$ELECTRON_RUN_AS_NODE" ]; then',
-      '  printf present > "$MIRAFOLD_AGENT_ENV_REPORT"',
-      "else",
-      '  printf absent > "$MIRAFOLD_AGENT_ENV_REPORT"',
-      "fi",
-      "exit 64",
-      "",
-    ].join("\n"));
-    fs.chmodSync(fakeGemini, 0o700);
-  }
+  const fakeGemini = prepareFakeGemini();
   invariant(fs.statSync(fakeGemini).isFile(), "fake Gemini executable is missing");
   process.env.GEMINI_API_KEY = "mirafold-packaged-smoke-no-inference";
   process.env.MIRAFOLD_GEMINI_BIN = fakeGemini;
@@ -366,11 +427,11 @@ function verifyBootstrapAmbient() {
     invariant(stderr.trim() === "", "render-MCP wrote stderr: " + stderr.trim());
     invariant(process.env.ELECTRON_RUN_AS_NODE === undefined, "MCP child mode leaked into the probe environment");
     const ambient = verifyBootstrapAmbient();
-    let agentRunAsNode = ambient.ordinaryChildRunAsNode;
-    if (process.platform !== "win32") {
-      await waitFor(() => fs.existsSync(agentEnvReport), "packaged Gemini agent environment report", 5000);
-      agentRunAsNode = fs.readFileSync(agentEnvReport, "utf8") === "present" ? "present" : null;
-    }
+    await waitFor(() => fs.existsSync(agentEnvReport), "packaged Gemini agent environment report", 5000);
+    const agentEnvironment = fs.readFileSync(agentEnvReport, "utf8");
+    invariant(agentEnvironment === "absent" || agentEnvironment === "present",
+      "packaged Gemini agent environment report is invalid");
+    const agentRunAsNode = agentEnvironment === "present" ? "present" : null;
     invariant(agentRunAsNode === null, "packaged Gemini agent inherited Electron Node mode");
 
     socket.close();
@@ -791,7 +852,7 @@ export function runPackagedMcpProbe({
       env: minimalEnvironment(appDirectory, { MIRAFOLD_PROBE_PROJECT: project }),
       maxBuffer: 4 * 1024 * 1024,
       shell: false,
-      timeout: 90000,
+      timeout: MCP_PROBE_TIMEOUT_MS,
       windowsHide: true,
     });
     assertCredentialSafe(String(result.stdout), "packaged MCP stdout");
