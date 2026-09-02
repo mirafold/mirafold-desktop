@@ -484,8 +484,43 @@ test("remote inspection tolerates tag propagation, peels it, and normalizes rele
   assert.equal(tagRefRequests, 2);
   assert.deepEqual(
     calls.map((call) => call.pathname).sort(),
-    [...responses.keys(), `/git/ref/tags/${candidate.tag}`].sort(),
+    [...responses.keys(), "/git/ref/heads/main", `/git/ref/tags/${candidate.tag}`].sort(),
   );
+});
+
+test("remote inspection rejects main moving while an atomically pushed tag propagates", async () => {
+  const candidate = plan();
+  const competingCommit = "8".repeat(40);
+  let mainRefRequests = 0;
+  let tagRefRequests = 0;
+  const fetchImpl = async (url) => {
+    const pathname = new URL(url).pathname.replace(`/repos/${candidate.repository}`, "");
+    let value;
+    if (pathname === "/git/ref/heads/main") {
+      value = { object: { type: "commit", sha: mainRefRequests++ === 0 ? COMMIT : competingCommit } };
+    } else if (pathname === `/git/commits/${COMMIT}`) {
+      value = {
+        sha: COMMIT,
+        parents: [{ sha: BASE }],
+        tree: { sha: TREE },
+        message: candidate.commitMessage,
+      };
+    } else if (pathname === `/git/ref/tags/${candidate.tag}` && tagRefRequests++ > 0) {
+      value = { object: { type: "commit", sha: COMMIT } };
+    }
+    return {
+      status: value === undefined ? 404 : 200,
+      ok: value !== undefined,
+      json: async () => value,
+    };
+  };
+
+  await assert.rejects(
+    inspectRemoteRelease(candidate, { token: "test-token", fetchImpl, tagRetryDelayMs: 0 }),
+    /remote main moved while the release tag propagated/,
+  );
+  assert.equal(mainRefRequests, 2);
+  assert.equal(tagRefRequests, 2);
 });
 
 test("the writer reconstructs, stages, commits, and tags only the reviewed pair", async (t) => {

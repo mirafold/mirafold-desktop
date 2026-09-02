@@ -442,6 +442,14 @@ export async function inspectRemoteRelease(planValue, {
       await new Promise((resolve) => setTimeout(resolve, tagRetryDelayMs));
       tagRef = await githubRequest(fetchImpl, token, `/git/ref/tags/${encodeURIComponent(plan.tag)}`, "release tag", { missing: true });
     }
+    if (tagRef !== null) {
+      const refreshedMainRef = await githubRequest(fetchImpl, token, `/git/ref/heads/${RELEASE_BRANCH}`, "refreshed main ref");
+      invariant(refreshedMainRef?.object?.type === "commit", "refreshed GitHub main ref does not point to a commit");
+      invariant(
+        gitObject(refreshedMainRef.object.sha, "refreshed GitHub main ref") === main.sha,
+        "remote main moved while the release tag propagated",
+      );
+    }
   }
   let tag = null;
   if (tagRef !== null) {
