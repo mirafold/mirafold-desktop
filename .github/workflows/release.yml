@@ -134,6 +134,12 @@ jobs:
           inputs.fail_platform == matrix.name
         run: node -e "process.exit(1)"
 
+      # Manual releases publish this reviewed file verbatim. Bind its single
+      # included-versions section to the package before dependency code or
+      # native builds.
+      - name: Release notes match included versions
+        run: node scripts/verify-release-notes.mjs
+
       # Same script-free install boundary as CI and Shell intake: lifecycle
       # scripts stay disabled (the packaged tree needs none — Electron 43 has no
       # postinstall, and both native modules ship prebuilt), so what electron-
