@@ -14,8 +14,9 @@ test("manual release prep stages version-bound release notes", () => {
   for (const required of [
     ".github/RELEASE_NOTES.md",
     "## Included versions",
-    "- Mirafold Desktop `x.y.z`",
-    "- Mirafold Shell `x.y.z`",
+    "- Mirafold Desktop `DESKTOP_VERSION`",
+    "- Mirafold Shell `BUNDLED_SHELL_VERSION`",
+    "dependencies.mirafold",
     "git add .github/RELEASE_NOTES.md package.json package-lock.json",
   ]) {
     assert.ok(prep.includes(required), `manual release prep is missing: ${required}`);

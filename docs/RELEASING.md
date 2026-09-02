@@ -156,13 +156,18 @@ for the one-time bridge release.
    manufactured six conflicts during the `0.3.0` release even though direct
    tree comparison proved the only content difference was the reviewed feature.
 3. **Write the release notes and bump the Desktop version.** Replace
-   `.github/RELEASE_NOTES.md` with notes for this release, including these
-   exact lines under `## Included versions`:
+   `.github/RELEASE_NOTES.md` with notes for this release, beginning with these
+   exact lines after replacing the two distinct placeholders:
 
    ```text
-   - Mirafold Desktop `x.y.z`
-   - Mirafold Shell `x.y.z`
+   ## Included versions
+
+   - Mirafold Desktop `DESKTOP_VERSION`
+   - Mirafold Shell `BUNDLED_SHELL_VERSION`
    ```
+
+   `BUNDLED_SHELL_VERSION` is the `dependencies.mirafold` value from
+   `package.json`; it is independent of the Desktop version.
 
    Then bump the Desktop version in `package.json` and `package-lock.json`,
    stage the three release-specific files, verify the complete staged patch,
