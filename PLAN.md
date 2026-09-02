@@ -826,6 +826,51 @@ tag, release, or external state change belongs to this Phase.
   access. No dependency, package version, daemon/Shell behavior, security
   boundary, release setting, tag, deployment, or external state changed.
 
+### Phase 12 — packaged Desktop render-MCP hotfix
+
+Started 2026-09-01 from the hotfix specification in `HANDOFF.md`. The installed
+Desktop 0.3.9 / Shell 0.8.1 artifact was reproduced before editing: its real
+Gemini adapter generated `/opt/Mirafold/mirafold` plus the bundled
+`dist-server/render-mcp.js` with no child environment, and the MCP connection
+closed before initialize while Electron attempted graphical startup. A
+one-variable control giving only that child `ELECTRON_RUN_AS_NODE=1`
+initialized, listed exactly 18 tools, called `render_card` with a valid ID,
+and closed cleanly. Both renderer and daemon trees were reaped.
+
+**Boundary:** Shell owns the executable correction on an isolated branch and
+Desktop remains a thin consumer of the exact published package. Desktop may
+modify only `scripts/packaged-smoke.mjs`, its focused test, and this plan before
+normal automated intake changes the two version manifests. Do not modify
+Desktop runtime code, vendor Shell, weaken Codex's required MCP, or let
+Electron Node mode enter the daemon, agent, command, or ordinary-child ambient
+environment. This work remains separate from Shell's cleanup PR.
+
+- [ ] **Step 12.1 — release and accept the packaged renderer correction.** Add
+  a native-package regression that reaches the real bundled Shell adapter,
+  reads its engine-native child environment, and runs real MCP
+  initialize/list/call/close through the packaged Electron executable. It must
+  prove the override contains only `ELECTRON_RUN_AS_NODE`, exactly 18 tools and
+  `render_card` work, all ambient environments remain scrubbed, and renderer,
+  agent, and daemon processes leave no orphan. Release the independently
+  reviewed Shell patch, let automatic Desktop intake consume the exact public
+  package and advance Desktop one patch, run Linux and Windows package gates,
+  then install the public Desktop artifact and complete the real-engine and
+  normal-package acceptance contract from `HANDOFF.md`.
+
+  **Progress 2026-09-01:** Shell PR #91 is one signed-off hotfix commit over
+  current Shell `next`; local Shell gates pass 1,117 unit, 161 integration, 130
+  browser end-to-end, and 11 managed/visual tests. Desktop's regression is
+  implemented on isolated branch `fix/packaged-render-mcp-smoke`; the full
+  Desktop suite passes 201 active tests with only the native-Windows-on-Linux
+  skip. A disposable Desktop package containing the local Shell tarball passes
+  the complete existing package smoke plus real MCP proof, with only the one
+  child key present and every cleanup/ambient assertion true. This disposable
+  package is verification only and changed no Desktop dependency manifest.
+  Remaining: approve and merge Shell PR #91, publish the Shell patch, consume
+  its exact registry artifact through automated Desktop intake, land this
+  regression against that pin, run native Windows CI, and complete installed
+  public-artifact acceptance.
+
 ### Audit and test-audit pass — 2026-08-14
 
 Completed 2026-08-14, on this same branch. A full security audit found one
