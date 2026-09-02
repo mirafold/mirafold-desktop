@@ -98,6 +98,21 @@ test("tag identity and stable-channel policy are checked before dependency code"
   assert.ok(identity !== -1 && install !== -1 && identity < install);
 });
 
+test("manual release notes bind the included versions before dependency code", () => {
+  const build = job("build");
+  const gate = build.indexOf("Release notes match included versions");
+  const install = build.indexOf("npm install --global npm@12.0.2");
+  assert.ok(gate !== -1 && gate < install, "release notes must be checked before dependency code");
+  for (const fragment of [
+    'DESKTOP_VERSION="$(node -p "require(\'./package.json\').version")"',
+    'SHELL_VERSION="$(node -p "require(\'./package.json\').dependencies.mirafold")"',
+    '"- Mirafold Desktop \\`$DESKTOP_VERSION\\`" .github/RELEASE_NOTES.md',
+    '"- Mirafold Shell \\`$SHELL_VERSION\\`" .github/RELEASE_NOTES.md',
+  ]) {
+    assert.ok(build.includes(fragment), `release-notes gate is missing: ${fragment}`);
+  }
+});
+
 test("only the release job may write repository contents", () => {
   const release = job("release");
   assert.match(release, /permissions:\s*\n\s+contents: write/);
