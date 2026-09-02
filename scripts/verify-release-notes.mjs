@@ -26,7 +26,8 @@ export function verifyReleaseNotes(notes, desktopVersion, shellVersion) {
   for (const [product, version] of [["Desktop", desktopVersion], ["Shell", shellVersion]]) {
     invariant(typeof version === "string" && version.length > 0, `Mirafold ${product} version is missing`);
     const prefix = `- Mirafold ${product} `;
-    const rows = lines.filter((line) => line.startsWith(prefix));
+    const declaration = new RegExp(`Mirafold ${product}[\\t ]+` + "`");
+    const rows = lines.filter((line) => declaration.test(line));
     const expected = `${prefix}\`${version}\``;
     invariant(rows.length === 1, `release notes must contain exactly one Mirafold ${product} row`);
     invariant(rows[0] === expected, `release notes must contain exactly: ${expected}`);
