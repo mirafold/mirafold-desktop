@@ -134,17 +134,11 @@ jobs:
           inputs.fail_platform == matrix.name
         run: node -e "process.exit(1)"
 
-      # Manual releases publish this reviewed file verbatim. Bind its explicit
-      # version header to the package before dependency code or native builds.
+      # Manual releases publish this reviewed file verbatim. Bind its single
+      # included-versions section to the package before dependency code or
+      # native builds.
       - name: Release notes match included versions
-        run: |
-          set -euo pipefail
-          DESKTOP_VERSION="$(node -p "require('./package.json').version")"
-          SHELL_VERSION="$(node -p "require('./package.json').dependencies.mirafold")"
-          grep --fixed-strings --line-regexp -- \
-            "- Mirafold Desktop \`$DESKTOP_VERSION\`" .github/RELEASE_NOTES.md
-          grep --fixed-strings --line-regexp -- \
-            "- Mirafold Shell \`$SHELL_VERSION\`" .github/RELEASE_NOTES.md
+        run: node scripts/verify-release-notes.mjs
 
       # Same script-free install boundary as CI and Shell intake: lifecycle
       # scripts stay disabled (the packaged tree needs none — Electron 43 has no

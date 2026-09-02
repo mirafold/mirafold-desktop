@@ -103,14 +103,7 @@ test("manual release notes bind the included versions before dependency code", (
   const gate = build.indexOf("Release notes match included versions");
   const install = build.indexOf("npm install --global npm@12.0.2");
   assert.ok(gate !== -1 && gate < install, "release notes must be checked before dependency code");
-  for (const fragment of [
-    'DESKTOP_VERSION="$(node -p "require(\'./package.json\').version")"',
-    'SHELL_VERSION="$(node -p "require(\'./package.json\').dependencies.mirafold")"',
-    '"- Mirafold Desktop \\`$DESKTOP_VERSION\\`" .github/RELEASE_NOTES.md',
-    '"- Mirafold Shell \\`$SHELL_VERSION\\`" .github/RELEASE_NOTES.md',
-  ]) {
-    assert.ok(build.includes(fragment), `release-notes gate is missing: ${fragment}`);
-  }
+  assert.match(build, /run: node scripts\/verify-release-notes\.mjs/);
 });
 
 test("only the release job may write repository contents", () => {
