@@ -7,6 +7,22 @@ const releasing = readFileSync(
   "utf8",
 );
 
+test("manual release prep stages version-bound release notes", () => {
+  const prep = releasing.match(/3\. \*\*Write the release notes[\s\S]*?(?=\n4\. )/)?.[0];
+
+  assert.ok(prep, "manual release-note preparation is missing");
+  for (const required of [
+    ".github/RELEASE_NOTES.md",
+    "## Included versions",
+    "- Mirafold Desktop `DESKTOP_VERSION`",
+    "- Mirafold Shell `BUNDLED_SHELL_VERSION`",
+    "dependencies.mirafold",
+    "git add .github/RELEASE_NOTES.md package.json package-lock.json",
+  ]) {
+    assert.ok(prep.includes(required), `manual release prep is missing: ${required}`);
+  }
+});
+
 test("the release closeout reconstructs production as one signed-off next commit", () => {
   const closeout = releasing.match(
     /8\. \*\*Close the loop[\s\S]*?(?=\n9\. )/,

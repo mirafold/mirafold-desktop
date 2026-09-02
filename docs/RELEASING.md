@@ -155,13 +155,29 @@ for the one-time bridge release.
    so equivalent prior content has different commit ancestry. A normal merge
    manufactured six conflicts during the `0.3.0` release even though direct
    tree comparison proved the only content difference was the reviewed feature.
-3. **Bump the Desktop version** in `package.json` and `package-lock.json`, stage
-   those two release-specific changes, verify the complete staged patch, and
-   create one signed-off release commit:
+3. **Write the release notes and bump the Desktop version.** Replace
+   `.github/RELEASE_NOTES.md` with notes for this release, beginning with these
+   exact lines after replacing the two distinct placeholders:
+
+   ```text
+   ## Included versions
+
+   - Mirafold Desktop `DESKTOP_VERSION`
+   - Mirafold Shell `BUNDLED_SHELL_VERSION`
+   ```
+
+   `BUNDLED_SHELL_VERSION` is the `dependencies.mirafold` value from
+   `package.json`; it is independent of the Desktop version.
+   After this block, call the products `Desktop` or `Shell`; the `Mirafold`
+   name is reserved here so a repeated version declaration fails closed.
+
+   Then bump the Desktop version in `package.json` and `package-lock.json`,
+   stage the three release-specific files, verify the complete staged patch,
+   and create one signed-off release commit:
 
    ```
    npm version x.y.z --no-git-tag-version
-   git add package.json package-lock.json
+   git add .github/RELEASE_NOTES.md package.json package-lock.json
    git diff --cached --check
    git commit -s -m "release: vx.y.z"
    ```
