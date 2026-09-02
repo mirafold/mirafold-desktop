@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   packagedPaths,
   runPackagedDaemonProbe,
+  runPackagedMcpProbe,
   runPackagedNodeProbe,
 } from "../scripts/packaged-smoke.mjs";
 
@@ -34,6 +35,25 @@ function daemonSmokeText() {
     unreachableAfterStop: true,
     crashReported: false,
     windowsCrashTreeStopped: true,
+  })}\n`;
+}
+
+function mcpSmokeText(overrides = {}) {
+  return `MIRAFOLD_PACKAGED_MCP_SMOKE=${JSON.stringify({
+    renderMcpEntry: "node_modules/mirafold/dist-server/render-mcp.js",
+    adapterEnvPresent: true,
+    adapterEnvKeys: ["ELECTRON_RUN_AS_NODE"],
+    initialized: true,
+    tools: 18,
+    hasRenderCard: true,
+    renderIdValid: true,
+    rendererStopped: true,
+    daemonTreeStopped: true,
+    probeRunAsNode: null,
+    daemonRunAsNode: null,
+    agentRunAsNode: null,
+    ordinaryChildRunAsNode: null,
+    ...overrides,
   })}\n`;
 }
 
@@ -147,6 +167,83 @@ test("the smoke check refuses a packaged Shell other than the reviewed pin", (t)
       expectedShellVersion: "0.3.7",
     }),
     /packaged Shell 0\.3\.8 != 0\.3\.7/,
+  );
+});
+
+test("the packaged MCP smoke requires the real initialize/list/call and isolated-child report", (t) => {
+  const { root, app } = fixture(t);
+  const calls = [];
+  const report = runPackagedMcpProbe({
+    executable: process.execPath,
+    appDirectory: app,
+    temporaryDirectory: root,
+    spawn(command, args, options) {
+      calls.push({ command, args, options });
+      return { error: null, signal: null, status: 0, stderr: "", stdout: mcpSmokeText() };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, process.execPath);
+  assert.equal(calls[0].args[0], "--eval");
+  assert.match(calls[0].args[1], /client\.listTools\(\)/);
+  assert.match(calls[0].args[1], /client\.callTool/);
+  assert.match(calls[0].args[1], /settings\?\.mcpServers\?\.mirafold/);
+  assert.match(calls[0].args[1], /fake-gemini\.exe/);
+  assert.match(calls[0].args[1], /File\.WriteAllText\(report/);
+  assert.doesNotMatch(calls[0].args[1], /where\.exe/);
+  assert.equal(calls[0].options.env.ELECTRON_RUN_AS_NODE, "1");
+  assert.equal(calls[0].options.env.MIRAFOLD_PROBE_PROJECT, calls[0].options.cwd);
+  assert.equal(calls[0].options.timeout, 480_000);
+  assert.equal(report.initialized, true);
+  assert.equal(report.adapterEnvPresent, true);
+  assert.deepEqual(report.adapterEnvKeys, ["ELECTRON_RUN_AS_NODE"]);
+  assert.equal(report.tools, 18);
+  assert.equal(report.hasRenderCard, true);
+  assert.equal(report.renderIdValid, true);
+  assert.equal(report.rendererStopped, true);
+  assert.equal(report.daemonTreeStopped, true);
+  assert.equal(report.probeRunAsNode, null);
+  assert.equal(report.daemonRunAsNode, null);
+  assert.equal(report.agentRunAsNode, null);
+  assert.equal(report.ordinaryChildRunAsNode, null);
+});
+
+test("the packaged MCP smoke rejects a renderer that does not advertise exactly 18 tools", (t) => {
+  const { root, app } = fixture(t);
+  assert.throws(
+    () => runPackagedMcpProbe({
+      executable: process.execPath,
+      appDirectory: app,
+      temporaryDirectory: root,
+      spawn: () => ({
+        error: null,
+        signal: null,
+        status: 0,
+        stderr: "",
+        stdout: mcpSmokeText({ tools: 17 }),
+      }),
+    }),
+    /packaged render-MCP tool count differs/,
+  );
+});
+
+test("the packaged MCP smoke rejects any adapter environment beyond Electron child mode", (t) => {
+  const { root, app } = fixture(t);
+  assert.throws(
+    () => runPackagedMcpProbe({
+      executable: process.execPath,
+      appDirectory: app,
+      temporaryDirectory: root,
+      spawn: () => ({
+        error: null,
+        signal: null,
+        status: 0,
+        stderr: "",
+        stdout: mcpSmokeText({ adapterEnvKeys: ["ELECTRON_RUN_AS_NODE", "UNEXPECTED"] }),
+      }),
+    }),
+    /packaged adapter render-MCP environment keys differ/,
   );
 });
 
