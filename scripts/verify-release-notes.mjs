@@ -29,10 +29,10 @@ export function verifyReleaseNotes(notes, desktopVersion, shellVersion) {
 
   const headings = lines.flatMap((line, index) => INCLUDED_VERSIONS_RE.test(line) ? [index] : []);
   invariant(headings.length === 1, `release notes must contain exactly one ${INCLUDED_VERSIONS} heading`);
-  const normalizedRemainder = text.slice(expectedStart.length).replace(/[^A-Za-z0-9.]/g, "");
+  const normalizedRemainder = text.slice(expectedStart.length).replace(/[^A-Za-z]/g, "");
   invariant(
-    !/Mirafold(?:Desktop|Shell).*\d+\.\d+\.\d+/.test(normalizedRemainder),
-    `release notes must declare Mirafold versions only in the leading ${INCLUDED_VERSIONS} block`,
+    !normalizedRemainder.includes("Mirafold"),
+    `release notes must reserve the Mirafold name for the leading ${INCLUDED_VERSIONS} block`,
   );
 }
 

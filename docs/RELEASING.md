@@ -168,6 +168,8 @@ for the one-time bridge release.
 
    `BUNDLED_SHELL_VERSION` is the `dependencies.mirafold` value from
    `package.json`; it is independent of the Desktop version.
+   After this block, call the products `Desktop` or `Shell`; the `Mirafold`
+   name is reserved here so a repeated version declaration fails closed.
 
    Then bump the Desktop version in `package.json` and `package-lock.json`,
    stage the three release-specific files, verify the complete staged patch,

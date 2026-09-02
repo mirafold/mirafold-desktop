@@ -20,7 +20,7 @@ test("release notes reject contradictory version rows", () => {
   const contradictory = `${exact}\n- Mirafold Desktop \`0.1.0\`\n`;
   assert.throws(
     () => verifyReleaseNotes(contradictory, "1.2.3", "4.5.6"),
-    /must declare Mirafold versions only in the leading ## Included versions block/,
+    /must reserve the Mirafold name for the leading ## Included versions block/,
   );
 });
 
@@ -34,10 +34,11 @@ test("release notes reject Markdown-equivalent duplicate version rows", () => {
     "- Mirafold [Desktop](https://example.invalid) `0.1.0`",
     "- Mira**fold Desktop** `0.1.0`",
     "- Mirafold Desktop\n  `0.1.0`",
+    "- [Mirafold](https://example.invalid) Desktop `0.1.0`",
   ]) {
     assert.throws(
       () => verifyReleaseNotes(`${exact}\n${duplicate}\n`, "1.2.3", "4.5.6"),
-      /must declare Mirafold versions only in the leading ## Included versions block/,
+      /must reserve the Mirafold name for the leading ## Included versions block/,
     );
   }
 });
