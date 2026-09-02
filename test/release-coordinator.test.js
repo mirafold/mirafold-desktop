@@ -416,7 +416,7 @@ test("stale main, competing candidates, and tag collisions fail closed", () => {
   );
 });
 
-test("remote inspection peels the annotated tag and normalizes GitHub release state", async () => {
+test("remote inspection tolerates tag propagation, peels it, and normalizes release state", async () => {
   const candidate = plan();
   const tagObject = "9".repeat(40);
   const responses = new Map([
@@ -455,17 +455,24 @@ test("remote inspection peels the annotated tag and normalizes GitHub release st
     }],
   ]);
   const calls = [];
+  let tagRefRequests = 0;
   const fetchImpl = async (url, options) => {
     const pathname = new URL(url).pathname.replace(`/repos/${candidate.repository}`, "");
     calls.push({ pathname, authorization: options.headers.Authorization });
-    const value = responses.get(pathname);
+    const tagIsStillPropagating = pathname === `/git/ref/tags/${candidate.tag}`
+      && tagRefRequests++ === 0;
+    const value = tagIsStillPropagating ? undefined : responses.get(pathname);
     return {
       status: value === undefined ? 404 : 200,
       ok: value !== undefined,
       json: async () => value,
     };
   };
-  const state = await inspectRemoteRelease(candidate, { token: "test-token", fetchImpl });
+  const state = await inspectRemoteRelease(candidate, {
+    token: "test-token",
+    fetchImpl,
+    tagRetryDelayMs: 0,
+  });
   assert.deepEqual(state.tag, { annotated: true, commit: COMMIT });
   assert.deepEqual(state.main, candidateMain());
   assert.deepEqual(state.release, remoteRelease(candidate, { isDraft: false }));
@@ -474,7 +481,11 @@ test("remote inspection peels the annotated tag and normalizes GitHub release st
     { mode: "complete", releaseCommit: COMMIT },
   );
   assert.ok(calls.every((call) => call.authorization === "Bearer test-token"));
-  assert.deepEqual(calls.map((call) => call.pathname).sort(), [...responses.keys()].sort());
+  assert.equal(tagRefRequests, 2);
+  assert.deepEqual(
+    calls.map((call) => call.pathname).sort(),
+    [...responses.keys(), `/git/ref/tags/${candidate.tag}`].sort(),
+  );
 });
 
 test("the writer reconstructs, stages, commits, and tags only the reviewed pair", async (t) => {

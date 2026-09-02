@@ -38,6 +38,8 @@ const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const GIT_OBJECT = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const PLAN_LIMIT = 1024 * 1024;
+const REMOTE_TAG_ATTEMPTS = 4;
+const REMOTE_TAG_RETRY_MS = 1000;
 
 function gitObject(value, label) {
   invariant(typeof value === "string" && GIT_OBJECT.test(value), `${label} must be a 40-hex Git object`);
@@ -413,10 +415,12 @@ function normalizeRelease(value) {
 export async function inspectRemoteRelease(planValue, {
   token,
   fetchImpl = globalThis.fetch,
+  tagRetryDelayMs = REMOTE_TAG_RETRY_MS,
 } = {}) {
   const plan = validateReleasePlan(planValue);
   invariant(typeof token === "string" && token.length > 0, "GH_TOKEN is required for remote release inspection");
   invariant(typeof fetchImpl === "function", "a fetch implementation is required");
+  invariant(Number.isSafeInteger(tagRetryDelayMs) && tagRetryDelayMs >= 0, "tag retry delay is invalid");
 
   const mainRef = await githubRequest(fetchImpl, token, `/git/ref/heads/${RELEASE_BRANCH}`, "main ref");
   const mainSha = gitObject(mainRef?.object?.sha, "GitHub main ref");
@@ -431,7 +435,14 @@ export async function inspectRemoteRelease(planValue, {
     message: mainCommit.message,
   };
 
-  const tagRef = await githubRequest(fetchImpl, token, `/git/ref/tags/${encodeURIComponent(plan.tag)}`, "release tag", { missing: true });
+  let tagRef = await githubRequest(fetchImpl, token, `/git/ref/tags/${encodeURIComponent(plan.tag)}`, "release tag", { missing: true });
+  if (tagRef === null && main.sha !== plan.baseCommit) {
+    assertCandidateCommit(plan, main);
+    for (let attempt = 1; attempt < REMOTE_TAG_ATTEMPTS && tagRef === null; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, tagRetryDelayMs));
+      tagRef = await githubRequest(fetchImpl, token, `/git/ref/tags/${encodeURIComponent(plan.tag)}`, "release tag", { missing: true });
+    }
+  }
   let tag = null;
   if (tagRef !== null) {
     let object = tagRef.object;
