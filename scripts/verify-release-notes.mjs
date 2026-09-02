@@ -6,29 +6,34 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INCLUDED_VERSIONS = "## Included versions";
+const INCLUDED_VERSIONS_RE = /^ {0,3}##[\t ]+Included versions(?:[\t ]+#+)?[\t ]*$/;
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
 }
 
 export function verifyReleaseNotes(notes, desktopVersion, shellVersion) {
-  const lines = String(notes).replace(/\r\n?/g, "\n").split("\n");
-  const headings = lines.flatMap((line, index) => line === INCLUDED_VERSIONS ? [index] : []);
-  invariant(headings.length === 1, `release notes must contain exactly one ${INCLUDED_VERSIONS} heading`);
-
-  const start = headings[0] + 1;
-  const nextHeading = lines.findIndex((line, index) => index >= start && line.startsWith("## "));
-  const section = lines.slice(start, nextHeading === -1 ? lines.length : nextHeading);
-
-  for (const [product, version] of [["Desktop", desktopVersion], ["Shell", shellVersion]]) {
+  const text = String(notes).replace(/\r\n?/g, "\n");
+  const lines = text.split("\n");
+  const versions = [["Desktop", desktopVersion], ["Shell", shellVersion]];
+  for (const [product, version] of versions) {
     invariant(typeof version === "string" && version.length > 0, `Mirafold ${product} version is missing`);
-    const prefix = `- Mirafold ${product} `;
-    const rows = lines.filter((line) => line.startsWith(prefix));
-    const expected = `${prefix}\`${version}\``;
-    invariant(rows.length === 1, `release notes must contain exactly one Mirafold ${product} row`);
-    invariant(rows[0] === expected, `release notes must contain exactly: ${expected}`);
-    invariant(section.includes(expected), `${expected} must be inside ${INCLUDED_VERSIONS}`);
   }
+
+  const expectedRows = versions.map(([product, version]) => `- Mirafold ${product} \`${version}\``);
+  const expectedStart = [INCLUDED_VERSIONS, "", ...expectedRows, ""].join("\n");
+  invariant(
+    text.startsWith(expectedStart),
+    `release notes must begin with the exact ${INCLUDED_VERSIONS} block`,
+  );
+
+  const headings = lines.flatMap((line, index) => INCLUDED_VERSIONS_RE.test(line) ? [index] : []);
+  invariant(headings.length === 1, `release notes must contain exactly one ${INCLUDED_VERSIONS} heading`);
+  const normalizedRemainder = text.slice(expectedStart.length).replace(/[^A-Za-z]/g, "");
+  invariant(
+    !normalizedRemainder.includes("Mirafold"),
+    `release notes must reserve the Mirafold name for the leading ${INCLUDED_VERSIONS} block`,
+  );
 }
 
 function main(args) {
