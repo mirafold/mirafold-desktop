@@ -6,14 +6,14 @@
 // package; this process starts it, points a window at it, and cleans up after
 // it.
 //
-// What this app deliberately is NOT: an integration. There is no preload
-// script, no IPC channel, and no Node access in the page. The window loads the
-// same HTTP page a browser would, over loopback, as an ordinary web page — so
-// the shell's entire security model (its Content-Security-Policy, its
-// per-launch auth token, its Origin guard) stays exactly as true here as it is
-// in Chrome. Adding a bridge would mean re-auditing all of it. The native parts
-// a desktop app owes you — a real folder picker, a menu, a crash dialog — live
-// out here in the main process, where they need no bridge at all.
+// What this app deliberately does NOT add is a renderer bridge. There is no
+// preload script, no IPC channel, and no Node access in the page. The window
+// loads the same HTTP page a browser would, over loopback, as an ordinary web
+// page — so the shell's entire security model (its Content-Security-Policy,
+// its per-launch auth token, its Origin guard) stays exactly as true here as it
+// is in Chrome. Adding a bridge would mean re-auditing all of it. The native
+// parts a desktop app owes you — a real folder picker, a menu, a crash dialog —
+// live out here in the main process, where they need no bridge at all.
 
 import {
   app,
@@ -21,6 +21,7 @@ import {
   BrowserWindow,
   dialog,
   Menu,
+  safeStorage,
   shell,
 } from "electron";
 import { existsSync, readFileSync } from "node:fs";
@@ -35,9 +36,16 @@ import {
   DEFAULT_INTERFACE_SCALE,
   interfaceScaleShortcut,
 } from "./interface-scale.js";
-import { daemonOriginFromUrl, navigationVerdict, popupVerdict } from "./navigation.js";
+import {
+  daemonOriginFromUrl,
+  isDesktopActivationRequest,
+  navigationVerdict,
+  popupVerdict,
+} from "./navigation.js";
 import { installPermissionGuards } from "./permissions.js";
 import { createSafeAppImageUpdater, createSafeNsisUpdater } from "./platform-updaters.js";
+import { createProActivationController } from "./pro-activation.js";
+import { createProStore, PRO_STORE_VERSION } from "./pro-store.js";
 import {
   interfaceScale as savedInterfaceScale,
   lastFolder,
@@ -65,6 +73,16 @@ let bootSeq = 0;
 let folderChangePromise = null;
 let desktopUpdater = null;
 let interfaceScaleController = null;
+let proStore = null;
+let proActivation = null;
+let proLicenseKey;
+let proRetryKey;
+let proPendingFlow = false;
+let proActionPromise = null;
+let proActivationUrl = null;
+let proProgress = null;
+
+const PRO_LICENSE_KEY_RE = /^mf_[a-z2-7]{20,40}$/;
 
 /**
  * Start a Promise-returning Electron action from a synchronous event handler.
@@ -88,6 +106,306 @@ function safeErrorDetail(error) {
   const message = redactCredentials(String(error?.message ?? error ?? "")).slice(-2000);
   const stderr = redactCredentials(String(error?.stderr ?? "")).slice(-2000);
   return [message, "", stderr].join("\n").trim();
+}
+
+function updateWindowTitle() {
+  if (!win || win.isDestroyed()) return;
+  if (proProgress !== null) {
+    win.setTitle(`Mirafold — ${proProgress}`);
+    return;
+  }
+  win.setTitle(folder ? `Mirafold — ${path.basename(folder)}` : "Mirafold");
+}
+
+function setProProgress(message) {
+  proProgress = message;
+  updateWindowTitle();
+}
+
+function proFailureCopy(kind, error) {
+  let code = null;
+  try {
+    if (typeof error?.code === "string") code = error.code;
+  } catch {
+    // Untrusted errors never contribute text to a native activation dialog.
+  }
+  if (kind === "preflight") {
+    return {
+      message: "Secure storage is required before Mirafold Pro can open checkout.",
+      detail: "Unlock a supported system Secret Service or KWallet, then try again. Your local Mirafold session is still available.",
+    };
+  }
+  if (kind === "store") {
+    return {
+      message: "Mirafold Pro could not be saved safely on this device.",
+      detail: "Your current session is unchanged. Try the secure save again before starting another purchase.",
+    };
+  }
+  if (kind === "startup") {
+    return {
+      message: "Saved Mirafold Pro state could not be opened safely.",
+      detail: "Mirafold started with local sessions only. Its saved Pro state was left unchanged.",
+    };
+  }
+  const detail = code === "timeout" || code === "expired"
+    ? "The private browser handoff expired. Open Pro activation from Mirafold again."
+    : code === "browser"
+      ? "The activation page could not be opened in the system browser."
+      : code === "port-unavailable"
+        ? "The saved private callback port is in use. Close the other listener, then reopen Mirafold."
+        : "The private browser handoff did not complete. Your local Mirafold session is unchanged.";
+  return {
+    message: "Mirafold Pro activation was not completed.",
+    detail,
+  };
+}
+
+async function showProFailure(kind, error, retryable = false) {
+  setProProgress(null);
+  if (quitting || !win) return false;
+  const copy = proFailureCopy(kind, error);
+  try {
+    const { response } = await showMessage({
+      type: "error",
+      title: "Mirafold Pro couldn't connect",
+      message: copy.message,
+      detail: copy.detail,
+      buttons: retryable ? ["Try again", "Later"] : ["OK"],
+      defaultId: 0,
+      cancelId: retryable ? 1 : 0,
+    });
+    return retryable && response === 0;
+  } catch {
+    console.error("Mirafold could not show its Pro activation failure dialog.");
+    return false;
+  }
+}
+
+async function showProSuccess() {
+  setProProgress(null);
+  if (quitting || !win) return;
+  try {
+    await showMessage({
+      type: "info",
+      title: "Mirafold Pro connected",
+      message: "Mirafold Pro is connected on this device.",
+      detail: "Mirafold restarted securely. Open Pair in Mirafold to connect your phone.",
+      buttons: ["OK"],
+      defaultId: 0,
+    });
+  } catch {
+    console.error("Mirafold could not show its Pro activation success dialog.");
+  }
+}
+
+function trackProAction(action) {
+  if (proActionPromise) return proActionPromise;
+  let tracked;
+  tracked = Promise.resolve()
+    .then(action)
+    .finally(() => {
+      if (proActionPromise === tracked) proActionPromise = null;
+      setProProgress(null);
+    });
+  proActionPromise = tracked;
+  return tracked;
+}
+
+async function initializeProSupport() {
+  if (process.platform !== "linux") return { pending: false, error: null };
+  try {
+    proStore = createProStore({
+      safeStorage,
+      userDataPath: app.getPath("userData"),
+    });
+    proActivation = createProActivationController({
+      store: proStore,
+      openBrowser: (url) => shell.openExternal(url),
+    });
+  } catch (error) {
+    proStore = null;
+    proActivation = null;
+    return { pending: false, error };
+  }
+
+  try {
+    const inspection = await proStore.inspect();
+    if (inspection?.present !== true) return { pending: false, error: null };
+    let state = await proStore.load();
+    if (state?.licenseKey !== undefined) {
+      if (!PRO_LICENSE_KEY_RE.test(state.licenseKey)) throw new Error("invalid Pro state");
+      proLicenseKey = state.licenseKey;
+    }
+    const pending = Object.hasOwn(state ?? {}, "pending");
+    proPendingFlow = pending;
+    state = null;
+    return { pending, error: null };
+  } catch (error) {
+    return { pending: false, error };
+  }
+}
+
+async function refreshProPendingState() {
+  if (!proStore) return proPendingFlow;
+  try {
+    let state = await proStore.load();
+    proPendingFlow = Object.hasOwn(state ?? {}, "pending");
+    state = null;
+  } catch {
+    // Retain the last known state. A fixed UI message owns the visible error.
+  }
+  return proPendingFlow;
+}
+
+async function persistActivatedKey(key) {
+  if (!proStore || !PRO_LICENSE_KEY_RE.test(key)) {
+    await showProFailure("activation", null);
+    return false;
+  }
+  proRetryKey = key;
+
+  while (!quitting && win) {
+    setProProgress("Saving Pro access securely…");
+    try {
+      await proStore.save({ version: PRO_STORE_VERSION, licenseKey: key });
+    } catch {
+      // A post-rename durability error may still have committed the exact key.
+      // The readback below is the authority before any retry or daemon restart.
+    }
+
+    let confirmed = false;
+    try {
+      const stored = await proStore.load();
+      confirmed = stored?.version === PRO_STORE_VERSION
+        && stored.licenseKey === key
+        && !Object.hasOwn(stored, "pending");
+    } catch {
+      // Report only the fixed native storage message below.
+    }
+    if (confirmed) break;
+    if (!(await showProFailure("store", null, true))) return false;
+  }
+
+  if (quitting || !win) return false;
+  proLicenseKey = key;
+  proRetryKey = undefined;
+  proPendingFlow = false;
+  key = undefined;
+  setProProgress("Restarting with Pro access…");
+  const restarted = await restartDaemonForPro();
+  if (restarted !== true) return false;
+  await showProSuccess();
+  return true;
+}
+
+async function reopenProActivationPage(url) {
+  if (typeof url !== "string" || url.length === 0) {
+    await showProFailure("activation", null);
+    return false;
+  }
+  try {
+    await shell.openExternal(url);
+    return true;
+  } catch {
+    await showProFailure("activation", { code: "browser" });
+    if (proActionPromise && proActivationUrl === url) {
+      setProProgress("Finish Pro activation in your browser");
+    }
+    return false;
+  }
+}
+
+async function finishProActivation(handle) {
+  const activationUrl = typeof handle?.activationUrl === "string"
+    ? handle.activationUrl
+    : null;
+  proActivationUrl = activationUrl;
+  setProProgress("Finish Pro activation in your browser");
+  let key;
+  try {
+    key = await handle.result;
+  } catch (error) {
+    if (proActivationUrl === activationUrl) proActivationUrl = null;
+    await refreshProPendingState();
+    if (!quitting) await showProFailure("activation", error);
+    return false;
+  }
+  if (proActivationUrl === activationUrl) proActivationUrl = null;
+  return persistActivatedKey(key);
+}
+
+function beginProActivation() {
+  if (proActionPromise) {
+    return proActivationUrl === null
+      ? proActionPromise
+      : reopenProActivationPage(proActivationUrl);
+  }
+  return trackProAction(async () => {
+    if (!proStore || !proActivation) {
+      await showProFailure("preflight", null);
+      return false;
+    }
+    if (proRetryKey !== undefined) return persistActivatedKey(proRetryKey);
+
+    setProProgress("Preparing Pro activation…");
+    try {
+      await proStore.preflight();
+    } catch (error) {
+      await showProFailure("preflight", error);
+      return false;
+    }
+
+    const resuming = proPendingFlow;
+    let handle;
+    try {
+      handle = proPendingFlow
+        ? await proActivation.resume()
+        : await proActivation.start();
+    } catch (error) {
+      await refreshProPendingState();
+      await showProFailure("activation", error);
+      return false;
+    }
+    if (!handle) {
+      proPendingFlow = false;
+      try {
+        handle = await proActivation.start();
+      } catch (error) {
+        await refreshProPendingState();
+        await showProFailure("activation", error);
+        return false;
+      }
+    }
+    proPendingFlow = true;
+    if (resuming) {
+      const activationUrl = typeof handle?.activationUrl === "string"
+        ? handle.activationUrl
+        : null;
+      proActivationUrl = activationUrl;
+      await reopenProActivationPage(activationUrl);
+    }
+    return finishProActivation(handle);
+  });
+}
+
+function resumeProActivation() {
+  return trackProAction(async () => {
+    setProProgress("Resuming Pro activation…");
+    let handle;
+    try {
+      handle = await proActivation.resume();
+    } catch (error) {
+      await showProFailure("activation", error);
+      return false;
+    }
+    if (!handle) {
+      proPendingFlow = false;
+      await showProFailure("startup", null);
+      return false;
+    }
+    proPendingFlow = true;
+    return finishProActivation(handle);
+  });
 }
 
 /**
@@ -160,6 +478,18 @@ function createWindow() {
   // launch's authenticated renderer state. Every other web popup, including a
   // same-daemon link in agent output, belongs in the user's real browser.
   win.webContents.setWindowOpenHandler(({ url, postBody }) => {
+    if (isDesktopActivationRequest(
+      url,
+      win.webContents.getURL(),
+      daemonOrigin,
+      postBody != null,
+    )) {
+      runBackgroundAction(
+        beginProActivation,
+        "Mirafold Pro activation could not be completed.",
+      );
+      return { action: "deny" };
+    }
     const verdict = popupVerdict(url, daemonOrigin, postBody != null);
     if (verdict === "same-window") {
       runBackgroundAction(
@@ -244,7 +574,9 @@ async function boot() {
 
   let url;
   try {
-    url = await booting.start(dir);
+    url = proLicenseKey === undefined
+      ? await booting.start(dir)
+      : await booting.start(dir, { licenseKey: proLicenseKey });
   } catch (err) {
     await retire();
     if (!current()) return;
@@ -287,8 +619,24 @@ async function boot() {
     await retire();
     return;
   }
-  win.setTitle(`Mirafold — ${path.basename(dir)}`);
+  updateWindowTitle();
   return true;
+}
+
+/** Restart the current folder only after a newly activated key is durable. */
+async function restartDaemonForPro() {
+  if (quitting || !win || !folder) return false;
+  ++bootSeq;
+  daemonOrigin = null;
+  const stopping = daemon;
+  daemon = null;
+  const clean = stopping ? await stopping.stop() : true;
+  if (!clean) {
+    await onDaemonCleanupFailure("enabling Mirafold Pro");
+    return false;
+  }
+  if (quitting || !win) return false;
+  return (await boot()) === true;
 }
 
 /** Swap the open project: stop this daemon, start another elsewhere. */
@@ -614,8 +962,17 @@ if (!app.requestSingleInstanceLock()) {
     // this app asks. Leaving an empty window up would be worse than exiting.
     if (!folder) return app.quit();
     createWindow();
+    const proStartup = await initializeProSupport();
     const booted = await boot();
     if (booted !== true || quitting || !win) return;
+    if (proStartup.error) {
+      await showProFailure("startup", proStartup.error);
+    } else if (proStartup.pending) {
+      runBackgroundAction(
+        resumeProActivation,
+        "Mirafold Pro activation could not be resumed.",
+      );
+    }
     // Updating is background work. A missing feed or network failure is logged
     // and never delays or tears down a working Mirafold session.
     void desktopUpdater.start();
@@ -638,6 +995,10 @@ if (!app.requestSingleInstanceLock()) {
       daemonOrigin = null;
     },
     async stop() {
+      const activation = proActivation;
+      const proAction = proActionPromise;
+      if (activation) await activation.shutdown();
+      if (proAction) await proAction;
       const stopping = daemon;
       daemon = null;
       if (stopping && (await stopping.stop()) !== true) {

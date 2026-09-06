@@ -64,8 +64,9 @@ class FakeDaemon {
     daemonInstances.push(this);
   }
 
-  async start(folder) {
+  async start(folder, options) {
     this.folder = folder;
+    this.options = options;
     this.running = true;
     if (
       mode === "boot-failure-quit"
@@ -105,6 +106,7 @@ class FakeWindow extends EventEmitter {
       },
     };
     this.webContents.isDestroyed = () => false;
+    this.webContents.getURL = () => this.currentUrl ?? "";
     this.webContents.setZoomFactor = (scale) => { this.appliedScales.push(scale); };
     this.webContents.setWindowOpenHandler = (handler) => { windowOpenHandler = handler; };
     windows.push(this);
@@ -114,10 +116,12 @@ class FakeWindow extends EventEmitter {
     if (mode === "loading-file-failure") {
       throw new Error("fixture loading screen failure");
     }
+    this.currentUrl = "file:///fixture-loading.html";
     this.webContents.emit("did-finish-load");
   }
   async loadURL(url) {
     this.loadedUrls.push(url);
+    this.currentUrl = url;
     if (mode === "page-load-failure") {
       const failure = new Error(
         "ERR_FAILED (-2) loading 'http://127.0.0.1:4100/?token=dummy-dialog-token'",
@@ -158,6 +162,7 @@ app.getVersion = () => "0.1.1";
 app.quit = () => { quitCalls += 1; };
 
 const autoUpdater = new EventEmitter();
+const safeStorage = {};
 const dialog = {
   async showOpenDialog(...args) {
     folderDialogs += 1;
@@ -204,10 +209,25 @@ const shell = {
 };
 
 mock.module("electron", {
-  namedExports: { app, autoUpdater, BrowserWindow: FakeWindow, dialog, Menu, shell },
+  namedExports: { app, autoUpdater, BrowserWindow: FakeWindow, dialog, Menu, safeStorage, shell },
 });
 mock.module(new URL("./src/daemon.js", import.meta.url).href, {
   namedExports: { Daemon: FakeDaemon },
+});
+mock.module(new URL("./src/pro-store.js", import.meta.url).href, {
+  namedExports: {
+    PRO_STORE_VERSION: 1,
+    createProStore: () => ({
+      inspect: async () => ({ present: false }),
+    }),
+  },
+});
+mock.module(new URL("./src/pro-activation.js", import.meta.url).href, {
+  namedExports: {
+    createProActivationController: () => ({
+      shutdown: async () => false,
+    }),
+  },
 });
 mock.module(new URL("./src/state.js", import.meta.url).href, {
   namedExports: {
