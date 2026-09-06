@@ -1067,8 +1067,9 @@ security primitive the platform does not already provide.
   synchronization, atomic rename, safe rotation rewrites, inspected removal,
   and idempotent absence. The module has no startup import, Electron import,
   renderer bridge, dependency, or logging path. `test/pro-store.test.js` adds
-  16 focused tests. Six product-code mutations—allowing `basic_text`, accepting
-  the `v10` fallback tag, removing no-follow, weakening mode validation,
+  16 focused tests. Seven product-code mutations—allowing `basic_text`, accepting
+  the `v10` fallback tag, re-decrypting rotated ciphertext instead of using its
+  first successful result, removing no-follow, weakening mode validation,
   allowing the first oversized byte, and changing exact-boundary expiry—failed
   their focused test before the original bytes were restored. Final evidence:
   focused 16/16; complete suite 227 tests with 226 passing and the one existing

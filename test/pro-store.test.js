@@ -82,7 +82,6 @@ function safeStorageAdapter(options = {}) {
     encryptionCalls: 0,
     decryptionCalls: 0,
     plainTextFallbackCalls: 0,
-    rotated: new Set(),
   };
 
   const adapter = {
@@ -119,12 +118,11 @@ function safeStorageAdapter(options = {}) {
       if (state.wrongProbe && plaintext === "mirafold-pro-safe-storage-v1") {
         plaintext = "wrong safeStorage probe";
       }
-      const identity = ciphertext.toString("hex");
       const record = plaintext.startsWith("{");
-      const firstRotation = record && state.rotateRecords && !state.rotated.has(identity);
-      if (firstRotation) state.rotated.add(identity);
+      const providerTag = ciphertext.subarray(0, 3).toString("ascii");
       return {
-        shouldReEncrypt: state.alwaysRotate || firstRotation,
+        shouldReEncrypt: state.alwaysRotate
+          || (record && state.rotateRecords && providerTag !== state.ciphertextTag),
         result: plaintext,
       };
     },
@@ -361,11 +359,17 @@ test("load follows safeStorage's rotation signal and atomically re-encrypts", { 
   await store.save({ version: 1, licenseKey: LICENSE_KEY });
   const before = await fs.readFile(store.path);
   state.rotateRecords = true;
+  state.ciphertextTag = "v12";
 
   assert.deepEqual(await store.load(), { version: 1, licenseKey: LICENSE_KEY });
   const after = await fs.readFile(store.path);
   assert.notDeepEqual(after, before);
-  assert.ok(state.decryptionCalls >= 4, "rotation did not request the second decrypted result");
+  assert.equal(after.subarray(0, 3).toString("ascii"), "v12");
+  assert.equal(state.decryptionCalls, 3, "rotated ciphertext was decrypted more than once");
+
+  assert.deepEqual(await store.load(), { version: 1, licenseKey: LICENSE_KEY });
+  assert.deepEqual(await fs.readFile(store.path), after);
+  assert.equal(state.decryptionCalls, 5, "current-provider ciphertext requested rotation");
 });
 
 test("corrupt ciphertext and malformed decrypted state fail without disclosing supplied bytes", { skip: FILE_TEST_SKIP }, async (t) => {

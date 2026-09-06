@@ -429,16 +429,13 @@ export function createProStore({
   }
 
   async function decrypt(ciphertext, errorCode) {
-    let first;
     try {
-      first = await safeStorage.decryptStringAsync(ciphertext);
-      if (!validDecryptResult(first)) throw fail(errorCode);
-      if (!first.shouldReEncrypt) {
-        return { plaintext: first.result, shouldReEncrypt: false };
-      }
-      const second = await safeStorage.decryptStringAsync(ciphertext);
-      if (!validDecryptResult(second) || second.shouldReEncrypt) throw fail(errorCode);
-      return { plaintext: second.result, shouldReEncrypt: true };
+      const decrypted = await safeStorage.decryptStringAsync(ciphertext);
+      if (!validDecryptResult(decrypted)) throw fail(errorCode);
+      return {
+        plaintext: decrypted.result,
+        shouldReEncrypt: decrypted.shouldReEncrypt,
+      };
     } catch (error) {
       if (error instanceof ProStoreError) throw error;
       throw fail(errorCode);
@@ -479,7 +476,11 @@ export function createProStore({
         throw fail("unavailable");
       }
       const probe = await decrypt(encrypted, "unavailable");
-      if (probe.plaintext !== PROBE_TEXT) throw fail("unavailable");
+      // Fresh ciphertext must already use the current provider. A rotation
+      // signal here means safeStorage's encrypt/decrypt view is inconsistent.
+      if (probe.plaintext !== PROBE_TEXT || probe.shouldReEncrypt) {
+        throw fail("unavailable");
+      }
       if (selectedBackend() !== backend) throw fail("unavailable");
       return Object.freeze({ backend });
     } catch (error) {
