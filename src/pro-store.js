@@ -16,6 +16,8 @@ export const MAX_PRO_CIPHERTEXT_BYTES = 64 * 1024;
 
 const MAX_PRO_PLAINTEXT_BYTES = 8 * 1024;
 const PROBE_TEXT = "mirafold-pro-safe-storage-v1";
+const TEMPORARY_FILENAME_PREFIX = `.${PRO_STORE_FILENAME}.`;
+const TEMPORARY_FILENAME_SUFFIX = ".tmp";
 const ACCEPTED_LINUX_BACKENDS = new Set([
   "gnome_libsecret",
   "kwallet",
@@ -46,6 +48,7 @@ const ERROR_MESSAGES = Object.freeze({
   corrupt: "Mirafold Pro secure state could not be read safely.",
   invalid: "Mirafold Pro secret state is invalid.",
   write: "Mirafold Pro secure state could not be updated.",
+  "durability-uncertain": "Mirafold Pro secure state changed, but durable storage could not be confirmed.",
 });
 
 export class ProStoreError extends Error {
@@ -155,6 +158,21 @@ function hasAcceptedCiphertextTag(value) {
   );
 }
 
+function isTemporaryFilename(value) {
+  if (
+    typeof value !== "string"
+    || !value.startsWith(TEMPORARY_FILENAME_PREFIX)
+    || !value.endsWith(TEMPORARY_FILENAME_SUFFIX)
+  ) {
+    return false;
+  }
+  const randomPart = value.slice(
+    TEMPORARY_FILENAME_PREFIX.length,
+    -TEMPORARY_FILENAME_SUFFIX.length,
+  );
+  return /^[0-9a-f]{32}$/.test(randomPart);
+}
+
 function safeNow(now) {
   let value;
   try {
@@ -247,6 +265,32 @@ export function createProStore({
     }
   }
 
+  async function syncUserDataParent() {
+    let parent;
+    try {
+      parent = await fs.open(
+        userDataPath,
+        openFlags("O_RDONLY", "O_DIRECTORY", "O_NONBLOCK"),
+      );
+      await parent.sync();
+    } catch (error) {
+      if (error instanceof ProStoreError) throw error;
+      throw fail("write");
+    } finally {
+      await closeQuietly(parent);
+    }
+  }
+
+  async function syncAfterMutation(directory) {
+    try {
+      await directory.sync();
+    } catch {
+      // rename/unlink has already changed the visible state. The caller must
+      // inspect or load it before retrying instead of assuming the prior state.
+      throw fail("durability-uncertain");
+    }
+  }
+
   async function openDirectory(create) {
     let created = false;
     if (create) {
@@ -272,6 +316,13 @@ export function createProStore({
         openFlags("O_RDONLY", "O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK"),
       );
       assertOwnedMode(await handle.stat(), 0o700, "directory");
+      // Repeat both syncs on every write-capable open. A prior creation may
+      // still be visible after its parent sync failed, so EEXIST alone does
+      // not prove the directory entry is durable.
+      if (create) {
+        await handle.sync();
+        await syncUserDataParent();
+      }
       return handle;
     } catch (error) {
       await closeQuietly(handle);
@@ -339,6 +390,51 @@ export function createProStore({
     await closeQuietly(opened.handle);
   }
 
+  async function temporaryPaths() {
+    let names;
+    try {
+      names = await fs.readdir(directoryPath);
+    } catch {
+      throw fail("unsafe");
+    }
+    if (!Array.isArray(names) || names.some((name) => typeof name !== "string")) {
+      throw fail("unsafe");
+    }
+    return names
+      .filter(isTemporaryFilename)
+      .map((name) => path.join(directoryPath, name));
+  }
+
+  async function cleanupTemporaryFiles(directory) {
+    const paths = await temporaryPaths();
+    let removed = false;
+    try {
+      for (const temporaryPath of paths) {
+        try {
+          await fs.unlink(temporaryPath);
+          removed = true;
+        } catch (error) {
+          if (!isMissing(error)) throw error;
+        }
+      }
+    } catch {
+      if (removed) await syncAfterMutation(directory);
+      throw fail("write");
+    }
+    if (removed) await syncAfterMutation(directory);
+    return removed;
+  }
+
+  async function cleanupTemporaryFilesRaw() {
+    const directory = await openDirectory(false);
+    if (!directory) return false;
+    try {
+      return await cleanupTemporaryFiles(directory);
+    } finally {
+      await closeQuietly(directory);
+    }
+  }
+
   async function replaceCiphertext(ciphertext) {
     if (
       !Buffer.isBuffer(ciphertext)
@@ -354,6 +450,7 @@ export function createProStore({
     let renamed = false;
     try {
       await assertTargetReplaceable();
+      await cleanupTemporaryFiles(directory);
       const random = randomBytes(16);
       if (!Buffer.isBuffer(random) || random.length !== 16) throw fail("write");
       temporaryPath = path.join(
@@ -389,16 +486,27 @@ export function createProStore({
       await assertTargetReplaceable();
       await fs.rename(temporaryPath, filePath);
       renamed = true;
-      await directory.sync();
+      await syncAfterMutation(directory);
     } catch (error) {
       await closeQuietly(temporaryHandle);
+      let cleanupUncertain = false;
       if (!renamed && temporaryPath) {
+        let removedTemporary = false;
         try {
           await fs.unlink(temporaryPath);
-        } catch {
-          // A failed cleanup never replaces the original safe failure.
+          removedTemporary = true;
+        } catch (cleanupError) {
+          cleanupUncertain = !isMissing(cleanupError);
+        }
+        if (removedTemporary) {
+          try {
+            await syncAfterMutation(directory);
+          } catch {
+            cleanupUncertain = true;
+          }
         }
       }
+      if (cleanupUncertain) throw fail("durability-uncertain");
       if (error instanceof ProStoreError) throw error;
       throw fail("write");
     } finally {
@@ -412,14 +520,22 @@ export function createProStore({
     let opened;
     try {
       opened = await openRegularFile();
-      if (!opened) return false;
-      await opened.handle.close();
-      opened = null;
-      await fs.unlink(filePath);
-      await directory.sync();
+      const hadRecord = opened !== null;
+      if (opened) {
+        await opened.handle.close();
+        opened = null;
+      }
+      const removedTemporary = await cleanupTemporaryFiles(directory);
+      if (!hadRecord) return removedTemporary;
+      try {
+        await fs.unlink(filePath);
+      } catch (error) {
+        if (isMissing(error)) return removedTemporary;
+        throw error;
+      }
+      await syncAfterMutation(directory);
       return true;
     } catch (error) {
-      if (isMissing(error)) return false;
       if (error instanceof ProStoreError) throw error;
       throw fail("write");
     } finally {
@@ -517,6 +633,7 @@ export function createProStore({
 
   async function loadRaw() {
     const { backend } = await preflightRaw();
+    await cleanupTemporaryFilesRaw();
     const ciphertext = await readCiphertext();
     if (!ciphertext) return null;
     if (!hasAcceptedCiphertextTag(ciphertext)) {
@@ -575,7 +692,8 @@ export function createProStore({
     let opened;
     try {
       opened = await openRegularFile();
-      return Object.freeze({ present: opened !== null });
+      const leftovers = await temporaryPaths();
+      return Object.freeze({ present: opened !== null || leftovers.length > 0 });
     } finally {
       await closeQuietly(opened?.handle);
       await closeQuietly(directory);

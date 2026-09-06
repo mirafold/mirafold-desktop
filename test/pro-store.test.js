@@ -153,6 +153,24 @@ function storeFor(directory, safeStorage, options = {}) {
   });
 }
 
+function fsWithSyncHook(onSync) {
+  return {
+    ...fs,
+    async open(target, ...args) {
+      const handle = await fs.open(target, ...args);
+      return new Proxy(handle, {
+        get(fileHandle, property) {
+          if (property === "sync") {
+            return () => onSync(target, fileHandle.sync.bind(fileHandle));
+          }
+          const value = Reflect.get(fileHandle, property, fileHandle);
+          return typeof value === "function" ? value.bind(fileHandle) : value;
+        },
+      });
+    },
+  };
+}
+
 async function rejectsCode(action, code) {
   await assert.rejects(action, (error) => {
     assert.ok(error instanceof ProStoreError);
@@ -258,6 +276,45 @@ test("key-only, pending-only, and renewal state round-trip as ciphertext", { ski
   assert.equal((await fs.stat(path.dirname(store.path))).mode & 0o777, 0o700);
   assert.equal((await fs.stat(store.path)).mode & 0o777, 0o600);
   await assert.rejects(() => fs.stat(path.join(directory, "state.json")), { code: "ENOENT" });
+});
+
+test("every write-capable open syncs the store directory and userData parent, including retry", { skip: FILE_TEST_SKIP }, async (t) => {
+  const directory = await userData(t);
+  const { adapter } = safeStorageAdapter();
+  const synced = [];
+  const trackingFs = fsWithSyncHook(async (target, sync) => {
+    synced.push(target);
+    await sync();
+  });
+  const store = storeFor(directory, adapter, { fs: trackingFs });
+  await store.save({ version: 1, licenseKey: LICENSE_KEY });
+
+  const storeDirectory = path.dirname(store.path);
+  const storeDirectorySync = synced.indexOf(storeDirectory);
+  const parentSync = synced.indexOf(directory);
+  assert.ok(storeDirectorySync >= 0, "new store directory was not synced");
+  assert.ok(parentSync > storeDirectorySync, "userData was not synced after its new child");
+
+  const failingDirectory = await userData(t);
+  const failure = new Error("injected parent sync failure");
+  failure.code = "EIO";
+  let parentSyncAttempts = 0;
+  const failingFs = fsWithSyncHook(async (target, sync) => {
+    if (target === failingDirectory) {
+      parentSyncAttempts += 1;
+      if (parentSyncAttempts === 1) throw failure;
+    }
+    await sync();
+  });
+  const failingStore = storeFor(failingDirectory, adapter, { fs: failingFs });
+  await rejectsCode(
+    () => failingStore.save({ version: 1, licenseKey: LICENSE_KEY }),
+    "write",
+  );
+  assert.deepEqual(await failingStore.inspect(), { present: false });
+  await failingStore.save({ version: 1, licenseKey: LICENSE_KEY });
+  assert.equal(parentSyncAttempts, 2, "retry skipped the unconfirmed parent sync");
+  assert.deepEqual(await failingStore.load(), { version: 1, licenseKey: LICENSE_KEY });
 });
 
 test("a backend or ciphertext-provider downgrade during record encryption stops before persistence", { skip: FILE_TEST_SKIP }, async (t) => {
@@ -481,6 +538,120 @@ test("interruption before rename preserves the prior record and removes the temp
   assert.deepEqual(await fs.readFile(original.path), priorCiphertext);
   assert.deepEqual(await original.load(), { version: 1, licenseKey: LICENSE_KEY });
   assert.deepEqual(await fs.readdir(path.dirname(original.path)), [PRO_STORE_FILENAME]);
+
+  const failedCleanupFs = {
+    ...fs,
+    async rename() {
+      const error = new Error("injected interruption");
+      error.code = "EIO";
+      throw error;
+    },
+    async unlink(target) {
+      if (path.basename(target).startsWith(`.${PRO_STORE_FILENAME}.`)) {
+        const error = new Error("injected cleanup failure");
+        error.code = "EACCES";
+        throw error;
+      }
+      return fs.unlink(target);
+    },
+  };
+  const stranded = storeFor(directory, adapter, { fs: failedCleanupFs });
+  await rejectsCode(
+    () => stranded.save({ version: 1, licenseKey: RENEWAL_KEY }),
+    "durability-uncertain",
+  );
+  assert.equal((await fs.readdir(path.dirname(original.path))).length, 2);
+  assert.deepEqual(await original.load(), { version: 1, licenseKey: LICENSE_KEY });
+  assert.deepEqual(await fs.readdir(path.dirname(original.path)), [PRO_STORE_FILENAME]);
+});
+
+test("recovery and removal clear every reserved temporary ciphertext without following links", { skip: FILE_TEST_SKIP }, async (t) => {
+  const directory = await userData(t);
+  const { adapter } = safeStorageAdapter();
+  const store = storeFor(directory, adapter);
+  await store.save({ version: 1, licenseKey: LICENSE_KEY });
+  const ciphertext = await fs.readFile(store.path);
+  const storeDirectory = path.dirname(store.path);
+  const temporaryPaths = ["a", "b", "c"].map((digit) => path.join(
+    storeDirectory,
+    `.${PRO_STORE_FILENAME}.${digit.repeat(32)}.tmp`,
+  ));
+  const unrelated = path.join(storeDirectory, `.${PRO_STORE_FILENAME}.not-hex.tmp`);
+  const outside = path.join(directory, "outside.bin");
+  await fs.writeFile(temporaryPaths[0], ciphertext, { mode: 0o600 });
+  await fs.writeFile(temporaryPaths[1], ciphertext.subarray(0, 5), { mode: 0o600 });
+  await fs.writeFile(outside, "outside", { mode: 0o600 });
+  await fs.symlink(outside, temporaryPaths[2]);
+  await fs.writeFile(unrelated, "unrelated", { mode: 0o600 });
+
+  assert.deepEqual(await store.load(), { version: 1, licenseKey: LICENSE_KEY });
+  for (const temporaryPath of temporaryPaths) {
+    await assert.rejects(() => fs.lstat(temporaryPath), { code: "ENOENT" });
+  }
+  assert.equal(await fs.readFile(outside, "utf8"), "outside");
+  assert.equal(await fs.readFile(unrelated, "utf8"), "unrelated");
+
+  await fs.writeFile(temporaryPaths[0], ciphertext, { mode: 0o600 });
+  await fs.unlink(store.path);
+  assert.deepEqual(await store.inspect(), { present: true });
+  assert.equal(await store.remove(), true);
+  assert.deepEqual(await store.inspect(), { present: false });
+  assert.equal(await store.remove(), false);
+  assert.equal(await fs.readFile(unrelated, "utf8"), "unrelated");
+});
+
+test("a post-mutation sync failure reports uncertain durability before any retry", { skip: FILE_TEST_SKIP }, async (t) => {
+  const directory = await userData(t);
+  const { adapter } = safeStorageAdapter();
+  const original = storeFor(directory, adapter);
+  await original.save({ version: 1, licenseKey: LICENSE_KEY });
+  const storeDirectory = path.dirname(original.path);
+  let failDirectorySync = false;
+  const hookedFs = fsWithSyncHook(async (target, sync) => {
+    if (failDirectorySync && target === storeDirectory) {
+      failDirectorySync = false;
+      const error = new Error("injected post-mutation sync failure");
+      error.code = "EIO";
+      throw error;
+    }
+    await sync();
+  });
+  const uncertainFs = {
+    ...hookedFs,
+    async rename(...args) {
+      await fs.rename(...args);
+      failDirectorySync = true;
+    },
+  };
+  const uncertain = storeFor(directory, adapter, { fs: uncertainFs });
+
+  await assert.rejects(
+    () => uncertain.save({ version: 1, licenseKey: RENEWAL_KEY }),
+    (error) => {
+      assert.equal(error.code, "durability-uncertain");
+      assert.doesNotMatch(error.message, new RegExp(LICENSE_KEY));
+      assert.doesNotMatch(error.message, new RegExp(RENEWAL_KEY));
+      return true;
+    },
+  );
+  failDirectorySync = false;
+  assert.deepEqual(await original.load(), { version: 1, licenseKey: RENEWAL_KEY });
+  const committedCiphertext = await fs.readFile(original.path);
+
+  failDirectorySync = true;
+  await rejectsCode(() => uncertain.remove(), "durability-uncertain");
+  failDirectorySync = false;
+  assert.deepEqual(await original.inspect(), { present: false });
+
+  const orphan = path.join(
+    storeDirectory,
+    `.${PRO_STORE_FILENAME}.${"d".repeat(32)}.tmp`,
+  );
+  await fs.writeFile(orphan, committedCiphertext, { mode: 0o600 });
+  failDirectorySync = true;
+  await rejectsCode(() => uncertain.load(), "durability-uncertain");
+  failDirectorySync = false;
+  assert.deepEqual(await original.inspect(), { present: false });
 });
 
 test("inspection supports confirmation and removal is secure, keyring-independent, and idempotent", { skip: FILE_TEST_SKIP }, async (t) => {

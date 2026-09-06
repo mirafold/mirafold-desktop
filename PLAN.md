@@ -1064,16 +1064,22 @@ security primitive the platform does not already provide.
   without removing a current key. Ciphertext lives only at owner-owned mode
   `0600` below an owner-owned mode `0700` directory, with no-follow opens,
   bounded reads, same-directory exclusive temporary files, file and directory
-  synchronization, atomic rename, safe rotation rewrites, inspected removal,
-  and idempotent absence. The module has no startup import, Electron import,
-  renderer bridge, dependency, or logging path. `test/pro-store.test.js` adds
-  16 focused tests. Seven product-code mutations—allowing `basic_text`, accepting
-  the `v10` fallback tag, re-decrypting rotated ciphertext instead of using its
-  first successful result, removing no-follow, weakening mode validation,
-  allowing the first oversized byte, and changing exact-boundary expiry—failed
-  their focused test before the original bytes were restored. Final evidence:
-  focused 16/16; complete suite 227 tests with 226 passing and the one existing
-  platform skip; syntax checks,
+  synchronization (including the `userData` parent before every write),
+  atomic rename, crash-orphan reconciliation, safe rotation rewrites, inspected
+  removal, and idempotent absence. A failure after rename or unlink returns the
+  distinct `durability-uncertain` result so the caller must inspect or load the
+  visible state before retrying. The module has no startup import, Electron
+  import, renderer bridge, dependency, or logging path.
+  `test/pro-store.test.js` adds 19 focused tests. Eleven product-code mutations—
+  allowing `basic_text`, accepting the `v10` fallback tag, re-decrypting rotated
+  ciphertext instead of using its first successful result, removing no-follow,
+  weakening mode validation, allowing the first oversized byte, changing
+  exact-boundary expiry, skipping the required parent-sync retry, ignoring the
+  reserved temporary namespace, and collapsing post-commit uncertainty into an
+  ordinary write error, plus hiding a failed pre-rename cleanup behind that
+  ordinary error—failed their focused test before the original bytes were
+  restored. Final evidence: focused 19/19; complete suite 230 tests with 229
+  passing and the one existing platform skip; syntax checks,
   `npm ls --all`, and `npm audit` green with zero vulnerabilities; `package.json`
   and `package-lock.json` unchanged.
 
