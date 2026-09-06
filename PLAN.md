@@ -871,6 +871,376 @@ environment. This work remains separate from Shell's cleanup PR.
   regression against that pin, run native Windows CI, and complete installed
   public-artifact acceptance.
 
+### Phase 13 — Linux Desktop owns Mirafold Pro securely
+
+Opened 2026-09-04 at Kyle's express request. This phase supersedes only the
+old statement that Desktop handles zero **Mirafold-owned Pro credentials**;
+the separate provider-credential GUI remains parked. It is an oversized
+feature phase: every numbered Step is one independently executable pass with
+its own verification and dated plan update. `$next` works one Step and stops.
+
+**Outcome and release gate.** A person who starts Mirafold from an app-center
+icon on Linux clicks the existing Pair flow, completes purchase or connects an
+existing Pro key in their normal browser, returns automatically, and gets a
+working relay QR without opening a terminal or storing a key themselves. The
+credential survives app restarts only when the operating system supplies a
+real secret store. This installed Linux path must pass production end to end
+before mirafold.com removes the demo's browser bar or mentions Desktop as a
+use option. Windows remains behaviorally unchanged and unclaimed in this
+phase; it has a separate proof phase below.
+
+#### Verified starting state — 2026-09-04
+
+- `src/main.js` creates one sandboxed BrowserWindow with context isolation,
+  no Node integration, no preload, and no IPC. Its navigation guards hand all
+  ordinary HTTP(S) links to the system browser. There is no activation
+  controller, loopback callback listener, credential menu, or `safeStorage`
+  import.
+- `src/daemon.js` obtains a login-shell environment, starts the exact bundled
+  `mirafold` daemon with `stdio: ["ignore", "pipe", "pipe"]`, and copies the
+  environment into the child. It has no private secret input channel.
+  `src/daemon-bootstrap.cjs` removes Desktop's PID-ledger and Electron Node-mode
+  variables before importing Shell, but reads no credential.
+- `src/state.js` persists only project folder and interface scale as ordinary
+  JSON in Electron's per-user data directory. No source file stores a Pro key.
+- The pinned Electron 43.4.0 type surface contains asynchronous
+  `safeStorage.encryptStringAsync`, `decryptStringAsync`, and
+  `isAsyncEncryptionAvailable`. Electron documents that Linux may fall back to
+  `basic_text`, where the encrypted value is protected by a hard-coded
+  plaintext password; that backend is not acceptable for a Pro key. Source:
+  [Electron safeStorage](https://www.electronjs.org/docs/latest/api/safe-storage).
+- Shell's Pair card links to `https://mirafold.com/pay`; the current generic
+  navigation path opens it externally. The app already holds a single-instance
+  lock, so a second process cannot become a competing activation receiver.
+
+#### Approved implementation boundary
+
+Phase 13 may create `src/pro-store.js`, `src/pro-activation.js`,
+`test/pro-store.test.js`, and `test/pro-activation.test.js`. It may modify
+`src/main.js`, `src/daemon.js`, `src/daemon-bootstrap.cjs`, `src/navigation.js`,
+`src/app-lifecycle.js`, `package.json`, and `package-lock.json`, plus their
+directly corresponding tests, package probes, and release evidence. Manifest
+changes are limited to pinning the exact published Shell version; no package is
+added. The runtime creates one versioned ciphertext file below Electron
+`userData`, not a project file or repository artifact.
+
+`src/state.js`, the sandboxed renderer configuration, the absence of preload
+and IPC, generic external navigation, project-folder data, updater trust and
+release policy, ordinary no-key startup, and all Windows launch code—including
+`src/windows-daemon-job.ps1`—stay behaviorally unchanged in Phase 13. Phase 14
+is the only authority to change Windows credential carriage. Any need for
+another executable file, renderer bridge, package, stored file, platform, or
+service stops the Step for an explicit boundary amendment before the change.
+
+#### Locked design and threat boundary
+
+Use the system browser plus an IPv4-loopback callback and RFC 7636 S256 PKCE,
+the standard native-application pattern in
+[RFC 8252](https://www.rfc-editor.org/rfc/rfc8252.html) and
+[RFC 7636](https://www.rfc-editor.org/rfc/rfc7636.html). Electron main creates
+a 32-byte verifier, 32-byte state, and random callback-path nonce; derives the
+S256 challenge; binds an ephemeral listener to literal `127.0.0.1` **before**
+opening the browser; durably encrypts the exact pending flow before launch; and
+sends only version, port, state, callback nonce, and challenge to the site. The
+verifier is plaintext only inside Electron main and the final HTTPS request;
+its expiring at-rest copy is protected by the same accepted safeStorage backend
+as the key. It never uses `localhost`, a LAN/wildcard bind, a custom URL scheme,
+or an embedded Electron login window.
+
+The listener accepts one bounded GET on the exact random path with the exact
+state, returns a constant local success page, and closes on success or a short
+deadline. A callback code alone cannot redeem: Electron main posts it with the
+main-process-only plaintext verifier over HTTPS, and the site's D1 conditional
+redemption lets one caller win. On restart, Desktop may resume only the exact
+unexpired stored port/path/state/challenge/verifier and must re-bind that port;
+the still-open or history-reopened browser welcome can then retry. Desktop
+cannot reconstruct a Paddle transaction if that browser context is also gone,
+and it never rebinds a completed transaction to fresh parameters. Wrong paths,
+methods, hosts, state, duplicate callbacks, early browser close, timeout, and
+app shutdown all fail without affecting local Mirafold. Never echo the code or
+state into the local HTML or a diagnostic.
+
+On Linux, initialize asynchronous `safeStorage` before opening purchase UI.
+If encryption is unavailable, temporarily unavailable, reports `basic_text`,
+or cannot complete an encrypt/decrypt probe, stop **before checkout** and say
+that a supported system secret service is required. Never call
+`setUsePlainTextEncryption`. Store only safeStorage ciphertext in a dedicated
+versioned secret-state file under Electron `userData`, created through an
+owner-only, no-follow, atomic replace; never mix it into `state.json`. The
+envelope may hold the current permanent key, at most one bounded pending
+activation record, or both during renewal; it never holds arbitrary site data.
+The pending record expires no later than the existing 48-hour transaction-claim
+window. Validate every decrypted field, support safeStorage's re-encryption
+signal, erase only expired pending state while preserving a current key, and
+make a corrupt/tampered/unavailable record a generic recoverable activation
+error—not a log of bytes or an app-start failure.
+
+After activation, keep the key plaintext only in Electron main memory, encrypt
+and durably replace the old credential while clearing the pending field first,
+then restart the daemon. A failed exchange or store preserves the prior
+credential plus any still-valid encrypted pending flow so the same committed
+transaction can retry; a success or expiry removes only the pending field.
+When a stored credential exists, remove any ambient `MIRAFOLD_LICENSE_KEY` from
+the child environment before spawn and pass only the stored key to the exact
+compatible Shell over a pipe connected to standard input, with one fixed non-
+secret internal flag in argv. With no stored credential, preserve today's
+legacy environment behavior. Close the parent pipe immediately; Shell consumes
+and closes its end before sessions can start. The key must never
+enter Desktop or daemon environment variables, command arguments, renderer or
+preload state, IPC, a WireMsg, browser storage/DOM/clipboard, project files,
+stdout/stderr, system journal, updater metadata, crash dialogs, or agent child
+processes. The existing renderer isolation stays absolute: native activation,
+storage, exchange, restart, and removal all live in main-process modules.
+
+Only an exact Shell-owned Desktop Pro URL from the current daemon origin starts
+activation. Other HTTP(S) navigation remains the user's ordinary browser;
+other schemes remain blocked. Agent-authored content can mimic a link, so the
+native controller must treat link activation as an untrusted request: it may
+open the browser after explicit user navigation, but it exposes no credential,
+does not accept site-supplied arbitrary callback URLs, and cannot overwrite the
+stored key until the complete state/PKCE/site validation succeeds.
+
+The first accountless release has an honest recovery limit: a new Desktop buyer
+does not need to see or save the key, but a lost machine or deleted credential
+cannot silently authorize a second installation. An existing subscriber may
+use the site's deliberate existing-key field; a new buyer without that key
+uses support after device loss. Do not disguise this as account recovery, and
+do not add accounts, email magic links, key export to clipboard, hardware
+attestation, certificate pinning, or a device-token service inside this phase.
+A confirmed user need for self-serve multi-device recovery is the trigger for
+a separate design. The same support boundary applies when both an encrypted
+pending activation and its browser transaction context are lost after payment.
+
+An existing subscriber's already-held key is handled differently from a new
+purchase: it passes transiently through the site's dedicated, first-party-only
+`/activate` password form and no-store request. That page loads no Paddle or
+other third-party resource and never puts the key in a URL, storage, clipboard,
+redirect, or response. A browser extension can still read a key the user types;
+the new-purchase path never exposes one to the browser at all.
+
+**Residual authority:** root/administrator, malware already executing as the
+same desktop user, a compromised OS secret service, compromised Mirafold/site/
+Paddle code, or a substituted installer can still obtain or use the key. The
+feature protects at-rest bytes from other users and ordinary file disclosure,
+removes the key from ambient process metadata and renderer/agent surfaces, and
+blocks callback interception/replay; it does not claim endpoint compromise is
+solvable from inside that endpoint. OS crash dumps, swap, and hibernation remain
+within the operating-system security boundary. Electron and Shell necessarily
+handle JavaScript strings, which cannot be reliably zeroized; references and
+lifetimes are minimized, but heap remnants remain part of that same endpoint
+boundary.
+
+No dependency is added. Electron's built-in safeStorage, Node HTTP/crypto/fs,
+and the site's existing Web APIs cover the protocol. A package would add
+installed bytes, transitive code, and advisory surface without supplying a
+security primitive the platform does not already provide.
+
+- [x] **Step 13.1 — build the fail-closed encrypted secret-state store.** Create
+  a small injected main-process module for asynchronous safeStorage readiness,
+  backend policy, exact credential/pending-flow schemas, expiry, ciphertext
+  load/decrypt/re-encrypt, and owner-only atomic replacement/removal. Use a
+  dedicated versioned secret path; reject symlinks, non-regular files,
+  oversized blobs, `basic_text`, temporary unavailability, corrupt ciphertext,
+  and malformed plaintext without logging supplied bytes. Do not make ordinary
+  app startup depend on Pro storage. Done when focused tests exercise each
+  provider/result/error, key-only, pending-only, and renewal-combined records,
+  the 48-hour pending ceiling and expiry that preserves an existing key,
+  permission and atomicity behavior; interrupted writes preserve the prior
+  record; removal is confirmation-ready and idempotent; mutations of the basic-
+  text refusal/no-follow/mode/size/expiry checks fail; and the complete Desktop
+  suite plus `npm ls --all` and audit remain green with no dependency change.
+
+  **Completed 2026-09-06.** `src/pro-store.js` is an injected, Linux-only main-
+  process store that accepts only Electron 43.4.0's four named secret-service
+  backends, completes an asynchronous encrypt/decrypt probe, and rechecks the
+  backend before committing bytes. Its exact version-1 envelope supports key-
+  only, pending-only, and renewal records; validates the deployed license-key
+  shape plus every 256-bit callback/PKCE field and the verifier's S256
+  challenge; caps pending state at 48 hours; and removes expired pending state
+  without removing a current key. Ciphertext lives only at owner-owned mode
+  `0600` below an owner-owned mode `0700` directory, with no-follow opens,
+  bounded reads, same-directory exclusive temporary files, file and directory
+  synchronization, atomic rename, safe rotation rewrites, inspected removal,
+  and idempotent absence. The module has no startup import, Electron import,
+  renderer bridge, dependency, or logging path. `test/pro-store.test.js` adds
+  15 focused tests. All five product-code mutations—allowing `basic_text`,
+  removing no-follow, weakening mode validation, allowing the first oversized
+  byte, and changing exact-boundary expiry—failed their focused test before the
+  original bytes were restored. Final evidence: focused 15/15; complete suite
+  226 tests with 225 passing and the one existing platform skip; syntax checks,
+  `npm ls --all`, and `npm audit` green with zero vulnerabilities; `package.json`
+  and `package-lock.json` unchanged.
+
+- [ ] **Step 13.2 — build and attack the browser/loopback PKCE client in
+  isolation.** Create pure activation-request and controller modules with
+  injected clock, randomness, browser opener, fetch, and HTTP server. Generate
+  256-bit verifier/state/path entropy, S256 only, canonical site parameters,
+  literal-loopback ephemeral binding before open, persist and read back the
+  encrypted pending flow before browser launch, an exact method/Host/path/state
+  gate, bounded headers/query/body/response reads, one active flow, one
+  exchange, exact-flow restart resumption, and deterministic expiry/shutdown
+  cleanup. Accept only the exact HTTPS production activation origin and a test-
+  injected loopback origin; never follow an exchange redirect or trust a
+  callback URL supplied by the site.
+  Done when interception, replay, wrong-state/path/host/method, port pre-bind,
+  oversized/malformed JSON, non-HTTPS production, redirect, timeout, duplicate
+  click, crash/restart with the original port free or occupied, expired pending
+  state, and shutdown tests all fail closed while the happy path returns one
+  in-memory key; seeded code/verifier/state values are absent from every log and
+  local success page; mutations prove PKCE/state/path/TLS/deadline/durable-
+  pending checks bite.
+
+- [ ] **Step 13.3 — carry the stored key to the published Shell over a private
+  pipe.** Pin the Shell version that contains Phase DA's reviewed stdin contract.
+  Extend only the Linux daemon launch spec and bootstrap argument pass-through:
+  a launch with a decrypted key gets piped stdin plus the fixed internal flags;
+  it also removes an ambient `MIRAFOLD_LICENSE_KEY` from `daemonEnv` before
+  spawn. An unactivated launch keeps today's environment, ignored stdin, and
+  argv. Write once, end, drop the main-process plaintext reference as soon as
+  the child owns its copy, and make write/early-exit failure retire the entire
+  daemon tree before any replacement. Never put the stored key in `daemonEnv`,
+  PowerShell, ledger files, or launch diagnostics. Done when unit and real-child
+  probes inspect `/proc` environment/cmdline, inherited descriptors, daemon/
+  agent output, and cleanup;
+  neither the stored nor a seeded stale ambient key appears, the daemon gets Pro
+  entitlement and billing state, no-key legacy startup is unchanged, and
+  package tests prove the exact published Shell—not a vendored/local substitute—
+  is used.
+
+- [ ] **Step 13.4 — integrate activation and restart into the native
+  lifecycle.** Recognize only the fixed Desktop marker on an external URL from
+  the current trusted daemon main frame; preflight secure storage; run one
+  activation at a time; open the fully parameterized site URL in the system
+  browser; store before success; then use the existing serialized stop/boot
+  ownership path to restart in the same folder and surface the relay QR. Add
+  native, non-secret progress/failure/success messages. Resume an unexpired
+  pending flow after app restart and leave a failed post-purchase store
+  retryable only through that exact flow. Done when the main-process probe
+  proves the URL provenance, preflight-before-browser ordering, pending-state
+  durability, store-before-restart ordering, success/failure UI, and crashes
+  before callback, after exchange, and after durable key replacement; generic
+  navigation/permissions remain unchanged, no renderer bridge exists, and the
+  complete Desktop suite passes.
+
+- [ ] **Step 13.5 — close removal and competing-lifecycle races.** Add a
+  neutral native menu item to remove Pro access from this device behind a
+  confirmation that states the accountless recovery consequence. Removal must
+  first cancel any pending activation and close its listener, cleanly stop the
+  daemon, delete only the encrypted Pro state, and restart unentitled in the
+  same folder; canceling removal changes nothing. Serialize app quit, folder
+  change, updater install, daemon crash, duplicate activation click, callback,
+  exchange completion, credential removal, and restart so each race has one
+  owner, one terminal state, no stale listener, and at most one dialog. Done
+  when focused model and real main-process probes cover every pairwise ordering,
+  key/pending files survive only the intended outcomes, no daemon or pipe is
+  orphaned, and the complete Desktop suite passes.
+
+- [ ] **Step 13.6 — prove the real Linux packages and secret-store boundary.**
+  Build `.deb`, AppImage, and tar candidates outside the checkout and inspect
+  their exact bundled Shell, native modules, flags, file modes, and absence of
+  plaintext fixtures. Launch from the installed desktop entry—not a terminal—
+  against a real supported Secret Service and complete a local fake-site/
+  fake-billing/gated-relay activation, restart, subscription-status call,
+  remote encrypted pairing, remove, and unentitled restart. Force
+  `--password-store=basic`, unavailable/locked keyring, corrupt/symlinked store,
+  and system-journal inspection. Kill and reopen the app before callback, after
+  exchange, and before/after credential replacement; resume only the exact
+  pending request. Exercise ordinary quit and package cleanup for every form.
+  Done when each real artifact has evidence for encrypted persistence, crash
+  recovery, restart, removal, private daemon input, exact published Shell,
+  native-module load, and zero remaining daemon/agent/listener or plaintext
+  credential; record artifact paths/hashes and observations without publishing.
+
+- [ ] **Step 13.7 — run the feature-delta correctness hunt.** Review the exact
+  Phase 13 product delta and adjacent startup, update, folder, and daemon
+  ownership logic for concrete incorrect behavior. Diagnose and reproduce each
+  finding before editing, make the narrow fix and a class-level regression test,
+  fix no more than ten confirmed findings, run the focused loop then the full
+  gates, and end with the required fresh-agent cold review. If more than ten
+  fixes are required, insert a continuation Step before 13.8. Done when every
+  confirmed correctness finding is fixed, no speculative hardening is mixed
+  into this pass, and the package smoke still proves all three Linux forms. Do
+  not publish or freeze hashes.
+
+- [ ] **Step 13.8 — run the feature-delta security audit.** Attack the exact
+  fixed candidate for callback theft, wrong state/path/host, concurrent
+  callback, exchange replay, parameter substitution, hostile renderer links,
+  ciphertext/symlink replacement, pipe and descriptor inheritance, process
+  metadata, browser/Paddle separation, billing-key authority, crash dumps/logs/
+  journal, stale pending flows, and quit/folder/update races. Prove each finding
+  before editing, turn it into a regression test, fix no more than ten confirmed
+  findings, and end with the required fresh-agent cold review; insert a
+  continuation Step before 13.9 if the cap is exceeded. Done when no confirmed
+  in-scope security finding remains and all focused, full, native, audit, and
+  packaging gates pass. Do not publish or freeze hashes.
+
+- [ ] **Step 13.9 — falsify the Phase 13 test suite.** Run the repository's
+  test-audit procedure against every claimed protection and lifecycle outcome,
+  using mutations in product code—not comments or the proof itself—to establish
+  which tests really fail. Repair every evidence-backed missing or wrong-target
+  test, keep each hunter as a permanent regression, rerun three unchanged full
+  suites to characterize flakes, and finish with the required fresh-agent cold
+  review. Done when every named Phase 13 contract has load-bearing evidence,
+  test theater is removed, no product behavior was changed in this pass, and
+  all local/native/package gates are green.
+
+- [ ] **Step 13.10 — freeze one release candidate without changing it.** From
+  the exact commit that cleared Steps 13.7–13.9, run the full clean-room release
+  rehearsal and native CI, build `.deb`, AppImage, and tar exactly once, inspect
+  their contents and secret-free metadata, and record immutable hashes. Any
+  source, test, dependency, workflow, or package-content change invalidates the
+  candidate and returns work to the owning review Step; it is not folded into
+  this pass. Done when one unchanged set of bytes has all required green run
+  IDs, attestable inputs, package manifests, and hashes. Do not deploy or
+  publish.
+
+- [ ] **Step 13.11 — accept the frozen candidate against production.** Require
+  the reviewed site activation endpoints and D1 migration live first. Install
+  Step 13.10's exact bytes through a candidate APT source on a clean supported
+  Linux desktop and launch from the app center. First activate with an existing
+  real Pro key to prove the no-charge path; Kyle types it in his own system
+  browser, never pastes it into chat, and the assistant never reads it. Then,
+  only with Kyle's explicit authorization in that future turn, run one fresh
+  live monthly Paddle trial: it charges $0 immediately but becomes a recurring
+  $12/month charge after
+  seven days unless canceled; cancel it during the same acceptance pass after
+  proving activation so no charge is expected. Prove browser return, hidden
+  key, entitlement exchange, QR, phone session, app restart, machine restart,
+  subscription management, removal, and reconnect/support fallback. Record
+  only redacted production request/result evidence and confirm ordinary npm/
+  browser checkout is unchanged. Done when the frozen hashes—not a rebuilt
+  approximation—pass the full installed arc. Do not publish or edit
+  mirafold.com in this Step.
+
+- [ ] **Step 13.12 — publish exactly the accepted Linux release.** Reconfirm the
+  candidate hashes equal Step 13.11, then use the protected Desktop release path
+  without source changes. Verify the tag, release manifests, attestations,
+  anonymous assets, APT index/signature, and installed version; update one
+  existing APT installation through the real channel and repeat activation
+  persistence plus relay pairing after update. Record versions, commits, run
+  IDs, artifacts, hashes, and observations. Only this completed Step unlocks
+  the site's public-positioning phase; it does not itself edit mirafold.com.
+
+### Phase 14 — Windows Desktop Pro activation proof (deferred; not a Linux gate)
+
+Windows may not inherit the Linux result by analogy. Its current PowerShell Job
+Object wrapper passes only standard handles to the daemon, Electron safeStorage
+uses DPAPI with same-user rather than app-isolated semantics, and no
+maintainer-owned human Windows test machine has been established. Do not start
+this phase through `$next`; Kyle must expressly open it.
+
+- [ ] **Step 14.1 — carry the private pipe through the real Windows wrapper.**
+  Extend and prove handle inheritance without weakening kill-on-close ownership
+  or leaking plaintext into PowerShell command lines, environment, transcripts,
+  event names, or diagnostics. Run native runner attacks and inspect the packed
+  process tree.
+- [ ] **Step 14.2 — prove DPAPI storage and the full installed flow on ordinary
+  Windows.** Exercise another-user refusal, same-user residual behavior,
+  installer/update survival, uninstall residue, browser callback, ConPTY
+  children, SmartScreen/wizard behavior, restart, removal, and no orphans on a
+  real human desktop. Only a green result can justify “Windows preview” Pro
+  language; until then Windows users are not told Desktop Pro works.
+
 ### Audit and test-audit pass — 2026-08-14
 
 Completed 2026-08-14, on this same branch. A full security audit found one
