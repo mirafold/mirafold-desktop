@@ -898,6 +898,64 @@ test("the fixed exchange deadline covers a stalled response body and remains ret
   assert.equal(await handle.result, LICENSE_KEY);
 });
 
+test("shutdown settles a non-cooperating exchange and clears its deadline", async (t) => {
+  const fetchStarted = deferred();
+  const liveTimers = new Set();
+  let exchangeSignal;
+  const setTimer = (callback, delay) => {
+    const handle = setTimeout(() => {
+      liveTimers.delete(handle);
+      callback();
+    }, delay);
+    liveTimers.add(handle);
+    return handle;
+  };
+  const clearTimer = (handle) => {
+    liveTimers.delete(handle);
+    clearTimeout(handle);
+  };
+  t.after(() => {
+    for (const handle of liveTimers) clearTimeout(handle);
+  });
+  const controller = createProActivationController({
+    store: memoryStore(),
+    openBrowser: async () => {},
+    exchangeDeadlineMs: 1000,
+    fetch: (_url, options) => {
+      exchangeSignal = options.signal;
+      fetchStarted.resolve();
+      return new Promise(() => {});
+    },
+    randomBytes: deterministicRandom(114, 115, 116).randomBytes,
+    siteOrigin: "http://127.0.0.1:49166",
+    setTimeout: setTimer,
+    clearTimeout: clearTimer,
+  });
+  const handle = await controller.start();
+  const callback = requestCallback(callbackParts(handle.activationUrl, token(117)).url);
+  callback.catch(() => {});
+  await fetchStarted.promise;
+  assert.equal(liveTimers.size, 2, "listener and exchange deadlines must both be active");
+
+  const shuttingDown = controller.shutdown();
+  const promptShutdown = await Promise.race([
+    shuttingDown.then((result) => ({ result })),
+    new Promise((resolve) => setTimeout(() => resolve(null), 100)),
+  ]);
+  if (promptShutdown === null) {
+    await shuttingDown;
+    assert.fail("shutdown waited for the exchange deadline instead of canceling it");
+  }
+  assert.equal(promptShutdown.result, true);
+  assert.equal(exchangeSignal.aborted, true);
+  assert.equal(liveTimers.size, 0, "shutdown must clear both deadlines before returning");
+  await assert.rejects(handle.result, activationError("shutdown"));
+  await assert.rejects(
+    callback,
+    (error) => error.code === "ECONNRESET" || error.code === "ECONNREFUSED",
+  );
+});
+
 test("shutdown prevents a preflight in progress from creating a later listener", async () => {
   const loadStarted = deferred();
   const releaseLoad = deferred();

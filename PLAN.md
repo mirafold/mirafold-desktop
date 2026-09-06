@@ -1128,15 +1128,17 @@ security primitive the platform does not already provide.
   success returns one key in memory while leaving DPC.4 to perform the atomic
   store-before-restart transition.
 
-  `test/pro-activation.test.js` adds 26 focused tests covering the real
+  `test/pro-activation.test.js` adds 27 focused tests covering the real
   loopback happy path, interception gates, replay, concurrent callbacks,
   failed persistence/readback/browser opening, redirects, malformed and
-  oversized responses, stalled headers and bodies, timeout, shutdown races,
-  restart with the original port free or occupied, expiry cleanup, and the real
-  encrypted DPC.1 store. Six product-code mutations weakening PKCE S256, state,
-  callback path, production TLS, listener deadline, and durable pending
-  readback each failed its targeted test before the final source bytes were
-  restored. Final evidence: focused 26/26; complete suite 256 tests with 255
+  oversized responses, stalled headers and bodies, timeout, shutdown races
+  including a fetch that ignores abort, restart with the original port free or
+  occupied, expiry cleanup, and the real encrypted DPC.1 store. Seven
+  product-code mutations weakening PKCE S256,
+  state, callback path, production TLS, listener deadline, durable pending
+  readback, and immediate shutdown cancellation each failed its targeted test
+  before the final source bytes were restored. Final evidence: focused 27/27;
+  complete suite 257 tests with 256
   passing and the one existing platform skip; syntax and whitespace checks,
   `npm ls --all`, and `npm audit` green with zero vulnerabilities;
   `package.json` and `package-lock.json` unchanged.

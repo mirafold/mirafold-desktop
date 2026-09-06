@@ -525,6 +525,12 @@ export function createProActivationController({
   async function forceClose(session) {
     clearSessionTimer(session);
     session.closing = true;
+    const exchangeDone = session.exchangeDone;
+    try {
+      session.cancelExchange?.();
+    } catch {
+      // The abort signal below independently cancels the real fetch transport.
+    }
     try {
       session.abortController?.abort();
     } catch {
@@ -551,6 +557,7 @@ export function createProActivationController({
         done();
       }
     });
+    await exchangeDone;
   }
 
   async function terminate(session, code, clearExpired = false) {
@@ -600,7 +607,17 @@ export function createProActivationController({
 
   async function exchange(session, code) {
     const controller = new AbortController();
+    let cancelExchange;
+    const cancellationPromise = new Promise((resolve) => {
+      cancelExchange = () => resolve(null);
+    });
+    let resolveExchangeDone;
+    const exchangeDone = new Promise((resolve) => {
+      resolveExchangeDone = resolve;
+    });
     session.abortController = controller;
+    session.cancelExchange = cancelExchange;
+    session.exchangeDone = exchangeDone;
     let deadline;
     const deadlinePromise = new Promise((_, reject) => {
       deadline = setTimeoutImpl(() => {
@@ -644,7 +661,7 @@ export function createProActivationController({
     })();
     request.catch(() => {});
     try {
-      return await Promise.race([request, deadlinePromise]);
+      return await Promise.race([request, deadlinePromise, cancellationPromise]);
     } catch {
       return null;
     } finally {
@@ -662,6 +679,9 @@ export function createProActivationController({
         }
       }
       session.abortController = null;
+      session.cancelExchange = null;
+      session.exchangeDone = null;
+      resolveExchangeDone();
     }
   }
 
@@ -767,6 +787,8 @@ export function createProActivationController({
       deferred: deferred(),
       ended: false,
       endCode: null,
+      cancelExchange: null,
+      exchangeDone: null,
       exchangeInFlight: false,
       pending: null,
       server: null,
