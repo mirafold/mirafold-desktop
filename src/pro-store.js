@@ -281,12 +281,10 @@ export function createProStore({
     }
   }
 
-  async function syncAfterMutation(directory) {
+  async function confirmDirectoryDurability(directory) {
     try {
       await directory.sync();
     } catch {
-      // rename/unlink has already changed the visible state. The caller must
-      // inspect or load it before retrying instead of assuming the prior state.
       throw fail("durability-uncertain");
     }
   }
@@ -418,10 +416,10 @@ export function createProStore({
         }
       }
     } catch {
-      if (removed) await syncAfterMutation(directory);
+      if (removed) await confirmDirectoryDurability(directory);
       throw fail("write");
     }
-    if (removed) await syncAfterMutation(directory);
+    if (removed) await confirmDirectoryDurability(directory);
     return removed;
   }
 
@@ -429,7 +427,9 @@ export function createProStore({
     const directory = await openDirectory(false);
     if (!directory) return false;
     try {
-      return await cleanupTemporaryFiles(directory);
+      const removed = await cleanupTemporaryFiles(directory);
+      if (!removed) await confirmDirectoryDurability(directory);
+      return removed;
     } finally {
       await closeQuietly(directory);
     }
@@ -486,7 +486,7 @@ export function createProStore({
       await assertTargetReplaceable();
       await fs.rename(temporaryPath, filePath);
       renamed = true;
-      await syncAfterMutation(directory);
+      await confirmDirectoryDurability(directory);
     } catch (error) {
       await closeQuietly(temporaryHandle);
       let cleanupUncertain = false;
@@ -500,7 +500,7 @@ export function createProStore({
         }
         if (removedTemporary) {
           try {
-            await syncAfterMutation(directory);
+            await confirmDirectoryDurability(directory);
           } catch {
             cleanupUncertain = true;
           }
@@ -526,14 +526,20 @@ export function createProStore({
         opened = null;
       }
       const removedTemporary = await cleanupTemporaryFiles(directory);
-      if (!hadRecord) return removedTemporary;
+      if (!hadRecord) {
+        if (!removedTemporary) await confirmDirectoryDurability(directory);
+        return removedTemporary;
+      }
       try {
         await fs.unlink(filePath);
       } catch (error) {
-        if (isMissing(error)) return removedTemporary;
+        if (isMissing(error)) {
+          await confirmDirectoryDurability(directory);
+          return removedTemporary;
+        }
         throw error;
       }
-      await syncAfterMutation(directory);
+      await confirmDirectoryDurability(directory);
       return true;
     } catch (error) {
       if (error instanceof ProStoreError) throw error;
@@ -693,6 +699,7 @@ export function createProStore({
     try {
       opened = await openRegularFile();
       const leftovers = await temporaryPaths();
+      await confirmDirectoryDurability(directory);
       return Object.freeze({ present: opened !== null || leftovers.length > 0 });
     } finally {
       await closeQuietly(opened?.handle);

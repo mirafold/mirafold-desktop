@@ -607,12 +607,16 @@ test("a post-mutation sync failure reports uncertain durability before any retry
   await original.save({ version: 1, licenseKey: LICENSE_KEY });
   const storeDirectory = path.dirname(original.path);
   let failDirectorySync = false;
+  let directorySyncAttempts = 0;
   const hookedFs = fsWithSyncHook(async (target, sync) => {
-    if (failDirectorySync && target === storeDirectory) {
-      failDirectorySync = false;
-      const error = new Error("injected post-mutation sync failure");
-      error.code = "EIO";
-      throw error;
+    if (target === storeDirectory) {
+      directorySyncAttempts += 1;
+      if (failDirectorySync) {
+        failDirectorySync = false;
+        const error = new Error("injected post-mutation sync failure");
+        error.code = "EIO";
+        throw error;
+      }
     }
     await sync();
   });
@@ -634,14 +638,16 @@ test("a post-mutation sync failure reports uncertain durability before any retry
       return true;
     },
   );
-  failDirectorySync = false;
-  assert.deepEqual(await original.load(), { version: 1, licenseKey: RENEWAL_KEY });
+  assert.equal(directorySyncAttempts, 2, "replacement failure was injected before rename");
+  assert.deepEqual(await uncertain.load(), { version: 1, licenseKey: RENEWAL_KEY });
+  assert.equal(directorySyncAttempts, 3, "load did not confirm replacement durability");
   const committedCiphertext = await fs.readFile(original.path);
 
   failDirectorySync = true;
   await rejectsCode(() => uncertain.remove(), "durability-uncertain");
-  failDirectorySync = false;
-  assert.deepEqual(await original.inspect(), { present: false });
+  assert.equal(directorySyncAttempts, 4, "removal failure was not reached after unlink");
+  assert.deepEqual(await uncertain.inspect(), { present: false });
+  assert.equal(directorySyncAttempts, 5, "inspection did not confirm removal durability");
 
   const orphan = path.join(
     storeDirectory,
@@ -650,8 +656,9 @@ test("a post-mutation sync failure reports uncertain durability before any retry
   await fs.writeFile(orphan, committedCiphertext, { mode: 0o600 });
   failDirectorySync = true;
   await rejectsCode(() => uncertain.load(), "durability-uncertain");
-  failDirectorySync = false;
-  assert.deepEqual(await original.inspect(), { present: false });
+  assert.equal(directorySyncAttempts, 6, "orphan recovery failure was not reached after unlink");
+  assert.deepEqual(await uncertain.inspect(), { present: false });
+  assert.equal(directorySyncAttempts, 7, "inspection did not confirm orphan cleanup durability");
 });
 
 test("inspection supports confirmation and removal is secure, keyring-independent, and idempotent", { skip: FILE_TEST_SKIP }, async (t) => {

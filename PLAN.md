@@ -1070,15 +1070,16 @@ security primitive the platform does not already provide.
   distinct `durability-uncertain` result so the caller must inspect or load the
   visible state before retrying. The module has no startup import, Electron
   import, renderer bridge, dependency, or logging path.
-  `test/pro-store.test.js` adds 19 focused tests. Eleven product-code mutations—
+  `test/pro-store.test.js` adds 19 focused tests. Twelve product-code mutations—
   allowing `basic_text`, accepting the `v10` fallback tag, re-decrypting rotated
   ciphertext instead of using its first successful result, removing no-follow,
   weakening mode validation, allowing the first oversized byte, changing
   exact-boundary expiry, skipping the required parent-sync retry, ignoring the
   reserved temporary namespace, and collapsing post-commit uncertainty into an
   ordinary write error, plus hiding a failed pre-rename cleanup behind that
-  ordinary error—failed their focused test before the original bytes were
-  restored. Final evidence: focused 19/19; complete suite 230 tests with 229
+  ordinary error and letting a recovery read skip the confirming directory
+  sync—failed their focused test before the original bytes were restored. Final
+  evidence: focused 19/19; complete suite 230 tests with 229
   passing and the one existing platform skip; syntax checks,
   `npm ls --all`, and `npm audit` green with zero vulnerabilities; `package.json`
   and `package-lock.json` unchanged.
