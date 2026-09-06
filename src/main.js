@@ -710,7 +710,8 @@ async function boot() {
       ? await booting.start(dir)
       : await booting.start(dir, { licenseKey: proLicenseKey });
   } catch (err) {
-    await retire();
+    const clean = await retire();
+    if (!clean) return onDaemonCleanupFailure("starting Mirafold");
     if (!current()) return;
     return onBootFailure(err);
   }
@@ -722,8 +723,8 @@ async function boot() {
   const origin = daemonOriginFromUrl(url);
   if (origin === null) {
     const clean = await retire();
-    if (!current()) return;
     if (!clean) return onDaemonCleanupFailure("starting Mirafold");
+    if (!current()) return;
     return onBootFailure(new Error("The daemon reported an invalid local URL."));
   }
 
@@ -743,8 +744,8 @@ async function boot() {
     }
     if (!booting.running) return;
     const clean = await retire();
-    if (!current()) return;
     if (!clean) return onDaemonCleanupFailure("recovering from a page-load failure");
+    if (!current()) return;
     return onBootFailure(err);
   }
   if (!current() || daemon !== booting || !booting.running) {
@@ -1112,12 +1113,21 @@ async function recoverFromUpdateInstallFailure() {
   }
 }
 
+function waitForNativeOrClose(operation, closedValue, whenClosing = lifecycle.whenClosing) {
+  const observed = Promise.resolve(operation);
+  // The operating system may leave its native UI Promise pending after quit.
+  // Keep observing it, while the caller releases as soon as terminal close owns
+  // the app. A late result never enters another lifecycle transition.
+  void observed.catch(() => {});
+  return Promise.race([observed, whenClosing.then(() => closedValue)]);
+}
+
 async function onBootFailure(err) {
   daemonOrigin = null;
   // Same guard as onDaemonCrash: during quit (or with the window gone) there
   // is no one to ask — a dialog would race app teardown, parentless.
   if (quitting || !win) return;
-  const { response } = await showMessage({
+  const outcome = await waitForNativeOrClose(showMessage({
     type: "error",
     title: "Mirafold couldn't start",
     message: "The Mirafold daemon failed to start.",
@@ -1125,10 +1135,13 @@ async function onBootFailure(err) {
     buttons: ["Try again", "Choose another folder", "Quit"],
     defaultId: 0,
     cancelId: 2,
-  });
+  }), { response: 2, skipped: true });
+  if (outcome.skipped || quitting || lifecycle.closing || !win) return;
+  const { response } = outcome;
   if (response === 0) return boot();
   if (response === 1) {
-    const chosen = await pickFolder();
+    const chosen = await waitForNativeOrClose(pickFolder(), null);
+    if (quitting || lifecycle.closing || !win) return;
     if (chosen) {
       folder = chosen;
       return boot();
@@ -1143,21 +1156,23 @@ async function onLoadingScreenFailure(err) {
   daemonOrigin = null;
   if (quitting || !win) return;
   try {
-    await showMessage({
+    await waitForNativeOrClose(showMessage({
       type: "error",
       title: "Mirafold couldn't start",
       message: "The Mirafold desktop interface could not be loaded.",
       detail: safeErrorDetail(err),
       buttons: ["Quit"],
       defaultId: 0,
-    });
+    }), null);
   } catch {
     // Do not let a second native failure turn the original startup failure
     // into an unhandled rejection. The app still has no usable interface.
     console.error("Mirafold could not show its startup failure dialog.");
   } finally {
-    quitting = true;
-    app.quit();
+    if (!lifecycle.closing) {
+      quitting = true;
+      app.quit();
+    }
   }
 }
 
@@ -1173,12 +1188,7 @@ async function onDaemonCleanupFailure(action, whenClosing = null) {
       buttons: ["Quit"],
       defaultId: 0,
     });
-    if (whenClosing) {
-      void presenting.catch(() => {});
-      await Promise.race([presenting, whenClosing]);
-    } else {
-      await presenting;
-    }
+    await waitForNativeOrClose(presenting, null, whenClosing ?? lifecycle.whenClosing);
   } finally {
     // A native-dialog failure cannot authorize a replacement process or leave
     // a disconnected window running after cleanup itself failed.
@@ -1228,11 +1238,11 @@ async function onDaemonCrash(crashed, { code, signal, stderr, clean }) {
     }, () => !quitting && !lifecycle.closing && win !== null && daemon === null);
     // The native box itself may not be cancellable. Observe its eventual
     // result, but let terminal close retire this lifecycle wait immediately.
-    void presenting.catch(() => {});
-    const outcome = await Promise.race([
+    const outcome = await waitForNativeOrClose(
       presenting,
-      whenClosing.then(() => ({ response: 1, skipped: true })),
-    ]);
+      { response: 1, skipped: true },
+      whenClosing,
+    );
     if (outcome.skipped || quitting || lifecycle.closing || !win || daemon !== null) return;
     if (outcome.response === 0) return boot();
     quitting = true;

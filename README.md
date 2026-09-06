@@ -181,9 +181,10 @@ crashes, updater installation and recovery, restarts, and quit take one ordered
 main-process lifecycle turn each; native dialogs also wait their turn so stale
 outcomes do not stack over a newer decision. An unclean crash blocks every
 replacement daemon until the app exits. A presented folder chooser cannot hold
-terminal quit open, and neither can an active crash dialog. Rollback after failed
-removal or updater recovery keeps any returned Pro key that is still waiting for
-a secure save.
+terminal quit open, and neither can an active crash dialog, startup-failure
+dialog, or startup-recovery folder chooser. Failed cleanup is reported before
+stale boot ownership is discarded. Rollback after failed removal or updater
+recovery keeps any returned Pro key that is still waiting for a secure save.
 
 ## Files
 

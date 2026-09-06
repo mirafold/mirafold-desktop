@@ -18,6 +18,14 @@ const ACTIVATION_URL = MARKER
   + "&state=fixture-state&code_challenge=fixture-challenge";
 const OLD_KEY = "mf_" + "a".repeat(20);
 const NEW_KEY = "mf_" + "b".repeat(20);
+const STARTUP_CLEANUP_FAILURE_MODES = [
+  "invalid-url-cleanup-failure",
+  "page-load-cleanup-failure",
+];
+const STARTUP_QUIT_WAIT_MODES = [
+  "quit-during-boot-failure-dialog",
+  "quit-during-boot-recovery-picker",
+];
 const events = [];
 const dialogs = [];
 const titles = [];
@@ -100,15 +108,19 @@ const removalConfirmRelease = mode === "removal-during-success-dialog" ? deferre
 const folderDialogEntered = [
   "unclean-crash-during-folder",
   "quit-during-folder-dialog",
+  "quit-during-boot-recovery-picker",
 ].includes(mode) ? deferred() : null;
 const folderDialogRelease = [
   "unclean-crash-during-folder",
   "quit-during-folder-dialog",
+  "quit-during-boot-recovery-picker",
 ].includes(mode) ? deferred() : null;
 const keySaveEntered = mode === "unclean-crash-during-activation" ? deferred() : null;
 const keySaveRelease = mode === "unclean-crash-during-activation" ? deferred() : null;
 const crashDialogEntered = mode === "quit-during-crash-dialog" ? deferred() : null;
 const crashDialogRelease = mode === "quit-during-crash-dialog" ? deferred() : null;
+const bootFailureDialogEntered = mode === "quit-during-boot-failure-dialog" ? deferred() : null;
+const bootFailureDialogRelease = mode === "quit-during-boot-failure-dialog" ? deferred() : null;
 
 const proStore = {
   async inspect() {
@@ -242,9 +254,15 @@ class FakeDaemon {
     this.options = options;
     this.running = true;
     events.push("daemon.start." + keyLabel(options?.licenseKey));
+    if (STARTUP_QUIT_WAIT_MODES.includes(mode) && this.index === 0) {
+      throw new Error("fixture daemon start failure");
+    }
     if (restartGate && this.index === 1) {
       events.push("daemon.start.gated");
       await restartGate.result;
+    }
+    if (mode === "invalid-url-cleanup-failure" && this.index === 0) {
+      return "https://invalid.example/?token=fixture";
     }
     return "http://127.0.0.1:" + (4100 + this.index) + "/?token=fixture";
   }
@@ -256,6 +274,10 @@ class FakeDaemon {
       "quit-during-activation-boot-unproven",
       "update-during-activation-boot",
     ].includes(mode) && this.index === 1) {
+      events.push("daemon.stop.unproven");
+      return false;
+    }
+    if (STARTUP_CLEANUP_FAILURE_MODES.includes(mode) && this.index === 0) {
       events.push("daemon.stop.unproven");
       return false;
     }
@@ -294,6 +316,9 @@ class FakeWindow extends EventEmitter {
   }
 
   async loadURL(url) {
+    if (mode === "page-load-cleanup-failure") {
+      throw new Error("fixture page load failure");
+    }
     this.currentUrl = url;
     this.webContents.emit("did-finish-load");
   }
@@ -325,6 +350,7 @@ const dialog = {
       "folder-then-callback",
       "unclean-crash-during-folder",
       "quit-during-folder-dialog",
+      "quit-during-boot-recovery-picker",
     ].includes(mode)) {
       events.push("dialog.folder");
       if (folderDialogEntered) {
@@ -350,6 +376,13 @@ const dialog = {
       if (crashDialogEntered && options.title === "Mirafold stopped") {
         crashDialogEntered.resolve();
         await crashDialogRelease.result;
+      }
+      if (bootFailureDialogEntered && options.title === "Mirafold couldn't start") {
+        bootFailureDialogEntered.resolve();
+        await bootFailureDialogRelease.result;
+      }
+      if (mode === "quit-during-boot-recovery-picker" && options.title === "Mirafold couldn't start") {
+        return { response: 1 };
       }
       if ([
         "store-retry",
@@ -483,7 +516,13 @@ function resolveActivation() {
 }
 
 await waitFor(
-  () => menuTemplate !== null && daemonInstances.length === 1 && updaterStarts === 1,
+  () => menuTemplate !== null
+    && daemonInstances.length === 1
+    && (
+      STARTUP_CLEANUP_FAILURE_MODES.includes(mode)
+      || STARTUP_QUIT_WAIT_MODES.includes(mode)
+      || updaterStarts === 1
+    ),
   "the initial Desktop boot did not finish",
 );
 assert.equal(typeof windowOpenHandler, "function", "the native popup handler was not installed");
@@ -494,7 +533,31 @@ const removeProItem = projectMenu.submenu.find(
 );
 assert.ok(removeProItem, "Linux must expose the neutral device-removal command");
 
-if (mode === "happy") {
+if (STARTUP_QUIT_WAIT_MODES.includes(mode)) {
+  if (mode === "quit-during-boot-failure-dialog") {
+    await bootFailureDialogEntered.result;
+  } else {
+    await folderDialogEntered.result;
+  }
+  let preventions = 0;
+  app.emit("before-quit", { preventDefault: () => { preventions += 1; } });
+  await waitFor(() => quitCalls === 1, "quit waited for native boot recovery UI");
+  assert.equal(preventions, 1);
+  if (bootFailureDialogRelease) bootFailureDialogRelease.resolve();
+  if (folderDialogRelease) folderDialogRelease.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(daemonInstances.length, 1, "retired boot recovery started a daemon");
+  assert.equal(daemonInstances[0].running, false);
+  assert.equal(updaterStarts, 0);
+} else if (STARTUP_CLEANUP_FAILURE_MODES.includes(mode)) {
+  await waitFor(() => quitCalls === 1, "startup cleanup failure was not terminal");
+  assert.equal(daemonInstances.length, 1);
+  assert.equal(daemonInstances[0].stopCalls, 1);
+  assert.equal(daemonInstances[0].running, true, "fixture must model the unproved live tree");
+  assert.equal(updaterStarts, 0);
+  assert.equal(dialogs.length, 1);
+  assert.equal(dialogs[0].title, "Mirafold couldn't stop safely");
+} else if (mode === "happy") {
   const window = globalThis.fixtureWindow;
   const daemonUrl = window.currentUrl;
 
@@ -1143,6 +1206,16 @@ test("the trusted Desktop marker drives preflight, durable activation, restart, 
 
 test("a secure-storage preflight failure opens no browser and exposes no supplied diagnostic", linuxOnly, () => {
   runProbe("preflight-failure");
+});
+
+test("invalid startup output and page-load failure report an unproved daemon cleanup", linuxOnly, () => {
+  runProbe("invalid-url-cleanup-failure");
+  runProbe("page-load-cleanup-failure");
+});
+
+test("quit bypasses the native boot-failure dialog and recovery folder picker", linuxOnly, () => {
+  runProbe("quit-during-boot-failure-dialog");
+  runProbe("quit-during-boot-recovery-picker");
 });
 
 test("a browser-open failure resumes and reopens the same saved flow only after another trusted marker", linuxOnly, () => {
