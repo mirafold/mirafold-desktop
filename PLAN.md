@@ -1084,7 +1084,7 @@ security primitive the platform does not already provide.
   `npm ls --all`, and `npm audit` green with zero vulnerabilities; `package.json`
   and `package-lock.json` unchanged.
 
-- [ ] **Step 13.2 — build and attack the browser/loopback PKCE client in
+- [x] **Step 13.2 — build and attack the browser/loopback PKCE client in
   isolation.** Create pure activation-request and controller modules with
   injected clock, randomness, browser opener, fetch, and HTTP server. Generate
   256-bit verifier/state/path entropy, S256 only, canonical site parameters,
@@ -1102,6 +1102,44 @@ security primitive the platform does not already provide.
   in-memory key; seeded code/verifier/state values are absent from every log and
   local success page; mutations prove PKCE/state/path/TLS/deadline/durable-
   pending checks bite.
+
+  **Completed 2026-09-06.** `src/pro-activation.js` is an isolated main-process
+  activation request and controller with injected storage, clock, randomness,
+  browser opener, fetch, HTTP server, and timers. It draws three separate
+  256-bit values, derives only an S256 challenge from the verifier, accepts the
+  exact `https://mirafold.com` production origin or a canonical explicit IPv4-
+  loopback test origin, binds literal `127.0.0.1` on an ephemeral port before
+  request creation, and saves and reads back the exact pending record through
+  the encrypted DPC.1 store before opening the browser. The module has no
+  Electron import, startup import, dependency, renderer bridge, or logging
+  path; its browser URL necessarily carries state and callback capabilities but
+  never the verifier.
+
+  The callback listener admits only one exact HTTP/1.1 `GET` with one exact
+  `Host`, raw callback path, query order, canonical code, and matching state.
+  It caps simultaneous sockets, header count and bytes, requests per socket,
+  request time, query size, and local response size. The exchange sends one
+  exact credential-free JSON `POST`, follows no redirect, requires the exact
+  response URL/status/media type/one-field JSON shape, and applies its fixed
+  deadline to both response headers and the bounded 256-byte body. One flow and
+  one exchange are authoritative at a time; restart re-binds only the saved
+  port and never reopens the browser; expiry clears only that pending flow;
+  shutdown closes the listener and waits for active encrypted-state work; and
+  success returns one key in memory while leaving DPC.4 to perform the atomic
+  store-before-restart transition.
+
+  `test/pro-activation.test.js` adds 26 focused tests covering the real
+  loopback happy path, interception gates, replay, concurrent callbacks,
+  failed persistence/readback/browser opening, redirects, malformed and
+  oversized responses, stalled headers and bodies, timeout, shutdown races,
+  restart with the original port free or occupied, expiry cleanup, and the real
+  encrypted DPC.1 store. Six product-code mutations weakening PKCE S256, state,
+  callback path, production TLS, listener deadline, and durable pending
+  readback each failed its targeted test before the final source bytes were
+  restored. Final evidence: focused 26/26; complete suite 256 tests with 255
+  passing and the one existing platform skip; syntax and whitespace checks,
+  `npm ls --all`, and `npm audit` green with zero vulnerabilities;
+  `package.json` and `package-lock.json` unchanged.
 
 - [ ] **Step 13.3 — carry the stored key to the published Shell over a private
   pipe.** Pin the Shell version that contains Phase DA's reviewed stdin contract.
