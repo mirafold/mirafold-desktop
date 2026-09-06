@@ -1052,8 +1052,12 @@ security primitive the platform does not already provide.
 
   **Completed 2026-09-06.** `src/pro-store.js` is an injected, Linux-only main-
   process store that accepts only Electron 43.4.0's four named secret-service
-  backends, completes an asynchronous encrypt/decrypt probe, and rechecks the
-  backend before committing bytes. Its exact version-1 envelope supports key-
+  backends, completes an asynchronous encrypt/decrypt probe, rechecks the
+  backend before committing bytes, and requires the pinned secure-provider
+  ciphertext tags (`v11` Secret Service/KWallet or `v12` Secret Portal).
+  Electron's `v10` Posix fallback uses a public hard-coded key and is refused
+  even when the configured backend still has a trusted name. The exact
+  version-1 envelope supports key-
   only, pending-only, and renewal records; validates the deployed license-key
   shape plus every 256-bit callback/PKCE field and the verifier's S256
   challenge; caps pending state at 48 hours; and removes expired pending state
@@ -1063,11 +1067,12 @@ security primitive the platform does not already provide.
   synchronization, atomic rename, safe rotation rewrites, inspected removal,
   and idempotent absence. The module has no startup import, Electron import,
   renderer bridge, dependency, or logging path. `test/pro-store.test.js` adds
-  15 focused tests. All five product-code mutations—allowing `basic_text`,
-  removing no-follow, weakening mode validation, allowing the first oversized
-  byte, and changing exact-boundary expiry—failed their focused test before the
-  original bytes were restored. Final evidence: focused 15/15; complete suite
-  226 tests with 225 passing and the one existing platform skip; syntax checks,
+  16 focused tests. Six product-code mutations—allowing `basic_text`, accepting
+  the `v10` fallback tag, removing no-follow, weakening mode validation,
+  allowing the first oversized byte, and changing exact-boundary expiry—failed
+  their focused test before the original bytes were restored. Final evidence:
+  focused 16/16; complete suite 227 tests with 226 passing and the one existing
+  platform skip; syntax checks,
   `npm ls --all`, and `npm audit` green with zero vulnerabilities; `package.json`
   and `package-lock.json` unchanged.
 

@@ -39,24 +39,24 @@ function pending(overrides = {}) {
   };
 }
 
-function encoded(plaintext, serial) {
+function encoded(plaintext, serial, tag = "v11") {
   const body = Buffer.from(plaintext, "utf8");
   for (let index = 0; index < body.length; index += 1) body[index] ^= 0xa5;
-  const header = Buffer.alloc(8);
-  header.write("MFV1", 0, "ascii");
-  header.writeUInt32BE(serial, 4);
+  const header = Buffer.alloc(7);
+  header.write(tag, 0, "ascii");
+  header.writeUInt32BE(serial, 3);
   return Buffer.concat([header, body]);
 }
 
 function decoded(ciphertext) {
   if (
     !Buffer.isBuffer(ciphertext)
-    || ciphertext.length < 8
-    || ciphertext.subarray(0, 4).toString("ascii") !== "MFV1"
+    || ciphertext.length < 7
+    || !/^v\d\d$/.test(ciphertext.subarray(0, 3).toString("ascii"))
   ) {
     throw new Error("test ciphertext refused");
   }
-  const body = Buffer.from(ciphertext.subarray(8));
+  const body = Buffer.from(ciphertext.subarray(7));
   for (let index = 0; index < body.length; index += 1) body[index] ^= 0xa5;
   return body.toString("utf8");
 }
@@ -70,6 +70,8 @@ function safeStorageAdapter(options = {}) {
     backendError: options.backendError ?? null,
     encryptError: options.encryptError ?? null,
     encryptResult: options.encryptResult,
+    ciphertextTag: options.ciphertextTag ?? "v11",
+    ciphertextTags: options.ciphertextTags ?? null,
     decryptError: options.decryptError ?? null,
     badDecryptResult: options.badDecryptResult ?? null,
     wrongProbe: options.wrongProbe ?? false,
@@ -101,7 +103,13 @@ function safeStorageAdapter(options = {}) {
       state.encryptionCalls += 1;
       if (state.encryptError) throw state.encryptError;
       if (state.encryptResult !== undefined) return state.encryptResult;
-      return encoded(plaintext, state.encryptionCalls);
+      const tag = state.ciphertextTags
+        ? state.ciphertextTags[Math.min(
+          state.encryptionCalls - 1,
+          state.ciphertextTags.length - 1,
+        )]
+        : state.ciphertextTag;
+      return encoded(plaintext, state.encryptionCalls, tag);
     },
     async decryptStringAsync(ciphertext) {
       state.decryptionCalls += 1;
@@ -162,6 +170,22 @@ test("preflight accepts every pinned Linux secret-service backend", async () => 
     assert.deepEqual(await store.preflight(), { backend });
     assert.equal(state.plainTextFallbackCalls, 0);
   }
+
+  const portal = safeStorageAdapter({ ciphertextTag: "v12" });
+  assert.deepEqual(
+    await storeFor(path.resolve(tmpdir()), portal.adapter).preflight(),
+    { backend: "gnome_libsecret" },
+  );
+});
+
+test("preflight refuses Electron's hard-coded v10 Posix fallback even behind a trusted backend name", async () => {
+  const { adapter, state } = safeStorageAdapter({
+    backend: "gnome_libsecret",
+    ciphertextTag: "v10",
+  });
+  await rejectsCode(() => storeFor(path.resolve(tmpdir()), adapter).preflight(), "unavailable");
+  assert.equal(state.decryptionCalls, 0, "the public-key fallback ciphertext was decrypted");
+  assert.equal(state.plainTextFallbackCalls, 0);
 });
 
 test("preflight refuses every non-secret backend and a non-Linux caller", async () => {
@@ -238,7 +262,7 @@ test("key-only, pending-only, and renewal state round-trip as ciphertext", { ski
   await assert.rejects(() => fs.stat(path.join(directory, "state.json")), { code: "ENOENT" });
 });
 
-test("a backend downgrade during record encryption stops before persistence", { skip: FILE_TEST_SKIP }, async (t) => {
+test("a backend or ciphertext-provider downgrade during record encryption stops before persistence", { skip: FILE_TEST_SKIP }, async (t) => {
   const directory = await userData(t);
   const { adapter, state } = safeStorageAdapter({
     backends: ["gnome_libsecret", "gnome_libsecret", "basic_text"],
@@ -247,6 +271,15 @@ test("a backend downgrade during record encryption stops before persistence", { 
   await rejectsCode(() => store.save({ version: 1, licenseKey: LICENSE_KEY }), "unavailable");
   assert.deepEqual(await store.inspect(), { present: false });
   assert.equal(state.plainTextFallbackCalls, 0);
+
+  const secondDirectory = await userData(t);
+  const fallback = safeStorageAdapter({ ciphertextTags: ["v11", "v10"] });
+  const fallbackStore = storeFor(secondDirectory, fallback.adapter);
+  await rejectsCode(
+    () => fallbackStore.save({ version: 1, licenseKey: LICENSE_KEY }),
+    "unavailable",
+  );
+  assert.deepEqual(await fallbackStore.inspect(), { present: false });
 });
 
 test("the exact envelope and pending schemas reject every malformed field class", { skip: FILE_TEST_SKIP }, async (t) => {
@@ -358,6 +391,17 @@ test("corrupt ciphertext and malformed decrypted state fail without disclosing s
     assert.equal(error.code, "corrupt");
     assert.doesNotMatch(error.message, new RegExp(LICENSE_KEY));
     assert.doesNotMatch(error.message, new RegExp(token(7)));
+    return true;
+  });
+
+  await fs.writeFile(
+    store.path,
+    encoded(JSON.stringify({ version: 1, licenseKey: LICENSE_KEY }), 99, "v10"),
+    { mode: 0o600 },
+  );
+  await assert.rejects(() => store.load(), (error) => {
+    assert.equal(error.code, "corrupt");
+    assert.doesNotMatch(error.message, new RegExp(LICENSE_KEY));
     return true;
   });
 });

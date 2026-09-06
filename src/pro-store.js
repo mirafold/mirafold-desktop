@@ -22,6 +22,11 @@ const ACCEPTED_LINUX_BACKENDS = new Set([
   "kwallet5",
   "kwallet6",
 ]);
+// Electron 43.4 tags async ciphertext with the provider that supplied its key.
+// v10 is the public hard-coded Posix fallback; v11 is Secret Service/KWallet,
+// and v12 is org.freedesktop.portal.Secret. Checking the configured backend is
+// insufficient because its provider can fail while Electron silently uses v10.
+const ACCEPTED_LINUX_CIPHERTEXT_TAGS = [Buffer.from("v11"), Buffer.from("v12")];
 const ENVELOPE_FIELDS = ["version", "licenseKey", "pending"];
 const PENDING_FIELDS = [
   "version",
@@ -142,6 +147,12 @@ function validDecryptResult(value) {
     && typeof value === "object"
     && typeof value.shouldReEncrypt === "boolean"
     && typeof value.result === "string";
+}
+
+function hasAcceptedCiphertextTag(value) {
+  return Buffer.isBuffer(value) && ACCEPTED_LINUX_CIPHERTEXT_TAGS.some(
+    (tag) => value.subarray(0, tag.length).equals(tag),
+  );
 }
 
 function safeNow(now) {
@@ -463,6 +474,7 @@ export function createProStore({
         !Buffer.isBuffer(encrypted)
         || encrypted.length === 0
         || encrypted.length > MAX_PRO_CIPHERTEXT_BYTES
+        || !hasAcceptedCiphertextTag(encrypted)
       ) {
         throw fail("unavailable");
       }
@@ -484,6 +496,7 @@ export function createProStore({
     let ciphertext;
     try {
       ciphertext = await safeStorage.encryptStringAsync(plaintext);
+      if (!hasAcceptedCiphertextTag(ciphertext)) throw fail("unavailable");
       if (selectedBackend() !== backend) throw fail("unavailable");
       await replaceCiphertext(ciphertext);
     } catch (error) {
@@ -505,6 +518,10 @@ export function createProStore({
     const { backend } = await preflightRaw();
     const ciphertext = await readCiphertext();
     if (!ciphertext) return null;
+    if (!hasAcceptedCiphertextTag(ciphertext)) {
+      ciphertext.fill(0);
+      throw fail("corrupt");
+    }
 
     let decrypted;
     try {
