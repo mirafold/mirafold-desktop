@@ -43,6 +43,8 @@ const DAEMON_BOOTSTRAP = path.join(HERE, "daemon-bootstrap.cjs");
 const WINDOWS_DAEMON_JOB = path.join(HERE, "windows-daemon-job.ps1");
 const PID_LEDGER_ENV = "MIRAFOLD_DESKTOP_PID_LEDGER";
 const WINDOWS_STOP_EVENT_ENV = "MIRAFOLD_DESKTOP_WINDOWS_STOP_EVENT";
+export const DESKTOP_CREDENTIAL_FLAG = "--mirafold-desktop";
+const LICENSE_KEY_RE = /^mf_[a-z2-7]{20,40}$/;
 
 // Windows first compiles and configures its kill-on-close Job Object wrapper,
 // then launches the actual daemon. Runtime Add-Type compilation crossed one
@@ -75,6 +77,19 @@ export function daemonLaunchSpec({
   env,
 }) {
   const childEnv = { ...env, ELECTRON_RUN_AS_NODE: "1" };
+  if (platform === "linux") {
+    // A flagged Shell deliberately never falls back to an ambient key. Remove
+    // that ignored secret at the process boundary too, rather than carrying it
+    // through /proc and every descendant for the lifetime of the daemon.
+    delete childEnv.MIRAFOLD_LICENSE_KEY;
+    return {
+      command: executable,
+      args: [bootstrapEntry, daemonEntry, DESKTOP_CREDENTIAL_FLAG],
+      env: childEnv,
+      detached: true,
+      stdin: "pipe",
+    };
+  }
   if (platform === "win32") {
     const systemRoot = env.SystemRoot ?? env.SYSTEMROOT ?? "C:\\Windows";
     return {
@@ -99,6 +114,7 @@ export function daemonLaunchSpec({
       ],
       env: childEnv,
       detached: false,
+      stdin: "ignore",
     };
   }
   return {
@@ -106,7 +122,81 @@ export function daemonLaunchSpec({
     args: [bootstrapEntry, daemonEntry],
     env: childEnv,
     detached: true,
+    stdin: "ignore",
   };
+}
+
+function assertDesktopLicenseKey(licenseKey) {
+  if (licenseKey !== undefined && (
+    typeof licenseKey !== "string"
+    || !LICENSE_KEY_RE.test(licenseKey)
+  )) {
+    throw new TypeError("invalid Desktop Pro license key");
+  }
+}
+
+function handoffError() {
+  const error = new Error("Desktop Pro credential could not be delivered to Mirafold Shell.");
+  error.code = "desktop-credential-handoff";
+  return error;
+}
+
+/**
+ * Give Shell its one bounded credential frame, terminated only by EOF.
+ *
+ * The writable callback is the ownership boundary: until it fires, Node may
+ * still need the source bytes. Every terminal outcome clears that buffer. The
+ * child-exit listener makes an early exit a failed handoff even if no EPIPE is
+ * reported by the operating system.
+ */
+export function sendDesktopCredential(child, licenseKey) {
+  assertDesktopLicenseKey(licenseKey);
+  let bytes = licenseKey === undefined ? null : Buffer.from(licenseKey, "utf8");
+  licenseKey = undefined;
+  const input = child?.stdin;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const clearBytes = () => {
+      bytes?.fill(0);
+      bytes = null;
+    };
+    const cleanup = () => {
+      child?.off?.("exit", onExit);
+    };
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      clearBytes();
+      if (error) reject(handoffError());
+      else resolve();
+    };
+    const onExit = () => finish(new Error("child exited"));
+    const onError = () => finish(new Error("pipe failed"));
+    const onClose = () => {
+      input?.off?.("error", onError);
+      if (!settled) finish(new Error("pipe closed"));
+    };
+
+    if (!input || typeof input.end !== "function") {
+      finish(new Error("pipe unavailable"));
+      return;
+    }
+    child.once("exit", onExit);
+    // Keep this handler until close. A late EPIPE after Writable's completion
+    // callback must remain handled even though the handoff has already settled.
+    input.on("error", onError);
+    input.once("close", onClose);
+    try {
+      const completed = (error) => finish(error);
+      if (bytes === null) input.end(completed);
+      else input.end(bytes, completed);
+    } catch {
+      input.destroy?.();
+      finish(new Error("pipe write failed"));
+    }
+  });
 }
 
 /**
@@ -207,10 +297,31 @@ export class Daemon {
   #stopPromise = null;
   #windowsStopEvent = null;
   #stderr = [];
+  #loadEnv;
+  #resolveDaemonEntry;
+  #writeStderr;
+  #writeStdout;
 
   /** @param {(info: {code: number|null, signal: string|null, stderr: string, clean: boolean}) => void} onCrash */
-  constructor(onCrash) {
+  constructor(onCrash, {
+    loadEnv = daemonEnv,
+    resolveDaemonEntry = daemonPath,
+    writeStderr = (text) => process.stderr.write(text),
+    writeStdout = (text) => process.stdout.write(text),
+  } = {}) {
+    if (
+      typeof loadEnv !== "function"
+      || typeof resolveDaemonEntry !== "function"
+      || typeof writeStderr !== "function"
+      || typeof writeStdout !== "function"
+    ) {
+      throw new TypeError("daemon dependencies must be functions");
+    }
     this.onCrash = onCrash;
+    this.#loadEnv = loadEnv;
+    this.#resolveDaemonEntry = resolveDaemonEntry;
+    this.#writeStderr = writeStderr;
+    this.#writeStdout = writeStdout;
   }
 
   get running() {
@@ -222,13 +333,22 @@ export class Daemon {
    * the folder picker meaningful, since sessions default to the daemon's cwd.
    * Resolves with the URL to load; rejects if the daemon dies or goes quiet.
    */
-  async start(folder) {
+  async start(folder, options = {}) {
     if (this.#child) throw new Error("daemon already running");
+    if (!options || typeof options !== "object" || Array.isArray(options)) {
+      throw new TypeError("daemon start options must be an object");
+    }
+    let licenseKey = options.licenseKey;
+    options = undefined;
+    assertDesktopLicenseKey(licenseKey);
+    if (process.platform !== "linux" && licenseKey !== undefined) {
+      throw new Error("Desktop Pro credential handoff is available only on Linux");
+    }
     this.#stderr = [];
     this.#stopping = false;
     this.#stopPromise = null;
 
-    const env = await daemonEnv();
+    const env = await this.#loadEnv();
     // stop() may have landed while we awaited the login shell — the window
     // between start() and the spawn. Spawning now would create a daemon that
     // nothing will ever kill.
@@ -250,13 +370,13 @@ export class Daemon {
       this.#windowsStopEvent = `Local\\MirafoldDesktopStop-${randomUUID()}`;
       env[WINDOWS_STOP_EVENT_ENV] = this.#windowsStopEvent;
     }
-    const launch = daemonLaunchSpec({ env });
+    const launch = daemonLaunchSpec({ env, daemonEntry: this.#resolveDaemonEntry() });
     let child;
     try {
       child = spawn(launch.command, launch.args, {
         cwd: folder,
         env: launch.env,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: [launch.stdin, "pipe", "pipe"],
         // Unix: put the daemon in its OWN process group so that stopping it can
         // signal the whole group and take the agent CLIs it spawned with it.
         // See stop() — without this there is no way to reach grandchildren.
@@ -273,11 +393,11 @@ export class Daemon {
     const safeStdout = new CredentialSafeLineStream();
     const safeStderr = new CredentialSafeLineStream();
     const forwardStdout = (text) => {
-      if (text) process.stdout.write(text);
+      if (text) this.#writeStdout(text);
     };
     const forwardStderr = (text) => {
       if (!text) return;
-      process.stderr.write(text);
+      this.#writeStderr(text);
       this.#stderr = appendStderr(this.#stderr, text);
     };
     const flushOutput = () => {
@@ -291,7 +411,7 @@ export class Daemon {
     });
     child.stderr.once("end", () => forwardStderr(safeStderr.end()));
 
-    const url = await new Promise((resolve, reject) => {
+    const startupUrl = new Promise((resolve, reject) => {
       let tail = "";
       let settled = false;
       let deadline = null;
@@ -331,24 +451,32 @@ export class Daemon {
         done(reject, new Error(`the daemon exited (${signal ?? `code ${code}`}) before starting`));
       });
       child.once("error", (err) => done(reject, err));
-    }).catch(async (err) => {
-      this.#child = null;
-      const trackedIdentities = this.#takeTreeSnapshot();
-      // The daemon may have spawned agent CLIs before failing, so take down
-      // the whole tree, not just the daemon. Straight to SIGKILL: the boot
-      // never completed, so there is nothing worth a graceful shutdown.
-      if (child.pid) {
-        await terminateProcessTree(child.pid, trackedIdentities, {
-          termTimeoutMs: 0,
-          ledgerFile: this.#ledgerFile,
-        });
-      }
-      this.#cleanLedger();
-      this.#windowsStopEvent = null;
-      flushOutput();
-      err.stderr = this.stderr;
-      throw err;
     });
+    const credentialHandoff = launch.stdin === "pipe"
+      ? sendDesktopCredential(child, licenseKey)
+      : Promise.resolve();
+    licenseKey = undefined;
+
+    const url = await Promise.all([startupUrl, credentialHandoff])
+      .then(([startedUrl]) => startedUrl)
+      .catch(async (err) => {
+        this.#child = null;
+        const trackedIdentities = this.#takeTreeSnapshot();
+        // The daemon may have spawned agent CLIs before failing, so take down
+        // the whole tree, not just the daemon. Straight to SIGKILL: the boot
+        // never completed, so there is nothing worth a graceful shutdown.
+        if (child.pid) {
+          await terminateProcessTree(child.pid, trackedIdentities, {
+            termTimeoutMs: 0,
+            ledgerFile: this.#ledgerFile,
+          });
+        }
+        this.#cleanLedger();
+        this.#windowsStopEvent = null;
+        flushOutput();
+        err.stderr = this.stderr;
+        throw err;
+      });
 
     // Boot succeeded, so from here a close is news. The listener above has
     // already fired-or-not; this one owns the rest of the process's life.
