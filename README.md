@@ -169,12 +169,24 @@ restart without opening a browser page on its own; choosing activation in the
 Shell reopens that exact saved flow. This native lifecycle is currently
 Linux-only. Windows activation remains a separate planned proof.
 
+On Linux, **Project → Remove Pro Access from This Device…** becomes available
+whenever an encrypted key or unfinished activation is present. Its native
+confirmation explains the accountless recovery limit: reconnecting later needs
+an existing Pro key, or Mirafold support when that key is unavailable. A
+confirmed removal first closes the private callback listener and any exchange,
+then proves the daemon tree stopped, removes only the dedicated encrypted Pro
+state, and starts the same folder without Pro. Canceling the confirmation does
+none of those things. Activation completion, removal, folder changes, daemon
+crashes, updater installation and recovery, restarts, and quit take one ordered
+main-process lifecycle turn each; native dialogs also wait their turn so stale
+outcomes do not stack over a newer decision.
+
 ## Files
 
 | file | what it does |
 | --- | --- |
 | `src/main.js` | app lifecycle, window, menu, folder picker, native dialogs, and Linux Pro coordination |
-| `src/app-lifecycle.js` | hold ordinary Electron quit until asynchronous cleanup finishes |
+| `src/app-lifecycle.js` | serialize daemon/Pro lifecycle ownership and hold quit until asynchronous cleanup finishes |
 | `src/daemon-bootstrap.cjs` | enter packaged Node mode, scrub it, and register Linux pseudo-terminals |
 | `src/daemon.js` | spawn the daemon as a child, read its URL, own its lifecycle |
 | `src/daemon-output.js` | credential-redacting, memory-bounded handling of the daemon's output |

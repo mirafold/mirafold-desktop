@@ -290,6 +290,14 @@ assert.deepEqual(menuTemplate.map((item) => item.label), ["Project", "Edit", "Vi
 const projectMenu = menuTemplate.find((item) => item.label === "Project");
 assert.equal(projectMenu.submenu[0].label, "Open Project Folder…");
 const openFolder = projectMenu.submenu[0].click;
+const removeProItem = projectMenu.submenu.find(
+  (item) => item.label === "Remove Pro Access from This Device…",
+);
+if (process.platform === "linux") {
+  assert.equal(removeProItem?.enabled, false, "removal must stay neutral and disabled without saved state");
+} else {
+  assert.equal(removeProItem, undefined, "the Linux-only Pro phase changed another platform's menu");
+}
 const developmentViewRoles = menuTemplate
   .find((item) => item.label === "View")
   .submenu.map((item) => item.role)

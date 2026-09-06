@@ -1273,7 +1273,7 @@ security primitive the platform does not already provide.
   package manifest, renderer bridge, Windows activation behavior, release,
   deployment, or public website claim changed.
 
-- [ ] **Step 13.5 — close removal and competing-lifecycle races.** Add a
+- [x] **Step 13.5 — close removal and competing-lifecycle races.** Add a
   neutral native menu item to remove Pro access from this device behind a
   confirmation that states the accountless recovery consequence. Removal must
   first cancel any pending activation and close its listener, cleanly stop the
@@ -1285,6 +1285,53 @@ security primitive the platform does not already provide.
   when focused model and real main-process probes cover every pairwise ordering,
   key/pending files survive only the intended outcomes, no daemon or pipe is
   orphaned, and the complete Desktop suite passes.
+
+  **Completed 2026-09-06.** Linux now enables one ordinary Project-menu command
+  only while encrypted Pro state is present. Its confirmation defaults to
+  keeping access and says removal deletes the encrypted key and unfinished browser
+  handoff, that Mirafold has no account recovery, and that reconnecting without
+  an existing key requires support. Canceling changes nothing. Confirmation
+  retires the current controller synchronously; the removal owner then proves
+  the listener/exchange and activation action settled, proves the daemon tree
+  stopped, invokes only the dedicated Pro store's removal, confirms the
+  keyring-independent postcondition, and starts the same folder without a key.
+  A committed deletion wins even when its durability call failed. A proved
+  surviving valid envelope restores its exact key/pending status and session;
+  an unknowable result starts no replacement and quits rather than guessing.
+
+  `src/app-lifecycle.js` now supplies one request-order owner for activation
+  startup and exchange completion, folder changes, removal, daemon crashes,
+  initial/recovery restarts, updater installation/recovery, and quit. Quit
+  closes the queue synchronously, retires queued work, and shares one terminal
+  cleanup. Long browser waits remain outside the queue so their own callback
+  can complete; controller identity prevents a retired result from saving,
+  restarting, or reporting. Duplicate activation/reopen/removal/folder actions
+  are single-flight, and all native messages and folder dialogs share one
+  presentation queue with a final relevance check. Update installation closes
+  the activation listener before daemon teardown; a pre-quit installer failure
+  reloads the exact encrypted state, restarts the daemon, and resumes only its
+  saved pending flow.
+
+  The focused model exercises all 72 orderings of the nine distinct lifecycle
+  actions plus duplicate, rejection, and terminal cases. Real main-process
+  probes cover confirmed key/pending removal, cancellation, duplicate clicks,
+  post-unlink uncertainty, known and unknowable failure, an exchange resolving
+  during retirement, stale success behind the confirmation, a crash during
+  explicit stop, folder/crash/update interleavings, update recovery, and quit
+  immediately before and after deletion. Focused lifecycle/Pro/main/updater
+  tests pass 88/88; the complete suite passes 284 of 285 tests with the one
+  existing platform skip. One initial complete run hit the existing daemon-test
+  cleanup race (`ESRCH` after its probe process had exited); the unchanged exact
+  test passed 6/6 repetitions and the complete rerun passed. Eight one-at-a-time
+  product mutations of queue closure, shared ownership, activation retirement,
+  menu-state clearing, stale-dialog ownership, update retirement/recovery, and
+  folder deduplication each failed its targeted test before source restoration.
+  Syntax, whitespace, `npm ls --all`, and `npm audit` pass with zero
+  vulnerabilities. A fresh unpacked Linux build contains byte-identical main
+  and Pro lifecycle modules, and the full packaged smoke passes Shell `0.9.0`,
+  both native modules, render MCP, authenticated daemon lifecycle, and complete
+  process-tree shutdown. No dependency, package manifest, renderer bridge,
+  Windows activation behavior, release, deployment, or website claim changed.
 
 - [ ] **Step 13.6 — prove the real Linux packages and secret-store boundary.**
   Build `.deb`, AppImage, and tar candidates outside the checkout and inspect
