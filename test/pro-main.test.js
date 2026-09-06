@@ -26,6 +26,14 @@ const STARTUP_QUIT_WAIT_MODES = [
   "quit-during-boot-failure-dialog",
   "quit-during-boot-recovery-picker",
 ];
+const PRO_LIFECYCLE_QUIT_WAIT_MODES = [
+  "quit-during-update-recovery-failure-dialog",
+  "quit-during-pro-success-dialog",
+];
+const REMOVAL_FAILURE_QUIT_WAIT_MODES = [
+  "quit-during-removal-known-failure-dialog",
+  "quit-during-removal-uncertain-failure-dialog",
+];
 const events = [];
 const dialogs = [];
 const titles = [];
@@ -60,6 +68,7 @@ let envelope = mode === "resume-renewal"
       "folder-then-callback",
       "crash-then-callback",
       "update-pending",
+      "quit-during-pro-success-dialog",
     ].includes(mode)
     ? { version: 1, pending }
     : [
@@ -72,6 +81,8 @@ let envelope = mode === "resume-renewal"
         "quit-during-removal",
         "quit-after-removal",
         "remove-stop-crash",
+        "quit-during-update-recovery-failure-dialog",
+        ...REMOVAL_FAILURE_QUIT_WAIT_MODES,
       ].includes(mode)
       ? { version: 1, licenseKey: NEW_KEY }
       : null;
@@ -121,12 +132,24 @@ const crashDialogEntered = mode === "quit-during-crash-dialog" ? deferred() : nu
 const crashDialogRelease = mode === "quit-during-crash-dialog" ? deferred() : null;
 const bootFailureDialogEntered = mode === "quit-during-boot-failure-dialog" ? deferred() : null;
 const bootFailureDialogRelease = mode === "quit-during-boot-failure-dialog" ? deferred() : null;
+const proLifecycleDialogEntered = [
+  ...PRO_LIFECYCLE_QUIT_WAIT_MODES,
+  ...REMOVAL_FAILURE_QUIT_WAIT_MODES,
+].includes(mode) ? deferred() : null;
+const proLifecycleDialogRelease = [
+  ...PRO_LIFECYCLE_QUIT_WAIT_MODES,
+  ...REMOVAL_FAILURE_QUIT_WAIT_MODES,
+].includes(mode) ? deferred() : null;
 
 const proStore = {
   async inspect() {
     storeInspections += 1;
     events.push("store.inspect");
-    if (mode === "remove-inspect-failure" && storeInspections > 1) {
+    if ([
+      "remove-inspect-failure",
+      "quit-during-update-recovery-failure-dialog",
+      "quit-during-removal-uncertain-failure-dialog",
+    ].includes(mode) && storeInspections > 1) {
       throw new Error("sensitive-inspection-diagnostic");
     }
     return { present: envelope !== null };
@@ -176,7 +199,11 @@ const proStore = {
   async remove() {
     storeRemoveAttempts += 1;
     events.push("store.remove");
-    if (mode === "remove-failure" || mode === "retry-remove-failure") {
+    if ([
+      "remove-failure",
+      "retry-remove-failure",
+      "quit-during-removal-known-failure-dialog",
+    ].includes(mode)) {
       events.push("store.remove.failed");
       throw new Error("sensitive-removal-diagnostic");
     }
@@ -381,6 +408,20 @@ const dialog = {
         bootFailureDialogEntered.resolve();
         await bootFailureDialogRelease.result;
       }
+      const blocksLifecycle = (
+        mode === "quit-during-update-recovery-failure-dialog"
+          && options.title === "Mirafold Pro couldn't connect"
+      ) || (
+        mode === "quit-during-pro-success-dialog"
+          && options.title === "Mirafold Pro connected"
+      ) || (
+        REMOVAL_FAILURE_QUIT_WAIT_MODES.includes(mode)
+          && options.title === "Mirafold Pro access was not removed"
+      );
+      if (proLifecycleDialogEntered && blocksLifecycle) {
+        proLifecycleDialogEntered.resolve();
+        await proLifecycleDialogRelease.result;
+      }
       if (mode === "quit-during-boot-recovery-picker" && options.title === "Mirafold couldn't start") {
         return { response: 1 };
       }
@@ -515,6 +556,16 @@ function resolveActivation() {
   current.resolve(NEW_KEY);
 }
 
+async function quitBeforeProLifecycleDialogSettles(message) {
+  await proLifecycleDialogEntered.result;
+  let preventions = 0;
+  app.emit("before-quit", { preventDefault: () => { preventions += 1; } });
+  await waitFor(() => quitCalls === 1, message);
+  assert.equal(preventions, 1);
+  proLifecycleDialogRelease.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
 await waitFor(
   () => menuTemplate !== null
     && daemonInstances.length === 1
@@ -557,6 +608,35 @@ if (STARTUP_QUIT_WAIT_MODES.includes(mode)) {
   assert.equal(updaterStarts, 0);
   assert.equal(dialogs.length, 1);
   assert.equal(dialogs[0].title, "Mirafold couldn't stop safely");
+} else if (mode === "quit-during-update-recovery-failure-dialog") {
+  assert.equal(await updaterOptions.prepareInstall(), true);
+  const recovering = updaterOptions.recoverInstall();
+  await quitBeforeProLifecycleDialogSettles("quit waited for update-recovery error UI");
+  await recovering;
+  assert.deepEqual(envelope, { version: 1, licenseKey: NEW_KEY });
+  assert.equal(daemonInstances.length, 2);
+  assert.equal(daemonInstances[1].running, false);
+} else if (mode === "quit-during-pro-success-dialog") {
+  await waitFor(() => activationResumes === 1 && activeDeferred !== null, "pending activation did not resume");
+  resolveActivation();
+  await quitBeforeProLifecycleDialogSettles("quit waited for Pro success UI");
+  assert.deepEqual(envelope, { version: 1, licenseKey: NEW_KEY });
+  assert.equal(daemonInstances.length, 2);
+  assert.equal(daemonInstances[1].running, false);
+} else if (REMOVAL_FAILURE_QUIT_WAIT_MODES.includes(mode)) {
+  removeProItem.click();
+  await quitBeforeProLifecycleDialogSettles("quit waited for removal-failure UI");
+  assert.deepEqual(
+    envelope,
+    mode === "quit-during-removal-known-failure-dialog"
+      ? { version: 1, licenseKey: NEW_KEY }
+      : null,
+  );
+  assert.equal(
+    daemonInstances.length,
+    mode === "quit-during-removal-known-failure-dialog" ? 2 : 1,
+  );
+  assert.equal(daemonInstances.at(-1).running, false);
 } else if (mode === "happy") {
   const window = globalThis.fixtureWindow;
   const daemonUrl = window.currentUrl;
@@ -1216,6 +1296,16 @@ test("invalid startup output and page-load failure report an unproved daemon cle
 test("quit bypasses the native boot-failure dialog and recovery folder picker", linuxOnly, () => {
   runProbe("quit-during-boot-failure-dialog");
   runProbe("quit-during-boot-recovery-picker");
+});
+
+test("quit bypasses Pro success and update-recovery failure dialogs", linuxOnly, () => {
+  runProbe("quit-during-update-recovery-failure-dialog");
+  runProbe("quit-during-pro-success-dialog");
+});
+
+test("quit bypasses known and uncertain removal-failure dialogs", linuxOnly, () => {
+  runProbe("quit-during-removal-known-failure-dialog");
+  runProbe("quit-during-removal-uncertain-failure-dialog");
 });
 
 test("a browser-open failure resumes and reopens the same saved flow only after another trusted marker", linuxOnly, () => {

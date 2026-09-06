@@ -1310,8 +1310,9 @@ security primitive the platform does not already provide.
   presentation queue with a final relevance check. A presented folder chooser
   waits outside lifecycle ownership because Electron cannot cancel it; terminal
   quit therefore closes independently and any late choice is discarded. The
-  coordinator's terminal signal likewise retires an active crash-dialog wait
-  or native startup-recovery wait without giving its late result authority.
+  coordinator's terminal signal likewise retires active crash,
+  startup-recovery, Pro-result, and removal-failure waits without giving their
+  late results authority.
   Failed cleanup proof takes priority over stale boot ownership after start,
   malformed daemon output, or page-load failure. Update installation closes
   the activation listener before daemon teardown and invalidates replacement
@@ -1328,23 +1329,24 @@ security primitive the platform does not already provide.
   open folder chooser or crash dialog, updater ownership during a gated boot
   whose stop proof fails, returned-but-unsaved key survival across failed
   removal and updater recovery, failed cleanup behind stale startup ownership,
-  terminal quit during startup error/recovery UI, and quit immediately before
-  and after deletion. Focused lifecycle/Pro/main/updater tests pass 99/99; the
-  complete suite passes 295 of 296 tests, with the one existing platform skip.
+  terminal quit during startup error/recovery UI, Pro success, update-recovery
+  failure, and both removal-failure outcomes, and quit immediately before and
+  after deletion. Focused lifecycle/Pro/main/updater tests pass 101/101; the
+  complete suite passes 297 of 298 tests, with the one existing platform skip.
   One initial complete
   run hit the existing daemon-test cleanup race (`ESRCH` after its probe process
   had exited); that exact unchanged test passed 6/6 repetitions and all later
-  complete runs passed. Seventeen product-code mutations, run one at a time,
+  complete runs passed. Twenty product-code mutations, run one at a time,
   covered queue closure, shared ownership, activation
   retirement, menu-state clearing, stale-dialog ownership, update retirement
   and recovery, folder single-flight/quit behavior, unclean-crash replacement,
   unsaved-key rollback, terminal dialog release, update boot ownership, and
   stale-boot reference retention, cleanup-before-freshness ordering, and
-  startup-recovery terminal release each failed its targeted test before source
-  restoration. The first three automated review passes found seven real
-  lifecycle races (four P1 and three P2); eleven permanent real-main/coordinator
-  regressions cover those classes and the shared stale-retirement paths they
-  exposed.
+  startup-recovery and Pro-result terminal release each failed its targeted
+  test before source restoration. The first four automated review passes found
+  nine real lifecycle races (four P1 and five P2); thirteen permanent
+  real-main/coordinator regressions cover those classes and the shared
+  stale-retirement paths they exposed.
   Syntax, whitespace, `npm ls --all`, and `npm audit` pass with zero
   vulnerabilities. A fresh unpacked Linux build contains byte-identical main
   and Pro lifecycle modules, and the full packaged smoke passes Shell `0.9.0`,

@@ -181,7 +181,7 @@ async function showProFailure(kind, error, retryable = false, owner = undefined)
   if (!relevant()) return false;
   const copy = proFailureCopy(kind, error);
   try {
-    const outcome = await showMessage({
+    const outcome = await waitForNativeOrClose(showMessage({
       type: "error",
       title: "Mirafold Pro couldn't connect",
       message: copy.message,
@@ -189,7 +189,7 @@ async function showProFailure(kind, error, retryable = false, owner = undefined)
       buttons: retryable ? ["Try again", "Later"] : ["OK"],
       defaultId: 0,
       cancelId: retryable ? 1 : 0,
-    }, relevant);
+    }, relevant), { response: retryable ? 1 : 0, skipped: true });
     return retryable && !outcome.skipped && outcome.response === 0 && relevant();
   } catch {
     console.error("Mirafold could not show its Pro activation failure dialog.");
@@ -202,14 +202,14 @@ async function showProSuccess(owner) {
   const relevant = () => isCurrentProActivation(owner);
   if (!relevant()) return;
   try {
-    await showMessage({
+    await waitForNativeOrClose(showMessage({
       type: "info",
       title: "Mirafold Pro connected",
       message: "Mirafold Pro is connected on this device.",
       detail: "Mirafold restarted securely. Open Pair in Mirafold to connect your phone.",
       buttons: ["OK"],
       defaultId: 0,
-    }, relevant);
+    }, relevant), null);
   } catch {
     console.error("Mirafold could not show its Pro activation success dialog.");
   }
@@ -887,7 +887,7 @@ async function showProRemovalFailure({ stateKnown }) {
   setProProgress(null);
   if (lifecycle.closing || !win) return;
   try {
-    await showMessage({
+    await waitForNativeOrClose(showMessage({
       type: "error",
       title: "Mirafold Pro access was not removed",
       message: stateKnown
@@ -898,7 +898,7 @@ async function showProRemovalFailure({ stateKnown }) {
         : "No replacement session was started because Mirafold cannot safely guess which credential state survived. Quit Mirafold, check this device's storage permissions, then reopen it and try again.",
       buttons: stateKnown ? ["OK"] : ["Quit"],
       defaultId: 0,
-    });
+    }), null);
   } catch {
     console.error("Mirafold could not show its Pro removal failure dialog.");
   }
