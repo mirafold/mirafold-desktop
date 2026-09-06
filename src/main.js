@@ -72,6 +72,7 @@ let win = null;
 let folder = null;
 let daemon = null;
 let daemonOrigin = null;
+let daemonCleanupBlocked = false;
 let quitting = false;
 let bootSeq = 0;
 let desktopUpdater = null;
@@ -85,6 +86,7 @@ let proStatePresent = false;
 let proActionPromise = null;
 let proReopenPromise = null;
 let proRemovalPromise = null;
+let folderChangePromise = null;
 let proActivationUrl = null;
 let proProgress = null;
 let proRetirementTail = Promise.resolve();
@@ -669,10 +671,13 @@ function createWindow() {
  *   success signal
  */
 async function boot() {
-  if (quitting || !win) return;
+  if (quitting || !win || daemonCleanupBlocked) return;
   const seq = ++bootSeq;
   const dir = folder;
-  const current = () => seq === bootSeq && !quitting && win !== null;
+  const current = () => seq === bootSeq
+    && !quitting
+    && !daemonCleanupBlocked
+    && win !== null;
 
   daemonOrigin = null;
   try {
@@ -763,27 +768,38 @@ async function restartDaemonForPro() {
 }
 
 /** Swap the open project: stop this daemon, start another elsewhere. */
-async function performFolderChange() {
-  if (quitting || !win) return;
-  const chosen = await pickFolder("Open another project folder");
-  if (!chosen || quitting || !win) return;
+async function performFolderChange(chosen) {
+  if (!chosen || quitting || lifecycle.closing || daemonCleanupBlocked || !win) return;
   ++bootSeq;
   daemonOrigin = null;
   const stopping = daemon;
   daemon = null;
   const clean = stopping ? await stopping.stop() : true;
   if (!clean) return onDaemonCleanupFailure("switching project folders");
-  if (quitting || !win) return;
+  if (quitting || daemonCleanupBlocked || !win) return;
   folder = chosen;
   await boot();
 }
 
 function openFolder() {
-  return lifecycle.run(
-    LIFECYCLE_ACTION.FOLDER_CHANGE,
-    performFolderChange,
-    { dedupeKey: "folder-change" },
-  );
+  if (folderChangePromise) return folderChangePromise;
+  let changing;
+  changing = (async () => {
+    // Electron cannot cancel a presented native chooser. Keep that wait outside
+    // lifecycle ownership so terminal quit can close the app independently;
+    // a choice returned afterward is discarded by the closing-state check.
+    const chosen = await pickFolder("Open another project folder");
+    if (!chosen || quitting || lifecycle.closing || daemonCleanupBlocked || !win) return;
+    return lifecycle.run(
+      LIFECYCLE_ACTION.FOLDER_CHANGE,
+      () => performFolderChange(chosen),
+      { dedupeKey: "folder-change" },
+    );
+  })().finally(() => {
+    if (folderChangePromise === changing) folderChangePromise = null;
+  });
+  folderChangePromise = changing;
+  return changing;
 }
 
 async function loadAutoUpdater(updateStrategy) {
@@ -964,7 +980,6 @@ async function performProRemoval(retirement) {
     return stopAfterUncertainProRemoval();
   }
   proLicenseKey = survivingKey;
-  proRetryKey = undefined;
   proPendingFlow = Object.hasOwn(survivingState ?? {}, "pending");
   survivingState = null;
   setProStatePresent(true);
@@ -973,7 +988,12 @@ async function performProRemoval(retirement) {
     await boot();
     await showProRemovalFailure({ stateKnown: true });
   }
-  return { removed: false, resumePending: proPendingFlow };
+  return {
+    removed: false,
+    // A returned-but-unsaved key owns the consumed pending flow. Retrying that
+    // exact key from the next trusted marker is the only lossless recovery.
+    resumePending: proPendingFlow && proRetryKey === undefined,
+  };
 }
 
 function removeProAccess() {
@@ -1031,7 +1051,7 @@ function removeProAccess() {
  * daemon and returns false; the updater then keeps the download for later.
  */
 async function prepareForUpdateInstall() {
-  if (quitting || lifecycle.closing) return false;
+  if (quitting || lifecycle.closing || daemonCleanupBlocked) return false;
   const retirement = retireProActivation();
   ++bootSeq;
   daemonOrigin = null;
@@ -1042,7 +1062,7 @@ async function prepareForUpdateInstall() {
       await onDaemonCleanupFailure("closing Mirafold Pro before installing an update");
       return false;
     }
-    if (quitting || lifecycle.closing || !win) return false;
+    if (quitting || lifecycle.closing || daemonCleanupBlocked || !win) return false;
     const stopping = daemon;
     daemon = null;
     const clean = stopping ? await stopping.stop() : true;
@@ -1063,7 +1083,6 @@ async function recoverFromUpdateInstallFailure() {
     if (!win || !folder || lifecycle.closing) return null;
     quitting = false;
     proLicenseKey = undefined;
-    proRetryKey = undefined;
     proPendingFlow = false;
     proStore = null;
     const proStartup = await initializeProSupport();
@@ -1072,7 +1091,13 @@ async function recoverFromUpdateInstallFailure() {
     if (proStartup.error) await showProFailure("startup", proStartup.error);
     return proStartup;
   });
-  if (outcome?.pending && proActivation && !quitting && !lifecycle.closing) {
+  if (
+    outcome?.pending
+    && proRetryKey === undefined
+    && proActivation
+    && !quitting
+    && !lifecycle.closing
+  ) {
     runBackgroundAction(
       resumeProActivation,
       "Mirafold Pro activation could not be resumed after update recovery.",
@@ -1160,9 +1185,11 @@ async function onDaemonCrash(crashed, { code, signal, stderr, clean }) {
   daemon = null;
   daemonOrigin = null;
   ++bootSeq;
+  if (clean !== true) daemonCleanupBlocked = true;
   return lifecycle.run(LIFECYCLE_ACTION.DAEMON_CRASH, async () => {
-    if (quitting || lifecycle.closing || !win || daemon !== null) return;
+    if (quitting || lifecycle.closing || !win) return;
     if (clean !== true) return onDaemonCleanupFailure("recovering from a daemon crash");
+    if (daemon !== null) return;
     const how = signal ? `was killed (${signal})` : `exited with code ${code}`;
     const outcome = await showMessage({
       type: "error",

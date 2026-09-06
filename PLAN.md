@@ -1307,25 +1307,31 @@ security primitive the platform does not already provide.
   can complete; controller identity prevents a retired result from saving,
   restarting, or reporting. Duplicate activation/reopen/removal/folder actions
   are single-flight, and all native messages and folder dialogs share one
-  presentation queue with a final relevance check. Update installation closes
-  the activation listener before daemon teardown; a pre-quit installer failure
-  reloads the exact encrypted state, restarts the daemon, and resumes only its
-  saved pending flow.
+  presentation queue with a final relevance check. A presented folder chooser
+  waits outside lifecycle ownership because Electron cannot cancel it; terminal
+  quit therefore closes independently and any late choice is discarded. Update
+  installation closes the activation listener before daemon teardown; a pre-
+  quit installer failure reloads the exact encrypted state, restarts the daemon,
+  and resumes only its saved pending flow.
 
   The focused model exercises all 72 orderings of the nine distinct lifecycle
   actions plus duplicate, rejection, and terminal cases. Real main-process
   probes cover confirmed key/pending removal, cancellation, duplicate clicks,
   post-unlink uncertainty, known and unknowable failure, an exchange resolving
   during retirement, stale success behind the confirmation, a crash during
-  explicit stop, folder/crash/update interleavings, update recovery, and quit
-  immediately before and after deletion. Focused lifecycle/Pro/main/updater
-  tests pass 88/88; the complete suite passes 284 of 285 tests with the one
-  existing platform skip. One initial complete run hit the existing daemon-test
+  explicit stop, clean and unclean crash interleavings, terminal quit during an
+  open folder chooser, returned-but-unsaved key survival across failed removal
+  and updater recovery, and quit immediately before and after deletion. Focused
+  lifecycle/Pro/main/updater tests pass 93/93; the complete suite passes 289 of
+  290 tests, with the one existing platform skip. One initial complete run hit
+  the existing daemon-test
   cleanup race (`ESRCH` after its probe process had exited); the unchanged exact
-  test passed 6/6 repetitions and the complete rerun passed. Eight one-at-a-time
-  product mutations of queue closure, shared ownership, activation retirement,
-  menu-state clearing, stale-dialog ownership, update retirement/recovery, and
-  folder deduplication each failed its targeted test before source restoration.
+  test passed 6/6 repetitions and all later complete runs passed. Twelve one-at-
+  a-time product mutations of queue closure, shared ownership, activation
+  retirement, menu-state clearing, stale-dialog ownership, update retirement
+  and recovery, folder single-flight/quit behavior, unclean-crash replacement,
+  and unsaved-key rollback each failed its targeted test before source
+  restoration.
   Syntax, whitespace, `npm ls --all`, and `npm audit` pass with zero
   vulnerabilities. A fresh unpacked Linux build contains byte-identical main
   and Pro lifecycle modules, and the full packaged smoke passes Shell `0.9.0`,

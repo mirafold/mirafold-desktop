@@ -179,7 +179,10 @@ state, and starts the same folder without Pro. Canceling the confirmation does
 none of those things. Activation completion, removal, folder changes, daemon
 crashes, updater installation and recovery, restarts, and quit take one ordered
 main-process lifecycle turn each; native dialogs also wait their turn so stale
-outcomes do not stack over a newer decision.
+outcomes do not stack over a newer decision. An unclean crash blocks every
+replacement daemon until the app exits. A presented folder chooser cannot hold
+terminal quit open, and rollback after failed removal or updater recovery keeps
+any returned Pro key that is still waiting for a secure save.
 
 ## Files
 

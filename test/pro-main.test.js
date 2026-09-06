@@ -93,6 +93,16 @@ const stopRelease = mode === "quit-during-removal" ? deferred() : null;
 const restartGate = mode === "quit-after-removal" ? deferred() : null;
 const removalConfirmEntered = mode === "removal-during-success-dialog" ? deferred() : null;
 const removalConfirmRelease = mode === "removal-during-success-dialog" ? deferred() : null;
+const folderDialogEntered = [
+  "unclean-crash-during-folder",
+  "quit-during-folder-dialog",
+].includes(mode) ? deferred() : null;
+const folderDialogRelease = [
+  "unclean-crash-during-folder",
+  "quit-during-folder-dialog",
+].includes(mode) ? deferred() : null;
+const keySaveEntered = mode === "unclean-crash-during-activation" ? deferred() : null;
+const keySaveRelease = mode === "unclean-crash-during-activation" ? deferred() : null;
 
 const proStore = {
   async inspect() {
@@ -125,7 +135,11 @@ const proStore = {
     events.push(savesKey ? "store.save.key" : "store.save.pending");
     if (savesKey) {
       keySaveAttempts += 1;
-      if (mode === "store-retry" && keySaveAttempts === 1) {
+      if ([
+        "store-retry",
+        "retry-remove-failure",
+        "retry-update-recovery",
+      ].includes(mode) && keySaveAttempts === 1) {
         events.push("store.save.key.failed");
         throw new Error("sensitive-store-diagnostic");
       }
@@ -134,13 +148,17 @@ const proStore = {
         events.push("store.save.key.uncertain");
         throw new Error("sensitive-durability-diagnostic");
       }
+      if (keySaveEntered) {
+        keySaveEntered.resolve();
+        await keySaveRelease.result;
+      }
     }
     envelope = clone(next);
   },
   async remove() {
     storeRemoveAttempts += 1;
     events.push("store.remove");
-    if (mode === "remove-failure") {
+    if (mode === "remove-failure" || mode === "retry-remove-failure") {
       events.push("store.remove.failed");
       throw new Error("sensitive-removal-diagnostic");
     }
@@ -290,8 +308,16 @@ const autoUpdater = new EventEmitter();
 const safeStorage = {};
 const dialog = {
   async showOpenDialog() {
-    if (mode === "folder-then-callback") {
+    if ([
+      "folder-then-callback",
+      "unclean-crash-during-folder",
+      "quit-during-folder-dialog",
+    ].includes(mode)) {
       events.push("dialog.folder");
+      if (folderDialogEntered) {
+        folderDialogEntered.resolve();
+        await folderDialogRelease.result;
+      }
       return { canceled: false, filePaths: ["/fixture-next-project"] };
     }
     throw new Error("the remembered fixture folder should avoid a folder dialog");
@@ -308,7 +334,11 @@ const dialog = {
         removalConfirmEntered.resolve();
         await removalConfirmRelease.result;
       }
-      if (mode === "store-retry" && options.buttons?.includes("Later")) {
+      if ([
+        "store-retry",
+        "retry-remove-failure",
+        "retry-update-recovery",
+      ].includes(mode) && options.buttons?.includes("Later")) {
         return { response: 1 };
       }
       if (mode === "remove-cancel" && options.title === "Remove Mirafold Pro access?") {
@@ -549,7 +579,11 @@ if (mode === "happy") {
   ]);
   assert.equal(dialogs.filter((item) => item.type === "error").length, 0);
   assert.deepEqual(envelope, { version: 1, licenseKey: NEW_KEY });
-} else if (mode === "store-retry") {
+} else if ([
+  "store-retry",
+  "retry-remove-failure",
+  "retry-update-recovery",
+].includes(mode)) {
   assert.deepEqual(windowOpenHandler({ url: MARKER }), { action: "deny" });
   await waitFor(() => events.includes("browser.activation"), "activation did not reach the browser");
   resolveActivation();
@@ -559,9 +593,32 @@ if (mode === "happy") {
   );
   assert.equal(daemonInstances.length, 1, "an unconfirmed key restarted the daemon");
   assert.ok(envelope?.pending, "an unconfirmed key replaced the durable pending flow");
+  if (mode === "retry-remove-failure") {
+    const currentRemoveItem = menuTemplate.find((item) => item.label === "Project").submenu.find(
+      (item) => item.label === "Remove Pro Access from This Device…",
+    );
+    assert.equal(currentRemoveItem.enabled, true);
+    currentRemoveItem.click();
+    await waitFor(
+      () => daemonInstances.length === 2
+        && dialogs.some((item) => item.title === "Mirafold Pro access was not removed"),
+      "failed removal did not restore the session with the retry key",
+    );
+    assert.equal(activationResumes, 0, "failed removal resumed a consumed pending exchange");
+  } else if (mode === "retry-update-recovery") {
+    assert.equal(await updaterOptions.prepareInstall(), true);
+    await updaterOptions.recoverInstall();
+    await waitFor(
+      () => daemonInstances.length === 2 && daemonInstances[1].running,
+      "failed updater recovery did not restore the session with the retry key",
+    );
+    assert.equal(activationResumes, 0, "updater recovery resumed a consumed pending exchange");
+  }
+
   assert.deepEqual(windowOpenHandler({ url: MARKER }), { action: "deny" });
   await waitFor(
-    () => daemonInstances.length === 2 && dialogs.some((item) => item.title === "Mirafold Pro connected"),
+    () => daemonInstances.length === (mode === "store-retry" ? 2 : 3)
+      && dialogs.some((item) => item.title === "Mirafold Pro connected"),
     "the exact marker did not retry the secure save",
   );
   assert.equal(activationStarts, 1, "the storage retry created another activation flow");
@@ -574,9 +631,22 @@ if (mode === "happy") {
     "store.save.key.failed",
     "store.load.pending",
     "dialog.Mirafold Pro couldn't connect",
+    ...(mode === "retry-remove-failure" ? [
+      "activation.shutdown",
+      "store.remove",
+      "store.remove.failed",
+      "store.load.pending",
+      "daemon.start.none",
+      "dialog.Mirafold Pro access was not removed",
+    ] : mode === "retry-update-recovery" ? [
+      "activation.shutdown",
+      "daemon.stop.0",
+      "activation.controller.2",
+      "daemon.start.none",
+    ] : []),
     "store.save.key",
     "store.load.key",
-    "daemon.stop.0",
+    mode === "store-retry" ? "daemon.stop.0" : "daemon.stop.1",
     "daemon.start.new",
   ]);
 } else if (
@@ -776,6 +846,7 @@ if (mode === "happy") {
 } else if (mode === "folder-then-callback") {
   await waitFor(() => activationResumes === 1 && activeDeferred !== null, "pending activation did not resume");
   openFolderItem.click();
+  openFolderItem.click();
   await waitFor(
     () => daemonInstances.length === 2 && daemonInstances[1].running,
     "folder change did not settle before activation completion",
@@ -800,6 +871,11 @@ if (mode === "happy") {
     "/fixture-next-project",
   ]);
   assert.equal(activationShutdowns, 0, "a folder change discarded a device-level activation");
+  assert.equal(
+    events.filter((item) => item === "dialog.folder").length,
+    1,
+    "duplicate folder commands opened a second native chooser",
+  );
   assert.equal(maximumActiveDialogs, 1);
 } else if (mode === "crash-then-callback") {
   await waitFor(() => activationResumes === 1 && activeDeferred !== null, "pending activation did not resume");
@@ -830,6 +906,56 @@ if (mode === "happy") {
   ]);
   assert.equal(dialogs.length, 2);
   assert.equal(maximumActiveDialogs, 1, "crash and Pro dialogs overlapped");
+} else if (mode === "unclean-crash-during-folder") {
+  openFolderItem.click();
+  await folderDialogEntered.result;
+  daemonInstances[0].running = false;
+  void daemonInstances[0].onCrash({
+    code: 1,
+    signal: null,
+    stderr: "fixture unclean crash",
+    clean: false,
+  });
+  folderDialogRelease.resolve();
+  await waitFor(() => quitCalls === 1, "unclean crash cleanup did not remain terminal");
+  assert.equal(daemonInstances.length, 1, "an unclean crash allowed a replacement daemon");
+  assert.equal(dialogs.length, 1);
+  assert.equal(dialogs[0].title, "Mirafold couldn't stop safely");
+  assertOrdered(["dialog.folder", "dialog.Mirafold couldn't stop safely"]);
+} else if (mode === "unclean-crash-during-activation") {
+  assert.deepEqual(windowOpenHandler({ url: MARKER }), { action: "deny" });
+  await waitFor(() => events.includes("browser.activation"), "activation did not reach the browser");
+  resolveActivation();
+  await keySaveEntered.result;
+  daemonInstances[0].running = false;
+  void daemonInstances[0].onCrash({
+    code: 1,
+    signal: null,
+    stderr: "fixture unclean crash",
+    clean: false,
+  });
+  keySaveRelease.resolve();
+  await waitFor(() => quitCalls === 1, "unclean crash cleanup did not become terminal");
+  assert.equal(daemonInstances.length, 1, "activation completion started a replacement daemon");
+  assert.equal(dialogs.length, 1);
+  assert.equal(dialogs[0].title, "Mirafold couldn't stop safely");
+  assert.equal(
+    dialogs.some((item) => item.title === "Mirafold Pro connected"),
+    false,
+    "activation reported success after an unclean daemon crash",
+  );
+} else if (mode === "quit-during-folder-dialog") {
+  openFolderItem.click();
+  await folderDialogEntered.result;
+  let preventions = 0;
+  app.emit("before-quit", { preventDefault: () => { preventions += 1; } });
+  await waitFor(() => quitCalls === 1, "quit waited for the open folder picker");
+  assert.equal(preventions, 1);
+  assert.equal(daemonInstances.length, 1);
+  assert.equal(daemonInstances[0].running, false);
+  folderDialogRelease.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(daemonInstances.length, 1, "the retired folder choice started a daemon");
 } else if (mode === "update-pending") {
   await waitFor(() => activationResumes === 1 && activeDeferred !== null, "pending activation did not resume");
   assert.equal(await updaterOptions.prepareInstall(), true);
@@ -950,6 +1076,14 @@ test("a post-purchase storage failure retries the same key only through the trus
   runProbe("store-retry");
 });
 
+test("failed removal retains the unsaved purchased key", linuxOnly, () => {
+  runProbe("retry-remove-failure");
+});
+
+test("failed updater recovery retains the unsaved purchased key", linuxOnly, () => {
+  runProbe("retry-update-recovery");
+});
+
 test("an uncertain secure write proceeds only when exact readback proves the replacement key", linuxOnly, () => {
   runProbe("store-uncertain");
 });
@@ -986,6 +1120,18 @@ test("folder, crash, and updater transitions serialize with a pending activation
   runProbe("folder-then-callback");
   runProbe("crash-then-callback");
   runProbe("update-pending");
+});
+
+test("an unclean crash prevents a late folder choice from starting a replacement", linuxOnly, () => {
+  runProbe("unclean-crash-during-folder");
+});
+
+test("an unclean crash remains terminal while activation completion owns the lifecycle", linuxOnly, () => {
+  runProbe("unclean-crash-during-activation");
+});
+
+test("quit does not wait for an open native folder picker", linuxOnly, () => {
+  runProbe("quit-during-folder-dialog");
 });
 
 test("quit gives removal one final state on either side of the encrypted delete", linuxOnly, () => {
