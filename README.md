@@ -93,14 +93,15 @@ account boundary, and everything that remains unimplemented are recorded in
 ## What this is, precisely
 
 A thin Electron shell around the **published `mirafold` npm package**. It adds a
-window, a folder picker, a menu, and process lifecycle management. It contains
-no product logic, no UI, and no copy of the server — those all live in
-[`mirafold/mirafold`](https://github.com/mirafold/mirafold) and are consumed
-here as an ordinary dependency, the same artifact npm users install.
+window, a folder picker, a menu, secure Linux credential storage, and process
+lifecycle management. It contains no copy of the Shell UI or server — those
+live in [`mirafold/mirafold`](https://github.com/mirafold/mirafold) and are
+consumed here as an ordinary dependency, the same artifact npm users install.
 
 ```
 ┌─ Electron main process ─────────────────────┐
-│  folder picker · menu · crash dialog        │
+│  folder picker · menu · native dialogs      │
+│  encrypted Linux Pro state · PKCE callback  │
 │                                             │
 │  spawns ──► mirafold daemon (child process) │
 │             ├─ agent CLIs (pty)             │
@@ -149,11 +150,30 @@ per-launch auth token, its Origin guard) remains true here without re-auditing.
 The native pieces a desktop app owes you live in the main process, where they
 need no bridge.
 
+### Linux Pro activation stays outside the renderer
+
+The published Shell asks Linux Desktop to start activation with one fixed
+external URL marker. Electron accepts that marker only while the current
+top-level document belongs to this launch's daemon; every inexact URL retains
+the ordinary external-navigation policy. The main process then requires an
+available Secret Service or KWallet-backed `safeStorage` provider before it
+opens the fully parameterized activation page in the system browser.
+
+The private loopback callback state is encrypted and read back before the
+browser opens. A returned Pro key is likewise encrypted and read back before
+Desktop stops the current daemon and starts the same folder again. The key
+reaches the published Shell through a one-use standard-input pipe, never a
+renderer bridge, command-line argument, or child-process environment variable.
+An unexpired callback whose saved port remains available resumes after an app
+restart without opening a browser page on its own; choosing activation in the
+Shell reopens that exact saved flow. This native lifecycle is currently
+Linux-only. Windows activation remains a separate planned proof.
+
 ## Files
 
 | file | what it does |
 | --- | --- |
-| `src/main.js` | app lifecycle, window, menu, folder picker, crash dialog |
+| `src/main.js` | app lifecycle, window, menu, folder picker, native dialogs, and Linux Pro coordination |
 | `src/app-lifecycle.js` | hold ordinary Electron quit until asynchronous cleanup finishes |
 | `src/daemon-bootstrap.cjs` | enter packaged Node mode, scrub it, and register Linux pseudo-terminals |
 | `src/daemon.js` | spawn the daemon as a child, read its URL, own its lifecycle |
@@ -163,6 +183,8 @@ need no bridge.
 | `src/interface-scale.js` | validate, step, and reapply the device-level whole-interface scale |
 | `src/navigation.js` | what the window is allowed to load, and what goes to the browser |
 | `src/permissions.js` | deny Chromium permissions except notifications from the active daemon's main frame |
+| `src/pro-activation.js` | private loopback PKCE activation, exact callback validation, and restart resumption |
+| `src/pro-store.js` | encrypted, atomic Linux Pro state backed only by Secret Service or KWallet |
 | `src/platform-updaters.js` | atomic AppImage replacement and acknowledged NSIS launch |
 | `src/updater.js` | update policy for APT, direct installers, Store packages, and Linux tar archives |
 | `src/login-env.js` | recover the login shell's `PATH` so agent CLIs are findable |

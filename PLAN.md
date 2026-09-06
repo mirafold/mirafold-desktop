@@ -1207,7 +1207,7 @@ security primitive the platform does not already provide.
   occurred; Step 13.4 owns loading the stored key and the store-before-restart
   transition.
 
-- [ ] **Step 13.4 — integrate activation and restart into the native
+- [x] **Step 13.4 — integrate activation and restart into the native
   lifecycle.** Recognize only the fixed Desktop marker on an external URL from
   the current trusted daemon main frame; preflight secure storage; run one
   activation at a time; open the fully parameterized site URL in the system
@@ -1221,6 +1221,57 @@ security primitive the platform does not already provide.
   before callback, after exchange, and after durable key replacement; generic
   navigation/permissions remain unchanged, no renderer bridge exists, and the
   complete Desktop suite passes.
+
+  **Completed 2026-09-06.** `src/main.js` now constructs the Linux-only DPC.1
+  encrypted store and DPC.2 activation controller after Electron is ready. A
+  no-state launch uses the filesystem-only inspection path and does not invoke
+  the system keyring; a saved validated key reaches the first daemon through
+  DPC.3's private input pipe, and an unexpired pending record rebinds its exact
+  listener without opening a browser on startup. The one fixed
+  `https://mirafold.com/activate` popup is native only while the current
+  top-level document still belongs to this launch's exact daemon origin and
+  carries no POST body. Inexact markers, loading state, and stale daemon ports
+  retain the existing generic popup policy. Shell artifact frames remain
+  sandboxed without popup permission, and Desktop adds no preload, IPC, or
+  renderer Node access.
+
+  A trusted marker first preflights a Secret Service/KWallet-backed
+  `safeStorage`, then starts one controller flow. The controller's already
+  durable, fully parameterized request opens in the system browser. Automatic
+  restart resumption stays quiet; a later explicit trusted marker can reopen
+  the same saved flow, including recovery from a browser-open failure, without
+  creating a new activation. The returned key is retained only in main-process
+  memory while Desktop atomically replaces pending state, reads back the exact
+  key-only envelope, and only then stops and boots the same folder with Pro.
+  An uncertain write may proceed only when that readback proves it committed;
+  an unconfirmed post-purchase write leaves the old daemon and pending record
+  intact and makes the same in-memory key retryable only through another exact
+  trusted marker. Native window-title progress and fixed, credential-free
+  failure/success dialogs own all user-visible outcomes. Quit shuts down and
+  settles the activation controller before daemon teardown.
+
+  `test/pro-main.test.js` adds eight isolated Electron-main probes for exact
+  provenance and duplicate clicks, preflight-before-browser ordering,
+  pending-store readback, browser recovery, confirmed and uncertain key writes,
+  store retry, same-folder store-before-restart ordering, renewal, startup
+  recovery before callback and after exchange, durable-key replacement, fixed
+  native UI, secret-free errors, and activation-before-daemon quit cleanup.
+  `test/navigation.test.js` pins every marker lookalike and stale/loading/POST
+  case; the existing main probe was adapted only for the new injected Electron
+  capability and daemon start option. Seven one-at-a-time product mutations
+  weakening the exact marker, preflight, key readback, daemon handoff, pending
+  resume, post-restart success, or quit ordering each failed its targeted test
+  before the source was restored.
+
+  Final evidence: focused main/navigation/Pro lifecycle tests 29/29; complete
+  suite 277 tests with 276 passing and the one existing platform skip; syntax,
+  whitespace, `npm ls --all`, and `npm audit` passed with zero vulnerabilities.
+  A fresh unpacked Linux build contained byte-identical lifecycle modules and
+  the full packaged smoke passed with Shell `0.9.0`, both native modules,
+  render MCP, authenticated daemon lifecycle, and complete process-tree
+  shutdown. `README.md` now describes the native Linux boundary. No dependency,
+  package manifest, renderer bridge, Windows activation behavior, release,
+  deployment, or public website claim changed.
 
 - [ ] **Step 13.5 — close removal and competing-lifecycle races.** Add a
   neutral native menu item to remove Pro access from this device behind a
