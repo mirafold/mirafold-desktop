@@ -791,6 +791,20 @@ function spawnResult(result, label) {
   invariant(result.status === 0, `${label} exited ${result.status}: ${String(result.stderr).slice(-4000)}`);
 }
 
+const LINUX_EMPTY_CREDENTIAL_WARNING = /^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\] \[mirafold\] warn: Desktop Pro credential unavailable \(missing-input\); local sessions remain available\.$/u;
+
+function assertExpectedDaemonStderr(stderr, platform, label) {
+  const text = String(stderr).trim();
+  if (platform === "linux") {
+    invariant(
+      LINUX_EMPTY_CREDENTIAL_WARNING.test(text),
+      `${label} stderr differed from the one expected unactivated-Desktop warning: ${String(stderr).slice(-4000)}`,
+    );
+    return;
+  }
+  invariant(text === "", `${label} wrote stderr: ${String(stderr).slice(-4000)}`);
+}
+
 function validatePackagedPaths(executable, appDirectory) {
   invariant(typeof executable === "string" && path.isAbsolute(executable), "packaged executable path must be absolute");
   invariant(lstatSync(executable).isFile(), "packaged executable must be a regular file");
@@ -835,6 +849,7 @@ export function runPackagedNodeProbe({
 export function runPackagedMcpProbe({
   executable,
   appDirectory,
+  platform = process.platform,
   spawn = spawnSync,
   temporaryDirectory = tmpdir(),
 } = {}) {
@@ -858,7 +873,7 @@ export function runPackagedMcpProbe({
     assertCredentialSafe(String(result.stdout), "packaged MCP stdout");
     assertCredentialSafe(String(result.stderr), "packaged MCP stderr");
     spawnResult(result, "packaged MCP probe");
-    invariant(String(result.stderr).trim() === "", `packaged MCP probe wrote stderr: ${String(result.stderr).slice(-4000)}`);
+    assertExpectedDaemonStderr(result.stderr, platform, "packaged MCP probe");
     const report = parseMarkedReport(result.stdout, MCP_MARKER, "packaged MCP probe");
     invariant(
       typeof report.renderMcpEntry === "string"
@@ -952,7 +967,7 @@ export function runPackagedDaemonProbe({
     assertCredentialSafe(String(result.stdout), "packaged daemon stdout");
     assertCredentialSafe(String(result.stderr), "packaged daemon stderr");
     spawnResult(result, "packaged daemon probe");
-    invariant(String(result.stderr).trim() === "", `packaged daemon wrote stderr: ${String(result.stderr).slice(-4000)}`);
+    assertExpectedDaemonStderr(result.stderr, platform, "packaged daemon probe");
     const report = parseMarkedReport(result.stdout, DAEMON_MARKER, "packaged daemon probe");
     invariant(report?.urlContract?.protocol === "http:", "packaged daemon protocol differs");
     invariant(report?.urlContract?.hostname === "127.0.0.1", "packaged daemon host differs");
@@ -1004,6 +1019,7 @@ export function verifyPackagedPaths({
   const renderMcp = runPackagedMcpProbe({
     executable,
     appDirectory,
+    platform,
     spawn,
     temporaryDirectory,
   });

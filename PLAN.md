@@ -1143,22 +1143,69 @@ security primitive the platform does not already provide.
   `npm ls --all`, and `npm audit` green with zero vulnerabilities;
   `package.json` and `package-lock.json` unchanged.
 
-- [ ] **Step 13.3 — carry the stored key to the published Shell over a private
-  pipe.** Pin the Shell version that contains Phase DA's reviewed stdin contract.
-  Extend only the Linux daemon launch spec and bootstrap argument pass-through:
-  a launch with a decrypted key gets piped stdin plus the fixed internal flags;
-  it also removes an ambient `MIRAFOLD_LICENSE_KEY` from `daemonEnv` before
-  spawn. An unactivated launch keeps today's environment, ignored stdin, and
-  argv. Write once, end, drop the main-process plaintext reference as soon as
-  the child owns its copy, and make write/early-exit failure retire the entire
-  daemon tree before any replacement. Never put the stored key in `daemonEnv`,
-  PowerShell, ledger files, or launch diagnostics. Done when unit and real-child
-  probes inspect `/proc` environment/cmdline, inherited descriptors, daemon/
-  agent output, and cleanup;
-  neither the stored nor a seeded stale ambient key appears, the daemon gets Pro
-  entitlement and billing state, no-key legacy startup is unchanged, and
-  package tests prove the exact published Shell—not a vendored/local substitute—
-  is used.
+- [x] **Step 13.3 — carry the stored key to the published Shell over a private
+  pipe.** Use the exact published Shell containing Phase DA's reviewed input
+  contract. Every Linux Desktop launch passes the fixed internal marker through
+  the existing bootstrap and owns a standard-input pipe. Clone `daemonEnv` and
+  remove `MIRAFOLD_LICENSE_KEY` before spawn: a flagged Shell refuses ambient
+  fallback, so retaining that ignored secret would expose it through process
+  metadata and descendants for no benefit. A launch with a decrypted key writes
+  its exact bounded bytes once and ends the pipe without a newline; an
+  unactivated launch ends the pipe without writing bytes. The latter remains a
+  free local launch but now correctly identifies its Desktop host so Shell can
+  offer browser activation. All other environment, argument, and startup
+  behavior remains unchanged; Windows retains its existing ignored input and
+  arguments.
+
+  Drop the launcher's plaintext binding after starting the handoff and clear its
+  producer buffer when the writable completes. Await both input delivery and the
+  startup URL; a write failure, closed pipe, or early child exit rejects through
+  the existing complete-tree teardown before any replacement can start. Never
+  put the stored key in `daemonEnv`, PowerShell, ledger files, launch diagnostics,
+  or child metadata. Done when unit and real-child probes inspect `/proc`
+  environment/cmdline, the private descriptor identity, daemon and child output,
+  persistent test records, and cleanup; neither the stored nor a seeded ambient
+  key appears, the exact published daemon gets Pro entitlement and billing
+  state, free no-key startup works, and package tests prove the registry-locked
+  Shell rather than a vendored or local substitute.
+
+  **Completed 2026-09-06.** Desktop already pinned registry-published
+  `mirafold@0.9.0` exactly, so `package.json` and `package-lock.json` did not
+  change. `src/daemon.js` now gives every Linux launch
+  `--mirafold-desktop`, removes the ambient license from the cloned child
+  environment, uses one EOF-framed standard-input write for an optional validated
+  key, clears the producer buffer on every outcome, and joins that handoff to
+  startup ownership. Missing input is an intentional unactivated Desktop launch;
+  unsupported-platform key delivery and malformed keys fail before spawn. The
+  existing bootstrap already forwarded the marker exactly and required no source
+  change. Windows and other non-Linux launch specifications retain ignored input
+  and their prior arguments.
+
+  `test/pro-handoff.test.js` adds five package and real-process tests. They bind
+  local fake entitlement, relay, and subscription services; run the exact locked
+  Shell through both `Daemon.start()` and the production launch specification;
+  prove the pipe key reaches entitlement and billing; inspect Linux daemon
+  environment, command line, and the original descriptor identity; execute a
+  real pseudo-terminal child; scan credential-free outputs and persistent fixture
+  records; preserve a free local turn after empty input; and prove startup failure
+  retires a descendant. `test/daemon.test.js` pins the launch specification,
+  one-write/EOF contract, empty handoff, fixed error, and producer-buffer clearing.
+  The packaged smoke gate now requires exactly Shell's one credential-free Linux
+  missing-input warning and still refuses any additional standard-error output;
+  Windows continues to require none.
+
+  Seven product-code mutations removing the Desktop marker, ambient-key scrub,
+  private pipe, EOF framing, buffer clearing, write-error propagation, or
+  production `Daemon.start()` key delivery each failed its targeted test before
+  the exact source hash was restored. Final evidence: focused daemon/handoff
+  tests 25/25; complete suite 267 tests with 266 passing and the one existing
+  platform skip; unpacked Linux build and full packaged smoke passed with Shell
+  `0.9.0`, both native modules, render MCP, authenticated daemon lifecycle, and
+  complete process-tree shutdown; syntax and whitespace checks, `npm ls --all`,
+  and `npm audit` passed with zero vulnerabilities. No secure-store read,
+  activation lifecycle, renderer bridge, release, deployment, or public claim
+  occurred; Step 13.4 owns loading the stored key and the store-before-restart
+  transition.
 
 - [ ] **Step 13.4 — integrate activation and restart into the native
   lifecycle.** Recognize only the fixed Desktop marker on an external URL from
