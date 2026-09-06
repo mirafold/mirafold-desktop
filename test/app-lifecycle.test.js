@@ -123,6 +123,22 @@ test("the first close is the sole terminal owner and retires already queued work
   assert.deepEqual(events, ["active.start", "active.retired", "quit.ran"]);
 });
 
+test("terminal close releases an active owner's non-cancellable wait", async () => {
+  const coordinator = createLifecycleCoordinator();
+  const entered = deferred();
+  const events = [];
+  const active = coordinator.run("daemon-crash", async ({ whenClosing }) => {
+    entered.resolve();
+    await whenClosing;
+    events.push("dialog.retired");
+  });
+  await entered.promise;
+
+  const closed = coordinator.close("quit", () => events.push("quit.ran"));
+  await Promise.all([active, closed]);
+  assert.deepEqual(events, ["dialog.retired", "quit.ran"]);
+});
+
 test("ordinary quit is held until one shared asynchronous cleanup completes", async () => {
   const cleanup = deferred();
   const lifecycle = [];

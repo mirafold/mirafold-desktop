@@ -693,9 +693,13 @@ async function boot() {
 
   const retire = async () => {
     const clean = await booting.stop();
+    if (!clean) daemonCleanupBlocked = true;
     if (daemon === booting) {
-      daemon = null;
       daemonOrigin = null;
+      // Keep an unproved tree reachable. The next terminal/update owner must
+      // observe the Daemon's cached false stop result instead of treating a
+      // cleared global reference as proof that no process remains.
+      if (clean) daemon = null;
     }
     return clean;
   };
@@ -1053,8 +1057,6 @@ function removeProAccess() {
 async function prepareForUpdateInstall() {
   if (quitting || lifecycle.closing || daemonCleanupBlocked) return false;
   const retirement = retireProActivation();
-  ++bootSeq;
-  daemonOrigin = null;
   const prepared = await lifecycle.run(LIFECYCLE_ACTION.UPDATE_INSTALL, async () => {
     try {
       await retirement;
@@ -1063,6 +1065,11 @@ async function prepareForUpdateInstall() {
       return false;
     }
     if (quitting || lifecycle.closing || daemonCleanupBlocked || !win) return false;
+    // Invalidate a replacement boot only after update owns the queue. If an
+    // earlier owner is still booting, it must finish and leave its Daemon here
+    // so this turn observes the authoritative stop proof below.
+    ++bootSeq;
+    daemonOrigin = null;
     const stopping = daemon;
     daemon = null;
     const clean = stopping ? await stopping.stop() : true;
@@ -1154,11 +1161,11 @@ async function onLoadingScreenFailure(err) {
   }
 }
 
-async function onDaemonCleanupFailure(action) {
+async function onDaemonCleanupFailure(action, whenClosing = null) {
   daemonOrigin = null;
   if (quitting || !win) return;
   try {
-    await showMessage({
+    const presenting = showMessage({
       type: "error",
       title: "Mirafold couldn't stop safely",
       message: `Mirafold could not prove its background processes stopped while ${action}.`,
@@ -1166,11 +1173,19 @@ async function onDaemonCleanupFailure(action) {
       buttons: ["Quit"],
       defaultId: 0,
     });
+    if (whenClosing) {
+      void presenting.catch(() => {});
+      await Promise.race([presenting, whenClosing]);
+    } else {
+      await presenting;
+    }
   } finally {
     // A native-dialog failure cannot authorize a replacement process or leave
     // a disconnected window running after cleanup itself failed.
-    quitting = true;
-    app.quit();
+    if (!lifecycle.closing) {
+      quitting = true;
+      app.quit();
+    }
   }
 }
 
@@ -1186,12 +1201,14 @@ async function onDaemonCrash(crashed, { code, signal, stderr, clean }) {
   daemonOrigin = null;
   ++bootSeq;
   if (clean !== true) daemonCleanupBlocked = true;
-  return lifecycle.run(LIFECYCLE_ACTION.DAEMON_CRASH, async () => {
+  return lifecycle.run(LIFECYCLE_ACTION.DAEMON_CRASH, async ({ whenClosing }) => {
     if (quitting || lifecycle.closing || !win) return;
-    if (clean !== true) return onDaemonCleanupFailure("recovering from a daemon crash");
+    if (clean !== true) {
+      return onDaemonCleanupFailure("recovering from a daemon crash", whenClosing);
+    }
     if (daemon !== null) return;
     const how = signal ? `was killed (${signal})` : `exited with code ${code}`;
-    const outcome = await showMessage({
+    const presenting = showMessage({
       type: "error",
       title: "Mirafold stopped",
       message: `The Mirafold daemon ${how}.`,
@@ -1209,6 +1226,13 @@ async function onDaemonCrash(crashed, { code, signal, stderr, clean }) {
       defaultId: 0,
       cancelId: 1,
     }, () => !quitting && !lifecycle.closing && win !== null && daemon === null);
+    // The native box itself may not be cancellable. Observe its eventual
+    // result, but let terminal close retire this lifecycle wait immediately.
+    void presenting.catch(() => {});
+    const outcome = await Promise.race([
+      presenting,
+      whenClosing.then(() => ({ response: 1, skipped: true })),
+    ]);
     if (outcome.skipped || quitting || lifecycle.closing || !win || daemon !== null) return;
     if (outcome.response === 0) return boot();
     quitting = true;

@@ -90,7 +90,11 @@ function deferred() {
 
 const stopEntered = mode === "quit-during-removal" ? deferred() : null;
 const stopRelease = mode === "quit-during-removal" ? deferred() : null;
-const restartGate = mode === "quit-after-removal" ? deferred() : null;
+const restartGate = [
+  "quit-after-removal",
+  "quit-during-activation-boot-unproven",
+  "update-during-activation-boot",
+].includes(mode) ? deferred() : null;
 const removalConfirmEntered = mode === "removal-during-success-dialog" ? deferred() : null;
 const removalConfirmRelease = mode === "removal-during-success-dialog" ? deferred() : null;
 const folderDialogEntered = [
@@ -103,6 +107,8 @@ const folderDialogRelease = [
 ].includes(mode) ? deferred() : null;
 const keySaveEntered = mode === "unclean-crash-during-activation" ? deferred() : null;
 const keySaveRelease = mode === "unclean-crash-during-activation" ? deferred() : null;
+const crashDialogEntered = mode === "quit-during-crash-dialog" ? deferred() : null;
+const crashDialogRelease = mode === "quit-during-crash-dialog" ? deferred() : null;
 
 const proStore = {
   async inspect() {
@@ -246,6 +252,13 @@ class FakeDaemon {
   async stop() {
     this.stopCalls += 1;
     events.push("daemon.stop." + this.index);
+    if ([
+      "quit-during-activation-boot-unproven",
+      "update-during-activation-boot",
+    ].includes(mode) && this.index === 1) {
+      events.push("daemon.stop.unproven");
+      return false;
+    }
     if (stopEntered && this.index === 0) {
       events.push("daemon.stop.gated");
       stopEntered.resolve();
@@ -333,6 +346,10 @@ const dialog = {
       if (removalConfirmEntered && options.title === "Remove Mirafold Pro access?") {
         removalConfirmEntered.resolve();
         await removalConfirmRelease.result;
+      }
+      if (crashDialogEntered && options.title === "Mirafold stopped") {
+        crashDialogEntered.resolve();
+        await crashDialogRelease.result;
       }
       if ([
         "store-retry",
@@ -906,6 +923,22 @@ if (mode === "happy") {
   ]);
   assert.equal(dialogs.length, 2);
   assert.equal(maximumActiveDialogs, 1, "crash and Pro dialogs overlapped");
+} else if (mode === "quit-during-crash-dialog") {
+  daemonInstances[0].running = false;
+  void daemonInstances[0].onCrash({
+    code: 1,
+    signal: null,
+    stderr: "fixture crash",
+    clean: true,
+  });
+  await crashDialogEntered.result;
+  let preventions = 0;
+  app.emit("before-quit", { preventDefault: () => { preventions += 1; } });
+  await waitFor(() => quitCalls === 1, "quit waited for the open crash dialog");
+  assert.equal(preventions, 1);
+  crashDialogRelease.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(daemonInstances.length, 1, "the retired crash choice restarted the daemon");
 } else if (mode === "unclean-crash-during-folder") {
   openFolderItem.click();
   await folderDialogEntered.result;
@@ -987,6 +1020,50 @@ if (mode === "happy") {
     "daemon.start.new",
   ]);
   assert.equal(maximumActiveDialogs, 1);
+} else if (mode === "update-during-activation-boot") {
+  assert.deepEqual(windowOpenHandler({ url: MARKER }), { action: "deny" });
+  await waitFor(() => events.includes("browser.activation"), "activation did not reach the browser");
+  resolveActivation();
+  await waitFor(
+    () => events.includes("daemon.start.gated"),
+    "activation completion did not enter its replacement boot",
+  );
+  const preparation = updaterOptions.prepareInstall();
+  restartGate.resolve();
+  assert.equal(
+    await preparation,
+    false,
+    "update installation ignored an unproved stale-boot cleanup",
+  );
+  assert.equal(daemonInstances.length, 2);
+  assert.equal(daemonInstances[1].stopCalls, 1);
+  assert.equal(quitCalls, 1);
+  assert.equal(dialogs.at(-1).title, "Mirafold couldn't stop safely");
+  assertOrdered([
+    "daemon.start.gated",
+    "daemon.stop.1",
+    "daemon.stop.unproven",
+    "dialog.Mirafold couldn't stop safely",
+  ]);
+} else if (mode === "quit-during-activation-boot-unproven") {
+  assert.deepEqual(windowOpenHandler({ url: MARKER }), { action: "deny" });
+  await waitFor(() => events.includes("browser.activation"), "activation did not reach the browser");
+  resolveActivation();
+  await waitFor(
+    () => events.includes("daemon.start.gated"),
+    "activation completion did not enter its replacement boot",
+  );
+  let preventions = 0;
+  app.emit("before-quit", { preventDefault: () => { preventions += 1; } });
+  restartGate.resolve();
+  await waitFor(() => quitCalls === 1, "quit cleanup did not finish");
+  assert.equal(preventions, 1);
+  assert.equal(
+    daemonInstances[1].stopCalls,
+    2,
+    "quit lost the failed stale-boot cleanup result with its daemon reference",
+  );
+  assert.equal(daemonInstances[1].running, true, "fixture must model the unproved live tree");
 } else if (mode === "quit-during-removal") {
   removeProItem.click();
   await stopEntered.result;
@@ -1122,12 +1199,24 @@ test("folder, crash, and updater transitions serialize with a pending activation
   runProbe("update-pending");
 });
 
+test("update ownership observes a replacement boot's failed cleanup proof", linuxOnly, () => {
+  runProbe("update-during-activation-boot");
+});
+
+test("quit observes a replacement boot's failed stale-cleanup proof", linuxOnly, () => {
+  runProbe("quit-during-activation-boot-unproven");
+});
+
 test("an unclean crash prevents a late folder choice from starting a replacement", linuxOnly, () => {
   runProbe("unclean-crash-during-folder");
 });
 
 test("an unclean crash remains terminal while activation completion owns the lifecycle", linuxOnly, () => {
   runProbe("unclean-crash-during-activation");
+});
+
+test("quit does not wait for an open native crash dialog", linuxOnly, () => {
+  runProbe("quit-during-crash-dialog");
 });
 
 test("quit does not wait for an open native folder picker", linuxOnly, () => {

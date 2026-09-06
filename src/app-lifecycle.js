@@ -21,8 +21,8 @@ export const LIFECYCLE_ACTION = Object.freeze({
  * Operations run in request order, rejected operations never poison the next
  * operation, and a named duplicate shares the first Promise. `close()` marks
  * the coordinator closed synchronously: queued work is retired before it can
- * touch state, the current owner can observe `isClosing()`, and exactly one
- * final cleanup runs after that owner settles.
+ * touch state, the current owner can observe `isClosing()` or await the shared
+ * closing signal, and exactly one final cleanup runs after that owner settles.
  */
 export function createLifecycleCoordinator() {
   let operationTail = Promise.resolve();
@@ -30,6 +30,10 @@ export function createLifecycleCoordinator() {
   let closing = false;
   let closePromise = null;
   const flights = new Map();
+  let releaseClosing;
+  const whenClosing = new Promise((resolve) => {
+    releaseClosing = resolve;
+  });
 
   function enqueue(kind, operation, { allowClosing = false, dedupeKey = null } = {}) {
     if (typeof kind !== "string" || kind.length === 0 || typeof operation !== "function") {
@@ -45,6 +49,7 @@ export function createLifecycleCoordinator() {
       try {
         return await operation(Object.freeze({
           isClosing: () => closing,
+          whenClosing,
         }));
       } finally {
         if (owner === kind) owner = null;
@@ -68,10 +73,14 @@ export function createLifecycleCoordinator() {
     get owner() {
       return owner;
     },
+    get whenClosing() {
+      return whenClosing;
+    },
     run: (kind, operation, options) => enqueue(kind, operation, options),
     close(kind, operation) {
       if (closePromise) return closePromise;
       closing = true;
+      releaseClosing();
       closePromise = enqueue(kind, operation, { allowClosing: true });
       return closePromise;
     },
