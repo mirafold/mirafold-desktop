@@ -256,6 +256,15 @@ export async function terminateProcessTree(pid, trackedIdentities = [], timings 
 
   if (process.platform === "win32") {
     if (timings.windowsJobOwned === true) {
+      // Attach both outcomes before the first await below. A caller-supplied
+      // close boundary that rejects while the stop-event helper is still
+      // running is unproved cleanup, not an unhandled process rejection.
+      const windowsJobClosed = timings.windowsJobClosed
+        ? Promise.resolve(timings.windowsJobClosed).then(
+          () => true,
+          () => false,
+        )
+        : null;
       // The wrapper registered this event with a native callback after joining
       // its kill-on-close Job. Signal it from a short stock-PowerShell process;
       // the callback calls TerminateJobObject, which is an authoritative tree
@@ -283,7 +292,31 @@ export async function terminateProcessTree(pid, trackedIdentities = [], timings 
         },
       );
       signaler.once("error", () => {});
-      const signaled = await new Promise((resolve) => {
+      const windowsTimeoutMs = timings.killTimeoutMs ?? 10_000;
+      await new Promise((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          resolve();
+        };
+        const timeout = setTimeout(() => {
+          signaler.kill();
+          finish();
+        }, windowsTimeoutMs);
+        signaler.once("error", finish);
+        signaler.once("close", finish);
+      });
+      if (!windowsJobClosed) return false;
+      // ChildProcess `close` is stronger than `exit`: Node emits it only after
+      // the wrapper has exited and every inherited stdio handle is closed. The
+      // packaged daemon inherits those handles, so this also prevents stop()
+      // from racing the final loopback reachability check while Job teardown
+      // is still completing. Wrapper close remains authoritative when the
+      // stop-event opener fails because that failure can race the wrapper's
+      // own exit and kill-on-close Job teardown.
+      return new Promise((resolve) => {
         let settled = false;
         const finish = (clean) => {
           if (settled) return;
@@ -291,23 +324,9 @@ export async function terminateProcessTree(pid, trackedIdentities = [], timings 
           clearTimeout(timeout);
           resolve(clean);
         };
-        const timeout = setTimeout(() => {
-          signaler.kill();
-          finish(false);
-        }, 10_000);
-        signaler.once("error", () => finish(false));
-        signaler.once("close", (code) => finish(code === 0));
+        const timeout = setTimeout(() => finish(false), windowsTimeoutMs);
+        windowsJobClosed.then(finish);
       });
-      if (!signaled || !timings.windowsJobClosed) return false;
-      // ChildProcess `close` is stronger than `exit`: Node emits it only after
-      // the wrapper has exited and every inherited stdio handle is closed. The
-      // packaged daemon inherits those handles, so this also prevents stop()
-      // from racing the final loopback reachability check while Job teardown
-      // is still completing.
-      return Promise.race([
-        timings.windowsJobClosed.then(() => true),
-        delay(10_000).then(() => false),
-      ]);
     }
     const killer = killTree(pid, "SIGTERM");
     if (!killer) return !processExists(pid);

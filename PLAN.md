@@ -1481,7 +1481,7 @@ security primitive the platform does not already provide.
   dependency, package manifest, renderer bridge, release, deployment, frozen
   hash, or website claim changed.
 
-- [ ] **Step 13.7C — complete the over-cap correctness continuation.** Repair
+- [x] **Step 13.7C — complete the over-cap correctness continuation.** Repair
   the routed Windows Job close-proof race shared by failed-start cleanup and
   ordinary successful-start `stop()`: when opening the registered stop event
   loses to wrapper close, consume that completed Job boundary before caching
@@ -1491,6 +1491,40 @@ security primitive the platform does not already provide.
   Linux package smokes, and the required fresh-agent cold review. Done when the
   routed finding is fixed and no confirmed correctness finding remains. Do not
   publish or freeze hashes.
+
+  Completed 2026-09-06. Caller-level probes against the unchanged 885f063
+  starting point reproduced both paths: after the Windows Job wrapper became
+  ready, a failed stop-event opener made failed-start cleanup and ordinary
+  stop() each return and cache false, even though wrapper close arrived
+  20 milliseconds later and proved kill-on-close Job teardown. The shared
+  cause was in terminateProcessTree(): it treated failure to issue the stop
+  request as conclusive before consuming the independent authoritative close
+  Promise. The same focused run proved the prior successful-close
+  Promise.race() left its losing ten-second timer referenced. Fresh cold review
+  then proved a rejected close Promise could become an unhandled rejection if
+  it settled before the stop-event helper.
+
+  Windows Job cleanup now settles the stop-event helper, then waits up to the
+  existing production ten-second bound for wrapper close regardless of whether
+  the helper opened the event. It still returns false when that close never
+  arrives, and it clears the losing timeout as soon as either outcome is known.
+  It also attaches a fail-closed normalization to the close Promise before its
+  first await, so an early rejection returns false instead of escaping.
+  Permanent real-Daemon regressions cover the failed-start and ordinary-stop
+  callers; sibling coverage retains the already-closed fast path and the
+  genuinely unproved and rejected results, while a bounded subprocess catches
+  a referenced timeout returning.
+
+  The 27 focused daemon/ownership tests and the complete 313-test suite pass
+  with 312 passes and one existing platform skip. Syntax, whitespace,
+  dependency integrity, and npm audit at moderate severity pass with zero
+  vulnerabilities. One fresh nonpublishing build produced AppImage
+  (219,590,120 bytes), tar (207,311,056 bytes), and Debian (168,923,000 bytes)
+  artifacts. Dotenv-excluding extraction found the changed process-tree module
+  byte-identical in all three; each form passed native-module, MCP,
+  environment-scrubbing, authenticated-loopback, renderer-stop, and
+  daemon-tree cleanup smoke. No dependency, package manifest, daemon caller,
+  release, deployment, frozen hash, or website claim changed.
 
 - [ ] **Step 13.8 — run the feature-delta security audit.** Attack the exact
   fixed candidate for callback theft, wrong state/path/host, concurrent
