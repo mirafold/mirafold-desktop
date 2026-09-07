@@ -351,6 +351,11 @@ export async function terminateProcessTree(pid, trackedIdentities = [], timings 
 
     const rootIdentity = retainedRoot ?? currentRoot;
     const originalGroupIsOwned = currentLinuxIdentity(rootIdentity) !== null;
+    // An unreadable identity cannot authorize a signal, but a still-live PID
+    // or group also cannot count as proof that cleanup finished. Keep polling
+    // that boundary and fail closed if it remains after both bounded waits.
+    const unidentifiedRootExists = () => rootIdentity === null
+      && (processExists(pid) || unixProcessGroupExists(pid));
     const termSignalled = new Set();
     const killSignalled = new Set();
 
@@ -371,6 +376,7 @@ export async function terminateProcessTree(pid, trackedIdentities = [], timings 
     const treeExists = (signal, signalled) => {
       signalNewIdentities(signal, signalled);
       return (
+        unidentifiedRootExists() ||
         (originalGroupIsOwned && unixProcessGroupExists(pid)) ||
         [...identities.values()].some(runningLinuxIdentity)
       );

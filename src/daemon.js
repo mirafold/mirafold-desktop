@@ -389,6 +389,18 @@ export class Daemon {
     }
     this.#child = child;
     this.#treeTracker = child.pid ? new LinuxProcessTreeTracker(child.pid, 25, ledgerFile) : null;
+    let windowsWrapperReady = false;
+    let windowsJobIsClosed = false;
+    let resolveWindowsJobClosed;
+    const windowsJobClosed = process.platform === "win32"
+      ? new Promise((resolve) => { resolveWindowsJobClosed = resolve; })
+      : null;
+    if (windowsJobClosed) {
+      child.once("close", () => {
+        windowsJobIsClosed = true;
+        resolveWindowsJobClosed();
+      });
+    }
 
     const safeStdout = new CredentialSafeLineStream();
     const safeStderr = new CredentialSafeLineStream();
@@ -432,7 +444,7 @@ export class Daemon {
         // the private text because the token is what makes the URL usable.
         forwardStdout(safeStdout.push(text));
         if (settled) return;
-        deadline.observe(text);
+        if (deadline.observe(text)) windowsWrapperReady = true;
         tail = (tail + text).slice(-4096); // one boot line, bounded
         const startupUrl = findStartupUrl(tail);
         if (startupUrl) {
@@ -465,14 +477,33 @@ export class Daemon {
         // The daemon may have spawned agent CLIs before failing, so take down
         // the whole tree, not just the daemon. Straight to SIGKILL: the boot
         // never completed, so there is nothing worth a graceful shutdown.
-        if (child.pid) {
-          await terminateProcessTree(child.pid, trackedIdentities, {
-            termTimeoutMs: 0,
-            ledgerFile: this.#ledgerFile,
+        const windowsJobOwned = process.platform === "win32" && windowsWrapperReady;
+        // Once the ready marker has been observed, the wrapper owns its full
+        // tree in a kill-on-close Job. If `close` caused this failure, that Job
+        // boundary has already completed; otherwise signal its registered stop
+        // event and wait for the same close proof.
+        const cleanup = child.pid
+          ? windowsJobOwned && windowsJobIsClosed
+            ? Promise.resolve(true)
+            : terminateProcessTree(child.pid, trackedIdentities, {
+              termTimeoutMs: 0,
+              ledgerFile: this.#ledgerFile,
+              windowsJobOwned,
+              windowsJobClosed,
+              windowsStopEvent: this.#windowsStopEvent,
+              windowsEnv: process.env,
+            })
+          : Promise.resolve(true);
+        // Keep this result authoritative after start() rejects. boot() retires
+        // the failed instance through stop(); clearing it here would turn an
+        // unproved startup cleanup into a false success on that second call.
+        this.#stopPromise = cleanup
+          .catch(() => false)
+          .finally(() => {
+            this.#cleanLedger();
+            this.#windowsStopEvent = null;
           });
-        }
-        this.#cleanLedger();
-        this.#windowsStopEvent = null;
+        await this.#stopPromise;
         flushOutput();
         err.stderr = this.stderr;
         throw err;

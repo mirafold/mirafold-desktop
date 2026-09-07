@@ -16,6 +16,9 @@ const MARKER = "https://mirafold.com/activate";
 const ACTIVATION_URL = MARKER
   + "?version=1&callback_port=43210&callback_nonce=fixture-callback"
   + "&state=fixture-state&code_challenge=fixture-challenge";
+const SECOND_ACTIVATION_URL = MARKER
+  + "?version=1&callback_port=43211&callback_nonce=fixture-callback-next"
+  + "&state=fixture-state-next&code_challenge=fixture-challenge-next";
 const OLD_KEY = "mf_" + "a".repeat(20);
 const NEW_KEY = "mf_" + "b".repeat(20);
 const STARTUP_CLEANUP_FAILURE_MODES = [
@@ -38,6 +41,7 @@ const events = [];
 const dialogs = [];
 const titles = [];
 const openedUrls = [];
+const unhandledRejections = [];
 const daemonInstances = [];
 let windowOpenHandler = null;
 let menuTemplate = null;
@@ -55,6 +59,10 @@ let maximumActiveDialogs = 0;
 let activeDeferred = null;
 let updaterOptions = null;
 
+if (["boot-dialog-rejection", "crash-dialog-rejection"].includes(mode)) {
+  process.on("unhandledRejection", (error) => { unhandledRejections.push(error); });
+}
+
 const pending = Object.freeze({ checkpoint: mode });
 let envelope = mode === "resume-renewal"
   ? { version: 1, licenseKey: OLD_KEY, pending }
@@ -69,6 +77,12 @@ let envelope = mode === "resume-renewal"
       "crash-then-callback",
       "update-pending",
       "quit-during-pro-success-dialog",
+      "quit-during-browser-reopen",
+      "removal-during-browser-reopen",
+      "update-during-browser-reopen",
+      "stale-browser-failure",
+      "startup-expired-resume",
+      "expired-resume-marker",
     ].includes(mode)
     ? { version: 1, pending }
     : [
@@ -218,8 +232,13 @@ const proStore = {
 
 function createHandle() {
   activeDeferred = deferred();
-  return Object.freeze({ activationUrl: ACTIVATION_URL, result: activeDeferred.result });
+  const activationUrl = mode === "stale-browser-failure" && activationControllers > 1
+    ? SECOND_ACTIVATION_URL
+    : ACTIVATION_URL;
+  return Object.freeze({ activationUrl, result: activeDeferred.result });
 }
+
+const staleBrowserReopen = mode === "stale-browser-failure" ? deferred() : null;
 
 function createProActivationController({ store, openBrowser }) {
   assert.equal(store, proStore);
@@ -244,6 +263,7 @@ function createProActivationController({ store, openBrowser }) {
     async resume() {
       activationResumes += 1;
       events.push("activation.resume");
+      if (mode === "startup-expired-resume") envelope = null;
       const current = await store.load();
       if (!current?.pending) return null;
       return createHandle();
@@ -281,7 +301,10 @@ class FakeDaemon {
     this.options = options;
     this.running = true;
     events.push("daemon.start." + keyLabel(options?.licenseKey));
-    if (STARTUP_QUIT_WAIT_MODES.includes(mode) && this.index === 0) {
+    if (
+      (STARTUP_QUIT_WAIT_MODES.includes(mode) || mode === "boot-dialog-rejection")
+      && this.index === 0
+    ) {
       throw new Error("fixture daemon start failure");
     }
     if (restartGate && this.index === 1) {
@@ -422,6 +445,12 @@ const dialog = {
         proLifecycleDialogEntered.resolve();
         await proLifecycleDialogRelease.result;
       }
+      if (
+        (mode === "boot-dialog-rejection" && options.title === "Mirafold couldn't start")
+        || (mode === "crash-dialog-rejection" && options.title === "Mirafold stopped")
+      ) {
+        throw new Error("fixture native dialog failure");
+      }
       if (mode === "quit-during-boot-recovery-picker" && options.title === "Mirafold couldn't start") {
         return { response: 1 };
       }
@@ -452,6 +481,16 @@ const shell = {
   async openExternal(url) {
     openedUrls.push(url);
     events.push(url === ACTIVATION_URL ? "browser.activation" : "browser.external");
+    if ([
+      "quit-during-browser-reopen",
+      "removal-during-browser-reopen",
+      "update-during-browser-reopen",
+    ].includes(mode) && url === ACTIVATION_URL) {
+      return new Promise(() => {});
+    }
+    if (mode === "stale-browser-failure" && url === ACTIVATION_URL) {
+      return staleBrowserReopen.result;
+    }
     if (
       mode === "browser-retry"
       && url === ACTIVATION_URL
@@ -572,6 +611,7 @@ await waitFor(
     && (
       STARTUP_CLEANUP_FAILURE_MODES.includes(mode)
       || STARTUP_QUIT_WAIT_MODES.includes(mode)
+      || mode === "boot-dialog-rejection"
       || updaterStarts === 1
     ),
   "the initial Desktop boot did not finish",
@@ -584,7 +624,18 @@ const removeProItem = projectMenu.submenu.find(
 );
 assert.ok(removeProItem, "Linux must expose the neutral device-removal command");
 
-if (STARTUP_QUIT_WAIT_MODES.includes(mode)) {
+if (mode === "boot-dialog-rejection") {
+  await waitFor(
+    () => quitCalls === 1 || unhandledRejections.length > 0,
+    "the rejected boot-recovery dialog did not settle",
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(quitCalls, 1, "a rejected boot-recovery dialog left the disconnected app open");
+  assert.deepEqual(unhandledRejections, [], "boot recovery escaped as an unhandled rejection");
+  assert.equal(daemonInstances.length, 1);
+  assert.equal(daemonInstances[0].running, false);
+  assert.equal(updaterStarts, 0);
+} else if (STARTUP_QUIT_WAIT_MODES.includes(mode)) {
   if (mode === "quit-during-boot-failure-dialog") {
     await bootFailureDialogEntered.result;
   } else {
@@ -623,6 +674,95 @@ if (STARTUP_QUIT_WAIT_MODES.includes(mode)) {
   assert.deepEqual(envelope, { version: 1, licenseKey: NEW_KEY });
   assert.equal(daemonInstances.length, 2);
   assert.equal(daemonInstances[1].running, false);
+} else if (mode === "quit-during-browser-reopen") {
+  await waitFor(() => activationResumes === 1 && activeDeferred !== null, "pending activation did not resume");
+  assert.deepEqual(windowOpenHandler({ url: MARKER }), { action: "deny" });
+  await waitFor(() => openedUrls.includes(ACTIVATION_URL), "the explicit browser reopen did not begin");
+  let preventions = 0;
+  app.emit("before-quit", { preventDefault: () => { preventions += 1; } });
+  await waitFor(() => quitCalls === 1, "quit waited for the stalled browser-open promise");
+  assert.equal(preventions, 1);
+  assert.equal(activationShutdowns, 1);
+  assert.equal(daemonInstances[0].running, false);
+} else if (mode === "removal-during-browser-reopen") {
+  await waitFor(() => activationResumes === 1 && activeDeferred !== null, "pending activation did not resume");
+  assert.deepEqual(windowOpenHandler({ url: MARKER }), { action: "deny" });
+  await waitFor(() => openedUrls.includes(ACTIVATION_URL), "the explicit browser reopen did not begin");
+  removeProItem.click();
+  await waitFor(
+    () => storeRemoveAttempts === 1 && daemonInstances.length === 2 && daemonInstances[1].running,
+    "a stalled browser reopen blocked confirmed removal",
+  );
+  assert.equal(activationShutdowns, 1);
+  assert.deepEqual(envelope, null);
+  assert.equal(daemonInstances[0].running, false);
+} else if (mode === "update-during-browser-reopen") {
+  await waitFor(() => activationResumes === 1 && activeDeferred !== null, "pending activation did not resume");
+  assert.deepEqual(windowOpenHandler({ url: MARKER }), { action: "deny" });
+  await waitFor(() => openedUrls.includes(ACTIVATION_URL), "the explicit browser reopen did not begin");
+  assert.equal(
+    await updaterOptions.prepareInstall(),
+    true,
+    "a stalled browser reopen blocked update preparation",
+  );
+  assert.equal(activationShutdowns, 1);
+  assert.equal(daemonInstances[0].running, false);
+} else if (mode === "stale-browser-failure") {
+  await waitFor(() => activationResumes === 1 && activeDeferred !== null, "pending activation did not resume");
+  assert.deepEqual(windowOpenHandler({ url: MARKER }), { action: "deny" });
+  await waitFor(() => openedUrls.includes(ACTIVATION_URL), "the old browser reopen did not begin");
+  removeProItem.click();
+  await waitFor(
+    () => storeRemoveAttempts === 1 && daemonInstances.length === 2 && daemonInstances[1].running,
+    "confirmed removal did not retire the old browser reopen",
+  );
+  assert.deepEqual(windowOpenHandler({ url: MARKER }), { action: "deny" });
+  await waitFor(
+    () => activationStarts === 1 && openedUrls.includes(SECOND_ACTIVATION_URL),
+    "the new activation did not reach its browser handoff",
+  );
+  assert.match(titles.at(-1), /Finish Pro activation/);
+  staleBrowserReopen.reject(new Error("fixture stale browser failure"));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(titles.at(-1), /Finish Pro activation/, "a retired browser failure cleared current progress");
+  assert.equal(
+    dialogs.filter((item) => item.title === "Mirafold Pro couldn't connect").length,
+    0,
+    "a retired browser failure opened a current-owner dialog",
+  );
+} else if (mode === "startup-expired-resume") {
+  await waitFor(
+    () => events.filter((item) => item === "store.load.empty").length === 2,
+    "expired startup state was not reconciled",
+  );
+  assert.equal(dialogs.length, 0, "normal saved-flow expiry was reported as a storage failure");
+  const currentRemoveItem = menuTemplate.find((item) => item.label === "Project").submenu.find(
+    (item) => item.label === "Remove Pro Access from This Device…",
+  );
+  assert.equal(currentRemoveItem.enabled, false, "expired state left the removal command enabled");
+} else if (mode === "expired-resume-marker") {
+  await waitFor(() => activationResumes === 1 && activeDeferred !== null, "pending activation did not resume");
+  const timedOut = activeDeferred;
+  activeDeferred = null;
+  const timeoutError = new Error("fixture timeout");
+  timeoutError.code = "timeout";
+  timedOut.reject(timeoutError);
+  await waitFor(
+    () => dialogs.some((item) => item.title === "Mirafold Pro couldn't connect"),
+    "the timed-out saved flow did not settle",
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  envelope = null;
+  assert.deepEqual(windowOpenHandler({ url: MARKER }), { action: "deny" });
+  await waitFor(
+    () => activationResumes === 2 && activationStarts === 1 && activeDeferred !== null,
+    "the expired saved flow did not start a fresh activation",
+  );
+  assert.equal(
+    openedUrls.filter((item) => item === ACTIVATION_URL).length,
+    1,
+    "the fresh activation opened its browser page more than once",
+  );
 } else if (REMOVAL_FAILURE_QUIT_WAIT_MODES.includes(mode)) {
   removeProItem.click();
   await quitBeforeProLifecycleDialogSettles("quit waited for removal-failure UI");
@@ -1082,6 +1222,22 @@ if (STARTUP_QUIT_WAIT_MODES.includes(mode)) {
   crashDialogRelease.resolve();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(daemonInstances.length, 1, "the retired crash choice restarted the daemon");
+} else if (mode === "crash-dialog-rejection") {
+  daemonInstances[0].running = false;
+  void daemonInstances[0].onCrash({
+    code: 1,
+    signal: null,
+    stderr: "fixture crash",
+    clean: true,
+  });
+  await waitFor(
+    () => quitCalls === 1 || unhandledRejections.length > 0,
+    "the rejected crash-recovery dialog did not settle",
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(quitCalls, 1, "a rejected crash-recovery dialog left the disconnected app open");
+  assert.deepEqual(unhandledRejections, [], "crash recovery escaped as an unhandled rejection");
+  assert.equal(daemonInstances.length, 1);
 } else if (mode === "unclean-crash-during-folder") {
   openFolderItem.click();
   await folderDialogEntered.result;
@@ -1301,6 +1457,29 @@ test("quit bypasses the native boot-failure dialog and recovery folder picker", 
 test("quit bypasses Pro success and update-recovery failure dialogs", linuxOnly, () => {
   runProbe("quit-during-update-recovery-failure-dialog");
   runProbe("quit-during-pro-success-dialog");
+});
+
+test("quit bypasses a stalled operating-system browser reopen", linuxOnly, () => {
+  runProbe("quit-during-browser-reopen");
+});
+
+test("a stalled browser reopen does not block Pro removal or update preparation", linuxOnly, () => {
+  runProbe("removal-during-browser-reopen");
+  runProbe("update-during-browser-reopen");
+});
+
+test("a retired browser failure cannot clear a newer activation's progress", linuxOnly, () => {
+  runProbe("stale-browser-failure");
+});
+
+test("terminal boot and crash recovery survive native-dialog rejection", linuxOnly, () => {
+  runProbe("boot-dialog-rejection");
+  runProbe("crash-dialog-rejection");
+});
+
+test("saved activation expiry reconciles state and a later marker opens one fresh flow", linuxOnly, () => {
+  runProbe("startup-expired-resume");
+  runProbe("expired-resume-marker");
 });
 
 test("quit bypasses known and uncertain removal-failure dialogs", linuxOnly, () => {

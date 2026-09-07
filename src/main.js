@@ -113,6 +113,13 @@ function runBackgroundAction(action, failureMessage) {
   });
 }
 
+function quitAfterNativeUiFailure(message) {
+  console.error(message);
+  if (lifecycle.closing) return;
+  quitting = true;
+  app.quit();
+}
+
 /** Keep native error dialogs bounded and safe to screenshot or share. */
 function safeErrorDetail(error) {
   const message = redactCredentials(String(error?.message ?? error ?? "")).slice(-2000);
@@ -173,12 +180,12 @@ function proFailureCopy(kind, error) {
 }
 
 async function showProFailure(kind, error, retryable = false, owner = undefined) {
-  setProProgress(null);
   const relevant = () => !quitting
     && !lifecycle.closing
     && win !== null
     && (owner === undefined || owner === proActivation);
   if (!relevant()) return false;
+  setProProgress(null);
   const copy = proFailureCopy(kind, error);
   try {
     const outcome = await waitForNativeOrClose(showMessage({
@@ -256,6 +263,7 @@ function retireProActivation() {
   const reopen = proReopenPromise;
   proActivation = null;
   proActivationUrl = null;
+  proReopenPromise = null;
   setProProgress(null);
 
   let shutdown = Promise.resolve();
@@ -269,8 +277,10 @@ function retireProActivation() {
   const settlement = Promise.all([
     shutdown,
     action ?? Promise.resolve(),
-    reopen ?? Promise.resolve(),
   ]);
+  // The native browser launcher cannot be cancelled. It no longer owns a
+  // lifecycle transition, and its owner checks discard any late failure.
+  void reopen?.catch(() => {});
   const retirement = proRetirementTail.then(() => settlement);
   proRetirementTail = retirement.catch(() => {});
   return retirement;
@@ -381,8 +391,10 @@ async function reopenProActivationPage(url, owner) {
     return false;
   }
   try {
-    await shell.openExternal(url);
-    return true;
+    return await waitForNativeOrClose(
+      Promise.resolve(shell.openExternal(url)).then(() => true),
+      false,
+    );
   } catch {
     await showProFailure("activation", { code: "browser" }, false, owner);
     if (proActionPromise && proActivationUrl === url) {
@@ -424,10 +436,13 @@ function reopenActiveProActivation() {
   reopening = lifecycle.run(
     LIFECYCLE_ACTION.ACTIVATION_START,
     () => isCurrentProActivation(owner) && proActivationUrl === activationUrl
-      ? reopenProActivationPage(activationUrl, owner)
+      ? true
       : false,
     { dedupeKey: "pro-browser-reopen" },
-  ).finally(() => {
+  ).then((claimed) => claimed && isCurrentProActivation(owner)
+    && proActivationUrl === activationUrl
+    ? reopenProActivationPage(activationUrl, owner)
+    : false).finally(() => {
     if (proReopenPromise === reopening) proReopenPromise = null;
   });
   proReopenPromise = reopening;
@@ -456,10 +471,12 @@ function beginProActivation() {
       }
       if (!isCurrentProActivation(owner)) return null;
 
-      const resuming = proPendingFlow;
+      const shouldResume = proPendingFlow;
       let handle;
+      let resumed = false;
       try {
-        handle = proPendingFlow ? await owner.resume() : await owner.start();
+        handle = shouldResume ? await owner.resume() : await owner.start();
+        resumed = shouldResume && Boolean(handle);
       } catch (error) {
         if (!isCurrentProActivation(owner)) return null;
         await refreshProPendingState();
@@ -480,7 +497,7 @@ function beginProActivation() {
       if (!isCurrentProActivation(owner)) return null;
       proPendingFlow = true;
       setProStatePresent(true);
-      if (resuming) {
+      if (resumed) {
         const activationUrl = typeof handle?.activationUrl === "string"
           ? handle.activationUrl
           : null;
@@ -517,7 +534,10 @@ function resumeProActivation() {
       if (!isCurrentProActivation(owner)) return null;
       if (!resumed) {
         proPendingFlow = false;
-        await showProFailure("startup", null, false, owner);
+        // Expiry is a normal null result from the controller, which has
+        // already removed the obsolete pending record. Reconcile the menu and
+        // continue with the local session without calling it a storage error.
+        await refreshProPendingState();
         return null;
       }
       proPendingFlow = true;
@@ -793,7 +813,15 @@ function openFolder() {
     // Electron cannot cancel a presented native chooser. Keep that wait outside
     // lifecycle ownership so terminal quit can close the app independently;
     // a choice returned afterward is discarded by the closing-state check.
-    const chosen = await pickFolder("Open another project folder");
+    let chosen;
+    try {
+      chosen = await pickFolder("Open another project folder");
+    } catch {
+      // The current daemon and folder are still usable. Settle the command and
+      // retain that session without exposing a rejected Electron Promise.
+      console.error("Mirafold could not show its project folder picker.");
+      return;
+    }
     if (!chosen || quitting || lifecycle.closing || daemonCleanupBlocked || !win) return;
     return lifecycle.run(
       LIFECYCLE_ACTION.FOLDER_CHANGE,
@@ -1127,20 +1155,32 @@ async function onBootFailure(err) {
   // Same guard as onDaemonCrash: during quit (or with the window gone) there
   // is no one to ask — a dialog would race app teardown, parentless.
   if (quitting || !win) return;
-  const outcome = await waitForNativeOrClose(showMessage({
-    type: "error",
-    title: "Mirafold couldn't start",
-    message: "The Mirafold daemon failed to start.",
-    detail: safeErrorDetail(err),
-    buttons: ["Try again", "Choose another folder", "Quit"],
-    defaultId: 0,
-    cancelId: 2,
-  }), { response: 2, skipped: true });
+  let outcome;
+  try {
+    outcome = await waitForNativeOrClose(showMessage({
+      type: "error",
+      title: "Mirafold couldn't start",
+      message: "The Mirafold daemon failed to start.",
+      detail: safeErrorDetail(err),
+      buttons: ["Try again", "Choose another folder", "Quit"],
+      defaultId: 0,
+      cancelId: 2,
+    }), { response: 2, skipped: true });
+  } catch {
+    quitAfterNativeUiFailure("Mirafold could not show its daemon startup recovery dialog.");
+    return;
+  }
   if (outcome.skipped || quitting || lifecycle.closing || !win) return;
   const { response } = outcome;
   if (response === 0) return boot();
   if (response === 1) {
-    const chosen = await waitForNativeOrClose(pickFolder(), null);
+    let chosen;
+    try {
+      chosen = await waitForNativeOrClose(pickFolder(), null);
+    } catch {
+      quitAfterNativeUiFailure("Mirafold could not show its daemon recovery folder picker.");
+      return;
+    }
     if (quitting || lifecycle.closing || !win) return;
     if (chosen) {
       folder = chosen;
@@ -1189,6 +1229,8 @@ async function onDaemonCleanupFailure(action, whenClosing = null) {
       defaultId: 0,
     });
     await waitForNativeOrClose(presenting, null, whenClosing ?? lifecycle.whenClosing);
+  } catch {
+    console.error("Mirafold could not show its process cleanup failure dialog.");
   } finally {
     // A native-dialog failure cannot authorize a replacement process or leave
     // a disconnected window running after cleanup itself failed.
@@ -1238,11 +1280,17 @@ async function onDaemonCrash(crashed, { code, signal, stderr, clean }) {
     }, () => !quitting && !lifecycle.closing && win !== null && daemon === null);
     // The native box itself may not be cancellable. Observe its eventual
     // result, but let terminal close retire this lifecycle wait immediately.
-    const outcome = await waitForNativeOrClose(
-      presenting,
-      { response: 1, skipped: true },
-      whenClosing,
-    );
+    let outcome;
+    try {
+      outcome = await waitForNativeOrClose(
+        presenting,
+        { response: 1, skipped: true },
+        whenClosing,
+      );
+    } catch {
+      quitAfterNativeUiFailure("Mirafold could not show its daemon crash recovery dialog.");
+      return;
+    }
     if (outcome.skipped || quitting || lifecycle.closing || !win || daemon !== null) return;
     if (outcome.response === 0) return boot();
     quitting = true;
@@ -1323,10 +1371,14 @@ export function buildMenu(isPackaged = app.isPackaged) {
 // One instance per machine. A second launch would otherwise start a second
 // daemon, and the two would fight over ports and over the same project folder's
 // agent state. Instead, focus the window that already exists.
-// electron-builder's AppImage launcher adds --no-sandbox when its user-
-// namespace probe fails. Mirafold renders agent-controlled content, so a
-// packaged build must fail closed instead of accepting that downgrade.
-if (app.isPackaged && app.commandLine.hasSwitch("no-sandbox")) {
+// electron-builder's Linux AppImage launcher adds --no-sandbox when its user-
+// namespace probe fails. Mirafold renders agent-controlled content, so that
+// packaged Linux fallback must fail closed instead of accepting the downgrade.
+if (
+  app.isPackaged
+  && process.platform === "linux"
+  && app.commandLine.hasSwitch("no-sandbox")
+) {
   void app.whenReady()
     .then(() => dialog.showMessageBox({
       type: "error",
@@ -1348,7 +1400,7 @@ if (app.isPackaged && app.commandLine.hasSwitch("no-sandbox")) {
     win.focus();
   });
 
-  app.whenReady().then(async () => {
+  void app.whenReady().then(async () => {
     interfaceScaleController = createInterfaceScaleController({
       initialScale: savedInterfaceScale(),
       applyScale(scale) {
@@ -1400,6 +1452,8 @@ if (app.isPackaged && app.commandLine.hasSwitch("no-sandbox")) {
     // Updating is background work. A missing feed or network failure is logged
     // and never delays or tears down a working Mirafold session.
     void desktopUpdater.start();
+  }).catch(() => {
+    quitAfterNativeUiFailure("Mirafold could not finish starting.");
   });
 
   // We target Linux and Windows, where closing the last window means quitting.
