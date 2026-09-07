@@ -1597,7 +1597,7 @@ security primitive the platform does not already provide.
   14 modified tracked files and the handoff matched their pre-move hashes.
   Resume in that worktree, not the canonical Desktop checkout.
 
-- [ ] **Step 13.9 — falsify the Phase 13 test suite.** Run the repository's
+- [x] **Step 13.9 — falsify the Phase 13 test suite.** Run the repository's
   test-audit procedure against every claimed protection and lifecycle outcome,
   using mutations in product code—not comments or the proof itself—to establish
   which tests really fail. Repair every evidence-backed missing or wrong-target
@@ -1607,7 +1607,7 @@ security primitive the platform does not already provide.
   test theater is removed, no product behavior was changed in this pass, and
   all local/native/package gates are green.
 
-  **2026-09-07: implementation and local gates complete; PR closeout pending.**
+  **2026-09-07: audit complete.**
   Six test-design causes were repaired in the existing activation, store and
   main-process suites: masked callback-method and exchange-status checks,
   missing response identity and ciphertext-file sync evidence, incomplete
@@ -1624,8 +1624,13 @@ security primitive the platform does not already provide.
   `/home/serrecchia/Projects/mirafold-desktop-dpc9`; exact mutation transcripts
   are in the adjacent `mirafold-desktop-dpc9-evidence` directory.
   Fresh cold review independently passed the 88 changed-suite tests and found
-  no remaining issue after an audit-ledger selector correction. Hosted CI and
-  PR review remain before closeout.
+  no remaining issue after an audit-ledger selector correction. Desktop
+  [PR #64](https://github.com/mirafold/mirafold-desktop/pull/64), signed-off
+  implementation `0dbf6a5`, passed hosted Linux and Windows CI (run
+  `34166008224`, including the real Windows package lifecycle) and DCO.
+  Automated PR review completed without findings on that implementation.
+  The closeout follow-up changes only this plan and the audit report.
+  Step 13.10 is next and has not started; automated releases remain disabled.
 
 - [ ] **Step 13.10 — freeze one release candidate without changing it.** From
   the exact commit that cleared Steps 13.7–13.9, run the full clean-room release

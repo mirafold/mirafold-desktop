@@ -146,8 +146,13 @@ The fresh cold reviewer independently passed all three changed suites
 caught an evidence-record omission: initial and final test selectors differed
 for two mutations. Both selectors and their actual test result names are now
 recorded and the reviewer verified the correction. Final verdict: no remaining
-findings (`dpc9-cold-review.log`). Hosted Linux/Windows CI is the remaining
-closeout check.
+findings (`dpc9-cold-review.log`). Hosted CI run
+[`34166008224`](https://github.com/mirafold/mirafold-desktop/actions/runs/34166008224)
+passed Linux and Windows, including the real Windows packaged lifecycle.
+DCO passed. Automated review on
+[PR #64](https://github.com/mirafold/mirafold-desktop/pull/64) completed on
+implementation commit `0dbf6a5` without findings. The closeout follow-up
+updates only PLAN.md and this report; the reviewed tests remain unchanged.
 
 The active worktree and ignored detailed logs are retained under
 `/home/serrecchia/Projects/mirafold-desktop-dpc9`; the exact local mutation
