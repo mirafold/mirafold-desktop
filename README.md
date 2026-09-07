@@ -305,12 +305,11 @@ artifacts.
 
 Publication is gated on the repository Actions variable
 `MIRAFOLD_AUTOMATED_RELEASES`, which must equal the literal value `enabled`
-before the write job can run. It was kept absent through the first signed APT
-release (0.3.2) and its non-publishing rehearsals, and **has been `enabled`
-since 2026-08-30**: ordinary Shell releases now require no Desktop source
-edit, version command, tag, installer build, or GitHub Release action from a
-maintainer. Deleting the variable stops publication again (intake, tests, and
-rehearsals keep running); a release already published stays published.
+before the write job can run. It was enabled on 2026-08-30 and disabled during
+Phase 13's release-control review on 2026-09-07. Keep it `disabled` through
+candidate acceptance and until the reviewed release writer reaches `main`
+and its live behavior is verified. Setting it to `disabled` stops future
+publication; an already published release stays published.
 
 `npm run update:probe:linux OLD_APPIMAGE NEW_RELEASE_DIR` is the local-only,
 disposable proof of the real Linux update paths. It serves a freshly built
@@ -331,19 +330,21 @@ retry state, publication isolation, and the exact Shell identity carried from
 reviewed intake into the proposed native package. Each scenario must prove its
 named evidence test really ran — Node counts a test file itself as one passing
 test, so a bare pass count would accept a renamed or deleted scenario test. A
-manual dispatch of the `Release` workflow from canonical `main` is the separate
-native Linux/Windows rehearsal: it builds, smoke-checks, verifies, retains,
-signs with the production archive identity, and attests the 17 files, while the
-event gate keeps its only `contents: write` publication job skipped. The
-signer uses the existing `automated-release` environment, whose live branch
-policy admits only `main`; a real `v*` tag instead uses the reviewer-protected
-`manual-release` environment. Its build jobs use the same script-free pinned
-npm toolchain and signature/advisory gates as Shell intake, so the manual tag
-path and the automated path package identical, registry-verified bytes. Its
-manual form also
-accepts `fail_platform=linux` or `fail_platform=windows`; the selected native
-leg fails before dependency code, proving that either platform failure prevents
-provenance and publication while the other matrix leg is still allowed to run.
+manual dispatch of the `Release` workflow from canonical `main` builds and
+checks native Linux/Windows packages, signs the APT repository, attests all 17
+files, and retains them with `candidate.json` as `release-candidate` for 90 days.
+That manifest binds the commit, run, versions, and every file's SHA-256. The
+signer uses the main-only `automated-release` environment; the publication job
+stays skipped. A later signed `v*` tag names the accepted run and manifest hash.
+Its reviewer-protected `manual-release` publisher checks the exact main commit,
+successful first-attempt run, retained artifact, manifest, file hashes, and APT
+signature before uploading those original files. It does not rebuild or sign
+again. The complete procedure is in [docs/RELEASING.md](docs/RELEASING.md).
+
+The dispatch form also accepts `fail_platform=linux` or `fail_platform=windows`;
+the selected native leg fails before dependency code, proving that either
+platform failure prevents candidate retention while the other leg can finish.
+Start a new dispatch after failure; reruns are ineligible as frozen candidates.
 
 The Windows runner cannot truthfully stand in for a person. Its silent NSIS
 probe does not claim anything about SmartScreen, the visible install wizard,
