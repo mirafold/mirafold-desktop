@@ -1529,7 +1529,7 @@ security primitive the platform does not already provide.
   daemon-tree cleanup smoke. No dependency, package manifest, daemon caller,
   release, deployment, frozen hash, or website claim changed.
 
-- [ ] **Step 13.8 — run the feature-delta security audit.** Attack the exact
+- [x] **Step 13.8 — run the feature-delta security audit.** Attack the exact
   fixed candidate for callback theft, wrong state/path/host, concurrent
   callback, exchange replay, parameter substitution, hostile renderer links,
   ciphertext/symlink replacement, pipe and descriptor inheritance, process
@@ -1541,7 +1541,8 @@ security primitive the platform does not already provide.
   in-scope security finding remains and all focused, full, native, audit, and
   packaging gates pass. Do not publish or freeze hashes.
 
-  In progress 2026-09-07 on `audit/desktop-feature-delta`. The complete Phase
+  Audit completed 2026-09-07 on `audit/desktop-feature-delta`, submitted as
+  PR #63 targeting `next`. The complete Phase
   13 delta has been attacked across activation/PKCE, encrypted storage, private
   daemon handoff, renderer navigation, lifecycle ownership, packaging, release
   automation, and repository policy. Confirmed findings repaired in the local
@@ -1578,8 +1579,12 @@ security primitive the platform does not already provide.
   independent live audit is clean, the final 319-test suite passes 318 with one
   platform skip, and fresh cold review found no remaining finding. This final
   script/test correction is excluded from the packaged runtime; the three
-  completed Linux package proofs remain applicable. Hosted PR checks and merge
-  remain before closing this Step.
+  completed Linux package proofs remain applicable. Hosted CI run
+  `34161562854` on signed-off commit `a1f7b7b` passed both Linux and Windows,
+  including dependency integrity, vulnerability/signature checks, the full
+  suite, and the real Windows packaged lifecycle. DCO also passed. The final
+  follow-up changes only this completion record; PR review and merge must
+  finish before continuing to Step 13.9.
 
   The repository variable `MIRAFOLD_AUTOMATED_RELEASES` is still disabled and
   must remain disabled until a later
