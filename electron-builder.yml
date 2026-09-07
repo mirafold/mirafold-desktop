@@ -27,6 +27,12 @@ files:
   - build/icon.png
   - package.json
   - node_modules/**/*
+  # Defense in depth: keep local dotenv secrets out even if one is created
+  # below an otherwise packaged source or production-dependency directory.
+  - "!**/.env"
+  - "!**/*.env"
+  - "!**/.env.*"
+  - "!**/*.env.*"
 
 # asar is deliberately OFF.
 #

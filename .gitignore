@@ -2,5 +2,11 @@ node_modules/
 dist/
 *.log
 
+# Local dotenv files are opaque secrets and never belong in source control.
+.env
+*.env
+.env.*
+*.env.*
+
 # Graphify (local code-graph tool) output: machine-local, never source
 graphify-out/

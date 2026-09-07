@@ -237,7 +237,7 @@ test("automated identity and release notes are deterministic and source-bound", 
   assert.equal(validateReleasePlan(candidate), candidate);
   assert.equal(
     candidate.commitMessage,
-    "release: Desktop 1.2.4 with Shell 0.3.8\n\nSigned-off-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>",
+    "release: Desktop 1.2.4 with Shell 0.3.8 [skip ci]\n\nSigned-off-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>",
   );
   const notes = automatedReleaseNotes({
     desktopVersion: VERSION,

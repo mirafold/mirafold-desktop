@@ -90,7 +90,9 @@ test("dependency and build jobs are read-only; only the isolated writer can push
   }
   const writer = job("release");
   assert.match(writer, /permissions:\s*\n\s+contents: write/);
+  assert.match(writer, /ssh-key:\s*\$\{\{ secrets\.MIRAFOLD_RELEASE_DEPLOY_KEY \}\}/);
   assert.match(writer, /persist-credentials: true/);
+  assert.equal(workflow.match(/MIRAFOLD_RELEASE_DEPLOY_KEY/g)?.length, 1);
   assert.equal(workflow.match(/contents: write/g)?.length, 1);
 });
 

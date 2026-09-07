@@ -77,6 +77,16 @@ const CREDENTIAL_LINES = [
     secret: "dummy-pairing-code_456",
     text: "[relay] dialing wss://relay.invalid — pairing code: dummy-pairing-code_456\r\n",
   },
+  {
+    name: "Pro license key",
+    secret: `mf_${"c".repeat(26)}`,
+    text: `daemon diagnostic contains mf_${"c".repeat(26)} before shutdown\n`,
+  },
+  {
+    name: "maximum-length Pro license key followed by base32 text",
+    secret: `mf_${"d".repeat(40)}`,
+    text: `daemon diagnostic contains mf_${"d".repeat(40)}beyond\n`,
+  },
 ];
 
 // Pins the 2026-08-13 audit findings: the pairing credential was not redacted
@@ -211,14 +221,16 @@ test("an overlong logical line is wholly elided", () => {
 test("the crash buffer receives only stream-sanitized credentials", () => {
   const stream = new CredentialSafeLineStream();
   let lines = [];
-  const input = "failure http://127.0.0.1:3000/?token=dummy-crash-token pairing code: dummy-crash-code\n";
+  const licenseKey = `mf_${"d".repeat(26)}`;
+  const input = `failure http://127.0.0.1:3000/?token=dummy-crash-token pairing code: dummy-crash-code license ${licenseKey}\n`;
   for (const chunk of [...input]) lines = appendStderr(lines, stream.push(chunk));
   lines = appendStderr(lines, stream.end());
   const crashText = lines.join("\n");
 
   assert.ok(!crashText.includes("dummy-crash-token"), crashText);
   assert.ok(!crashText.includes("dummy-crash-code"), crashText);
-  assert.equal((crashText.match(/<redacted>/g) ?? []).length, 2, crashText);
+  assert.ok(!crashText.includes(licenseKey), crashText);
+  assert.equal((crashText.match(/<redacted>/g) ?? []).length, 3, crashText);
   assert.equal(redactCredentials("nothing to redact here"), "nothing to redact here");
 });
 
