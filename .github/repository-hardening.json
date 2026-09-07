@@ -5,6 +5,10 @@
     "visibility": "public",
     "defaultBranch": "main",
     "owner": {
+      "login": "mirafold",
+      "organizationId": 304260636
+    },
+    "maintainer": {
       "login": "kserrec",
       "userId": 32747715
     }
@@ -12,6 +16,13 @@
   "integrations": {
     "githubActionsAppId": 15368,
     "dcoAppId": 1861
+  },
+  "releaseWriter": {
+    "deployKeyTitle": "Mirafold automated release writer",
+    "deployKeyPublicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAaGIu8fPr9kVYIruh8r2aWMWrlH7xar+LsBLcAmGE9a mirafold-desktop automated release writer",
+    "deployKeyFingerprint": "SHA256:UJR3Gv0QtEUbOWZeWMDYhGxepjHjR0mDK+vtvOqcVBc",
+    "environment": "automated-release",
+    "secretName": "MIRAFOLD_RELEASE_DEPLOY_KEY"
   },
   "actionsPermissions": {
     "default_workflow_permissions": "read",
@@ -36,7 +47,7 @@
         "status": "enabled"
       }
     },
-    "unavailableOnCurrentFreeUserOwnedRepository": [
+    "unavailableOnCurrentPlan": [
       "secret_scanning_non_provider_patterns",
       "secret_scanning_validity_checks"
     ]
@@ -87,8 +98,8 @@
       "enforcement": "active",
       "bypass_actors": [
         {
-          "actor_id": 15368,
-          "actor_type": "Integration",
+          "actor_id": null,
+          "actor_type": "DeployKey",
           "bypass_mode": "always"
         }
       ],

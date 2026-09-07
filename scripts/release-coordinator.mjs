@@ -133,7 +133,9 @@ export const AUTOMATED_AUTHOR = Object.freeze({
 export function automatedCommitSubject(desktopVersion, shellVersion) {
   stableVersion(desktopVersion, "Desktop version");
   stableVersion(shellVersion, "Shell version");
-  return `release: Desktop ${desktopVersion} with Shell ${shellVersion}`;
+  // A deploy-key push triggers ordinary push workflows. Preserve the release
+  // writer's non-recursive behavior by using GitHub's documented skip command.
+  return `release: Desktop ${desktopVersion} with Shell ${shellVersion} [skip ci]`;
 }
 
 /** The complete commit message `git commit -s -m <subject>` produces. */

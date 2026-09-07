@@ -1541,6 +1541,57 @@ security primitive the platform does not already provide.
   in-scope security finding remains and all focused, full, native, audit, and
   packaging gates pass. Do not publish or freeze hashes.
 
+  In progress 2026-09-07 on `audit/desktop-feature-delta`. The complete Phase
+  13 delta has been attacked across activation/PKCE, encrypted storage, private
+  daemon handoff, renderer navigation, lifecycle ownership, packaging, release
+  automation, and repository policy. Confirmed findings repaired in the local
+  candidate include missing dotenv source/package exclusions; Pro key exposure
+  in daemon journal/crash output, including a maximum-length adjacency case;
+  an automated-main check preflight that lacked a same-commit canonical merged
+  PR fallback; incomplete pagination of security inventories; and repository
+  owner identity verification occurring after mutations. The repository's
+  transfer to organization `mirafold` also invalidated the old GitHub Actions
+  bypass model, so the reviewed replacement uses one fingerprint-pinned
+  environment deploy key, rejects every other writable deploy key, exposes it
+  only to the dependency-free writer checkout, and suppresses recursive release
+  pushes with `[skip ci]`.
+
+  The final local suite has 319 tests: 318 pass and one existing platform test
+  is skipped. Focused hardening and daemon regressions, syntax, whitespace,
+  dependency integrity, the zero-vulnerability audit, and registry signatures
+  pass. A final fresh-agent cold review found no remaining security finding.
+  Recovery on 2026-09-07 reran the full suite with the same result, rebuilt the
+  final runtime without publishing, and passed the unpacked application smoke
+  plus independent extracted AppImage, tar, and Debian smokes. Each form's 17
+  runtime source files matched the final candidate byte-for-byte; native
+  modules, render-MCP, daemon authentication, and process shutdown passed.
+  Policy validation and whitespace checks passed. Logs are beside HANDOFF.md.
+
+  Live closeout verified 2026-09-07 after Kyle enabled repository deploy keys.
+  Apply created the pinned verified writable key `162581331` and active rulesets
+  `main-release-safety` (`22483133`) / `next-staging-safety` (`22483136`). Its
+  first post-apply audit exposed a read-only comparison defect: GitHub expanded
+  omitted pull-request defaults into three additional fields, while every
+  submitted field matched. The comparison now accepts only those exact
+  observed defaults and rejects changed or unknown settings; regressions cover
+  both rulesets without changing write payloads or live permissions. The
+  independent live audit is clean, the final 319-test suite passes 318 with one
+  platform skip, and fresh cold review found no remaining finding. This final
+  script/test correction is excluded from the packaged runtime; the three
+  completed Linux package proofs remain applicable. Hosted PR checks and merge
+  remain before closing this Step.
+
+  The repository variable `MIRAFOLD_AUTOMATED_RELEASES` is still disabled and
+  must remain disabled until a later
+  normal Desktop release carries this reviewed workflow to `main`. Nothing has
+  been published, deployed, released, or frozen in this Step.
+
+  Continuation location recovered 2026-09-07:
+  `/home/serrecchia/Projects/mirafold-desktop-dpc8/HANDOFF.md`. The original
+  temporary worktree was found intact and moved into Projects with Git; all
+  14 modified tracked files and the handoff matched their pre-move hashes.
+  Resume in that worktree, not the canonical Desktop checkout.
+
 - [ ] **Step 13.9 — falsify the Phase 13 test suite.** Run the repository's
   test-audit procedure against every claimed protection and lifecycle outcome,
   using mutations in product code—not comments or the proof itself—to establish

@@ -18,7 +18,7 @@ releases.
 
 | branch | what it is | protection (GitHub rulesets, `.github/repository-hardening.json`) |
 | --- | --- | --- |
-| `main` | the production mirror — every commit on it is inside some release | pull-request-only, `test (linux)` + `test (windows)` + `DCO` required, branch must be up to date, linear history, no force-push/delete. **One bypass:** the GitHub Actions App, so the audited automated release writer can push its version commit + tag directly. |
+| `main` | the production mirror — every commit on it is inside some release | pull-request-only, `test (linux)` + `test (windows)` + `DCO` required, branch must be up to date, linear history, no force-push/delete. **One bypass:** the DeployKey actor class. Apply and audit require the single policy-pinned writable release key and reject every other writable deploy key. |
 | `next` | staging — day-to-day work accumulates here | pull-request-only for everyone, same three required checks, linear history, no force-push/delete, **no bypass at all** |
 | `feature/*`, `fix/*`, `refactor/*`, `docs/*` | working branches, cut from `next` | none — name them anything, force-push freely |
 | `release/x.y.z` | short-lived Desktop release prep, cut from `next` (or from `main` for a hotfix) | none — it exists for hours |
@@ -113,14 +113,21 @@ builds and smoke-checks native Linux and Windows packages, signs the APT index,
 attests provenance,
 and then — in one isolated job that installs no dependencies — commits the
 version bump, tags it, pushes commit and tag atomically to `main` (the ruleset
-bypass), and publishes the verified 17-file GitHub Release. Retries resume;
-nothing partial ever becomes visible.
+bypass), and publishes the verified 17-file GitHub Release. The push uses the
+single writable deploy key pinned by `.github/repository-hardening.json`; its
+private half exists only as `MIRAFOLD_RELEASE_DEPLOY_KEY` in the main-only
+`automated-release` environment. The release commit includes `[skip ci]` so
+that the deploy-key tag push does not recursively start the manual/tag release
+workflow. Retries resume; nothing partial ever becomes visible.
 
 It publishes only while the repository variable `MIRAFOLD_AUTOMATED_RELEASES`
 is exactly `enabled`. It was kept dormant through the first signed APT release
 (0.3.2) and its nonpublishing rehearsals (Path B, below), so routine
 publication could not start before the new repository channel existed and had
-been exercised; **the variable was set 2026-08-30 and Path A is live.** The
+been exercised; the variable was first enabled 2026-08-30. **DPC.8 hold,
+2026-09-07: it is now `disabled`. Keep it disabled until a later normal Desktop
+release carries the reviewed deploy-key writer to `main` and its live behavior
+is verified.** When enabled, the
 scheduler is best-effort (polls can land an hour or more apart), so a Shell
 release that should not wait can be carried immediately with **Actions → Shell
 intake → Run workflow** on `main` — the manual run publishes only because the

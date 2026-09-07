@@ -32,6 +32,15 @@ test("electron-builder preserves npm-selected N-API binaries", () => {
   assert.match(builderConfig, /(?:^|\n)npmRebuild:\s*false(?:\n|$)/);
 });
 
+test("electron-builder excludes every dotenv filename family from artifacts", () => {
+  for (const pattern of ["!**/.env", "!**/*.env", "!**/.env.*", "!**/*.env.*"]) {
+    assert.ok(
+      builderConfig.includes(`  - "${pattern}"\n`),
+      `packaging does not exclude ${pattern}`,
+    );
+  }
+});
+
 test("the updater protocol implementation is an exact runtime dependency", () => {
   assert.equal(packageMetadata.dependencies?.["electron-updater"], "6.8.9");
   assert.equal(packageMetadata.devDependencies?.["electron-updater"], undefined);
