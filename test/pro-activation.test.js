@@ -381,41 +381,84 @@ test("listener bind, encrypted save, readback, and browser open occur in that or
   assert.equal(await controller.shutdown(), false);
 });
 
-test("a missing or changed readback closes the listener before any browser launch", async () => {
-  let opened = 0;
-  let callbackPort;
-  const store = memoryStore(null, {
-    load(count, record) {
-      return count === 1 ? record : null;
-    },
-  });
-  const controller = createProActivationController({
-    store,
-    openBrowser: async () => {
-      opened += 1;
-    },
-    fetch: async () => {
-      throw new Error("exchange was not expected");
-    },
-    createServer(options, handler) {
-      const server = http.createServer(options, handler);
-      server.once("listening", () => {
-        const address = server.address();
-        if (address && typeof address !== "string") callbackPort = address.port;
-      });
-      return server;
-    },
-    randomBytes: deterministicRandom(10, 11, 12).randomBytes,
-  });
+test("a missing or changed readback closes the listener before any browser launch", async (t) => {
+  // Each changed record remains schema-valid so schema validation cannot mask
+  // removal of the exact saved-flow or renewal-key comparison.
+  const cases = [
+    ["missing record", null, () => null],
+    ["missing pending", null, () => ({ version: 1, licenseKey: LICENSE_KEY })],
+    ["changed port", null, (record) => {
+      record.pending.callbackPort = record.pending.callbackPort === 65535
+        ? 65534 : record.pending.callbackPort + 1;
+      return record;
+    }],
+    ["changed nonce", null, (record) => {
+      record.pending.callbackNonce = token(41);
+      return record;
+    }],
+    ["changed state", null, (record) => {
+      record.pending.state = token(42);
+      return record;
+    }],
+    ["changed PKCE pair", null, (record) => {
+      record.pending.verifier = token(43);
+      record.pending.codeChallenge = createHash("sha256")
+        .update(record.pending.verifier, "ascii").digest("base64url");
+      return record;
+    }],
+    ["changed creation", null, (record) => {
+      record.pending.createdAtMs += 1;
+      return record;
+    }],
+    ["changed expiry", null, (record) => {
+      record.pending.expiresAtMs -= 1;
+      return record;
+    }],
+    ["added key", null, (record) => ({ ...record, licenseKey: LICENSE_KEY })],
+    ["lost renewal key", RENEWAL_KEY, (record) => {
+      delete record.licenseKey;
+      return record;
+    }],
+    ["changed renewal key", RENEWAL_KEY, (record) => ({ ...record, licenseKey: LICENSE_KEY })],
+  ];
+  for (const [name, priorKey, change] of cases) await t.test(name, async (t) => {
+    let opened = 0;
+    let callbackPort;
+    const initial = priorKey === null ? null : { version: 1, licenseKey: priorKey };
+    const store = memoryStore(initial, {
+      load(count, record) {
+        return count === 1 ? record : change(record);
+      },
+    });
+    const controller = createProActivationController({
+      store,
+      openBrowser: async () => {
+        opened += 1;
+      },
+      fetch: async () => {
+        throw new Error("exchange was not expected");
+      },
+      createServer(options, handler) {
+        const server = http.createServer(options, handler);
+        server.once("listening", () => {
+          const address = server.address();
+          if (address && typeof address !== "string") callbackPort = address.port;
+        });
+        return server;
+      },
+      randomBytes: deterministicRandom(10, 11, 12).randomBytes,
+    });
+    t.after(() => controller.shutdown());
 
-  await assert.rejects(controller.start(), activationError("store"));
-  assert.equal(opened, 0);
-  assert.equal(store.counts().saves, 1);
-  assert.ok(Number.isInteger(callbackPort));
-  await assert.rejects(
-    requestCallback(`http://127.0.0.1:${callbackPort}/`),
-    (error) => error.code === "ECONNREFUSED" || error.code === "ECONNRESET",
-  );
+    await assert.rejects(controller.start(), activationError("store"));
+    assert.equal(opened, 0);
+    assert.equal(store.counts().saves, 1);
+    assert.ok(Number.isInteger(callbackPort));
+    await assert.rejects(
+      requestCallback(`http://127.0.0.1:${callbackPort}/`),
+      (error) => error.code === "ECONNREFUSED" || error.code === "ECONNRESET",
+    );
+  });
 });
 
 test("a failed pending save preserves the prior key and never opens the browser", async () => {
@@ -625,6 +668,16 @@ test("wrong method, Host, path, state, query, body, HTTP version, and oversized 
   }));
 
   const rawPath = `${valid.pathname}?code=${valid.code}&state=${valid.state}`;
+  // http.request adds Content-Length: 0 to POST, which independently rejects
+  // the request even if the product's GET-only guard is removed.
+  for (const method of ["POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]) {
+    const raw = await rawHttp(
+      valid.callbackPort,
+      `${method} ${rawPath} HTTP/1.1\r\nHost: ${valid.host}\r\n\r\n`,
+    );
+    assert.match(raw, /^HTTP\/1\.1 400 /, `${method} without body headers was accepted`);
+    assert.equal(exchanges, 0, `${method} reached the exchange`);
+  }
   const http10 = await rawHttp(
     valid.callbackPort,
     `GET ${rawPath} HTTP/1.0\r\nHost: ${valid.host}\r\n\r\n`,
@@ -743,6 +796,14 @@ test("malformed, extra-field, wrong-type, wrong-status, and oversized exchange b
     responseFacade(exchangeUrl, JSON.stringify({ licenseKey: LICENSE_KEY, extra: true })),
     responseFacade(exchangeUrl, JSON.stringify({ licenseKey: LICENSE_KEY }), { contentType: "text/plain" }),
     responseFacade(exchangeUrl, JSON.stringify({ error: "desktop activation failed" }), { status: 403 }),
+    // One fault at a time: an error-shaped body cannot prove a status check.
+    ...[202, 302, 401, 403, 500].map((status) => responseFacade(
+      exchangeUrl, JSON.stringify({ licenseKey: LICENSE_KEY }), { status },
+    )),
+    responseFacade(`${origin}/wrong-exchange`, JSON.stringify({ licenseKey: LICENSE_KEY })),
+    { ...responseFacade(exchangeUrl, JSON.stringify({ licenseKey: LICENSE_KEY })), redirected: true },
+    ...[null, true, 123, [LICENSE_KEY], "invalid", `mf_${"a".repeat(19)}`, `mf_${"a".repeat(41)}`]
+      .map((licenseKey) => responseFacade(exchangeUrl, JSON.stringify({ licenseKey }))),
     responseFacade(exchangeUrl, oversized),
     responseFacade(exchangeUrl, JSON.stringify({ licenseKey: LICENSE_KEY })),
   ];

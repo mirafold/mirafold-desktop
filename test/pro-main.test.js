@@ -21,6 +21,15 @@ const SECOND_ACTIVATION_URL = MARKER
   + "&state=fixture-state-next&code_challenge=fixture-challenge-next";
 const OLD_KEY = "mf_" + "a".repeat(20);
 const NEW_KEY = "mf_" + "b".repeat(20);
+const STALE_BROWSER_MODES = ["stale-browser-failure", "stale-browser-during-save"];
+const READBACK_FAILURES = {
+  "wrong-key": { version: 1, licenseKey: OLD_KEY },
+  pending: { version: 1, licenseKey: NEW_KEY, pending: { checkpoint: "unretired" } },
+  "wrong-version": { version: 2, licenseKey: NEW_KEY },
+  missing: null,
+};
+const readbackCase = mode.replace(/^store-(?:uncertain|returned)-/, "");
+const rejectsReadback = Object.hasOwn(READBACK_FAILURES, readbackCase);
 const STARTUP_CLEANUP_FAILURE_MODES = [
   "invalid-url-cleanup-failure",
   "page-load-cleanup-failure",
@@ -80,7 +89,7 @@ let envelope = mode === "resume-renewal"
       "quit-during-browser-reopen",
       "removal-during-browser-reopen",
       "update-during-browser-reopen",
-      "stale-browser-failure",
+      ...STALE_BROWSER_MODES,
       "startup-expired-resume",
       "expired-resume-marker",
     ].includes(mode)
@@ -140,8 +149,9 @@ const folderDialogRelease = [
   "quit-during-folder-dialog",
   "quit-during-boot-recovery-picker",
 ].includes(mode) ? deferred() : null;
-const keySaveEntered = mode === "unclean-crash-during-activation" ? deferred() : null;
-const keySaveRelease = mode === "unclean-crash-during-activation" ? deferred() : null;
+const holdsKeySave = ["unclean-crash-during-activation", "stale-browser-during-save"].includes(mode);
+const keySaveEntered = holdsKeySave ? deferred() : null;
+const keySaveRelease = holdsKeySave ? deferred() : null;
 const crashDialogEntered = mode === "quit-during-crash-dialog" ? deferred() : null;
 const crashDialogRelease = mode === "quit-during-crash-dialog" ? deferred() : null;
 const bootFailureDialogEntered = mode === "quit-during-boot-failure-dialog" ? deferred() : null;
@@ -190,6 +200,14 @@ const proStore = {
     events.push(savesKey ? "store.save.key" : "store.save.pending");
     if (savesKey) {
       keySaveAttempts += 1;
+      if (rejectsReadback && keySaveAttempts === 1) {
+        envelope = clone(READBACK_FAILURES[readbackCase]);
+        events.push("store.save.key.unconfirmed");
+        if (mode.startsWith("store-uncertain-")) {
+          throw new Error("sensitive-durability-diagnostic");
+        }
+        return;
+      }
       if ([
         "store-retry",
         "retry-remove-failure",
@@ -232,13 +250,13 @@ const proStore = {
 
 function createHandle() {
   activeDeferred = deferred();
-  const activationUrl = mode === "stale-browser-failure" && activationControllers > 1
+  const activationUrl = STALE_BROWSER_MODES.includes(mode) && activationControllers > 1
     ? SECOND_ACTIVATION_URL
     : ACTIVATION_URL;
   return Object.freeze({ activationUrl, result: activeDeferred.result });
 }
 
-const staleBrowserReopen = mode === "stale-browser-failure" ? deferred() : null;
+const staleBrowserReopen = STALE_BROWSER_MODES.includes(mode) ? deferred() : null;
 
 function createProActivationController({ store, openBrowser }) {
   assert.equal(store, proStore);
@@ -454,11 +472,11 @@ const dialog = {
       if (mode === "quit-during-boot-recovery-picker" && options.title === "Mirafold couldn't start") {
         return { response: 1 };
       }
-      if ([
+      if ((rejectsReadback || [
         "store-retry",
         "retry-remove-failure",
         "retry-update-recovery",
-      ].includes(mode) && options.buttons?.includes("Later")) {
+      ].includes(mode)) && options.buttons?.includes("Later")) {
         return { response: 1 };
       }
       if (mode === "remove-cancel" && options.title === "Remove Mirafold Pro access?") {
@@ -488,7 +506,7 @@ const shell = {
     ].includes(mode) && url === ACTIVATION_URL) {
       return new Promise(() => {});
     }
-    if (mode === "stale-browser-failure" && url === ACTIVATION_URL) {
+    if (STALE_BROWSER_MODES.includes(mode) && url === ACTIVATION_URL) {
       return staleBrowserReopen.result;
     }
     if (
@@ -707,7 +725,7 @@ if (mode === "boot-dialog-rejection") {
   );
   assert.equal(activationShutdowns, 1);
   assert.equal(daemonInstances[0].running, false);
-} else if (mode === "stale-browser-failure") {
+} else if (STALE_BROWSER_MODES.includes(mode)) {
   await waitFor(() => activationResumes === 1 && activeDeferred !== null, "pending activation did not resume");
   assert.deepEqual(windowOpenHandler({ url: MARKER }), { action: "deny" });
   await waitFor(() => openedUrls.includes(ACTIVATION_URL), "the old browser reopen did not begin");
@@ -722,14 +740,28 @@ if (mode === "boot-dialog-rejection") {
     "the new activation did not reach its browser handoff",
   );
   assert.match(titles.at(-1), /Finish Pro activation/);
+  if (mode === "stale-browser-during-save") {
+    resolveActivation();
+    await keySaveEntered.result;
+    assert.match(titles.at(-1), /Saving Pro access securely/);
+  }
+  const currentTitle = titles.at(-1);
   staleBrowserReopen.reject(new Error("fixture stale browser failure"));
   await new Promise((resolve) => setImmediate(resolve));
-  assert.match(titles.at(-1), /Finish Pro activation/, "a retired browser failure cleared current progress");
+  assert.equal(titles.at(-1), currentTitle, "a retired browser failure changed current progress");
   assert.equal(
     dialogs.filter((item) => item.title === "Mirafold Pro couldn't connect").length,
     0,
     "a retired browser failure opened a current-owner dialog",
   );
+  if (mode === "stale-browser-during-save") {
+    keySaveRelease.resolve();
+    await waitFor(
+      () => dialogs.some((item) => item.title === "Mirafold Pro connected"),
+      "current activation did not complete after the stale failure",
+    );
+    assert.deepEqual(envelope, { version: 1, licenseKey: NEW_KEY });
+  }
 } else if (mode === "startup-expired-resume") {
   await waitFor(
     () => events.filter((item) => item === "store.load.empty").length === 2,
@@ -861,6 +893,32 @@ if (mode === "boot-dialog-rejection") {
   assert.equal(activationStarts, 1);
   assert.equal(activationResumes, 1);
   assert.doesNotMatch(JSON.stringify(dialogs), /sensitive-browser-diagnostic/);
+} else if (rejectsReadback) {
+  assert.deepEqual(windowOpenHandler({ url: MARKER }), { action: "deny" });
+  await waitFor(() => events.includes("browser.activation"), "activation did not reach the browser");
+  resolveActivation();
+  await waitFor(
+    () => dialogs.some((item) => item.buttons?.includes("Later")),
+    "an inexact secure readback did not offer retry",
+  );
+  assert.equal(daemonInstances.length, 1, "an unconfirmed purchased key restarted the daemon");
+  assert.equal(daemonInstances[0].running, true);
+  assert.ok(!events.includes("daemon.stop.0"), "the old session stopped before exact readback");
+  assert.equal(keySaveAttempts, 1);
+  assert.ok(!dialogs.some((item) => item.title === "Mirafold Pro connected"));
+  assert.doesNotMatch(JSON.stringify(dialogs), /sensitive-durability-diagnostic/);
+  assert.deepEqual(windowOpenHandler({ url: MARKER }), { action: "deny" });
+  await waitFor(
+    () => dialogs.some((item) => item.title === "Mirafold Pro connected"),
+    "the retained purchased key could not be saved after exact readback recovered",
+  );
+  assert.equal(keySaveAttempts, 2);
+  assert.equal(activationStarts, 1, "retry created a second purchase flow");
+  assert.equal(activationResumes, 0, "retry reused a consumed exchange");
+  assert.equal(openedUrls.filter((url) => url.startsWith(MARKER + "?")).length, 1);
+  assert.deepEqual(envelope, { version: 1, licenseKey: NEW_KEY });
+  assertOrdered(["store.save.key.unconfirmed", "dialog.Mirafold Pro couldn't connect",
+    "store.save.key", "store.load.key", "daemon.stop.0", "daemon.start.new"]);
 } else if (mode === "store-uncertain") {
   assert.deepEqual(windowOpenHandler({ url: MARKER }), { action: "deny" });
   await waitFor(() => events.includes("browser.activation"), "activation did not reach the browser");
@@ -1470,6 +1528,7 @@ test("a stalled browser reopen does not block Pro removal or update preparation"
 
 test("a retired browser failure cannot clear a newer activation's progress", linuxOnly, () => {
   runProbe("stale-browser-failure");
+  runProbe("stale-browser-during-save");
 });
 
 test("terminal boot and crash recovery survive native-dialog rejection", linuxOnly, () => {
@@ -1505,6 +1564,11 @@ test("failed updater recovery retains the unsaved purchased key", linuxOnly, () 
 
 test("an uncertain secure write proceeds only when exact readback proves the replacement key", linuxOnly, () => {
   runProbe("store-uncertain");
+  for (const outcome of ["uncertain", "returned"]) {
+    for (const state of ["wrong-key", "pending", "wrong-version", "missing"]) {
+      runProbe(`store-${outcome}-${state}`);
+    }
+  }
 });
 
 test("restart resumes pending state at each pre-store crash checkpoint and preserves renewal access", linuxOnly, () => {

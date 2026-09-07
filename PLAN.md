@@ -1597,7 +1597,7 @@ security primitive the platform does not already provide.
   14 modified tracked files and the handoff matched their pre-move hashes.
   Resume in that worktree, not the canonical Desktop checkout.
 
-- [ ] **Step 13.9 — falsify the Phase 13 test suite.** Run the repository's
+- [x] **Step 13.9 — falsify the Phase 13 test suite.** Run the repository's
   test-audit procedure against every claimed protection and lifecycle outcome,
   using mutations in product code—not comments or the proof itself—to establish
   which tests really fail. Repair every evidence-backed missing or wrong-target
@@ -1606,6 +1606,31 @@ security primitive the platform does not already provide.
   review. Done when every named Phase 13 contract has load-bearing evidence,
   test theater is removed, no product behavior was changed in this pass, and
   all local/native/package gates are green.
+
+  **2026-09-07: audit complete.**
+  Six test-design causes were repaired in the existing activation, store and
+  main-process suites: masked callback-method and exchange-status checks,
+  missing response identity and ciphertext-file sync evidence, incomplete
+  pending/purchased-key readback cases, and stale-browser progress assertions.
+  The 62-edit ledger records 61 caught behavior-breaking mutations and one
+  redundant guard removal that preserved the contract; every product edit was
+  restored exactly. Three unchanged final suites pass 330 tests with one
+  platform skip. Dependency and release-rehearsal gates pass. Retained unpacked
+  Linux, AppImage, tar and Debian artifacts pass fresh independent smokes, with
+  all 17 runtime files matching this branch and all 42 runtime/build/release
+  inputs unchanged from `ba17aed`. Evidence and test boundaries are in
+  [the audit report](docs/audits/phase13-test-audit.md). Worktree, handoff and
+  detailed local logs are preserved under
+  `/home/serrecchia/Projects/mirafold-desktop-dpc9`; exact mutation transcripts
+  are in the adjacent `mirafold-desktop-dpc9-evidence` directory.
+  Fresh cold review independently passed the 88 changed-suite tests and found
+  no remaining issue after an audit-ledger selector correction. Desktop
+  [PR #64](https://github.com/mirafold/mirafold-desktop/pull/64), signed-off
+  implementation `0dbf6a5`, passed hosted Linux and Windows CI (run
+  `34166008224`, including the real Windows package lifecycle) and DCO.
+  Automated PR review completed without findings on that implementation.
+  The closeout follow-up changes only this plan and the audit report.
+  Step 13.10 is next and has not started; automated releases remain disabled.
 
 - [ ] **Step 13.10 — freeze one release candidate without changing it.** From
   the exact commit that cleared Steps 13.7–13.9, run the full clean-room release

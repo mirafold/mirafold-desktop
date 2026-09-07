@@ -317,6 +317,39 @@ test("every write-capable open syncs the store directory and userData parent, in
   assert.deepEqual(await failingStore.load(), { version: 1, licenseKey: LICENSE_KEY });
 });
 
+test("a ciphertext-file sync failure preserves the prior record before rename", { skip: FILE_TEST_SKIP }, async (t) => {
+  const directory = await userData(t);
+  const { adapter } = safeStorageAdapter();
+  const original = storeFor(directory, adapter);
+  await original.save({ version: 1, licenseKey: LICENSE_KEY });
+  const before = await fs.readFile(original.path);
+  let fileSyncs = 0;
+  let renames = 0;
+  const hookedFs = fsWithSyncHook(async (target, sync) => {
+    if (target !== directory && target !== path.dirname(original.path)) {
+      fileSyncs += 1;
+      throw Object.assign(new Error("injected ciphertext sync failure"), { code: "EIO" });
+    }
+    await sync();
+  });
+  const interrupted = storeFor(directory, adapter, {
+    fs: {
+      ...hookedFs,
+      async rename(...args) {
+        renames += 1;
+        return fs.rename(...args);
+      },
+    },
+  });
+
+  await rejectsCode(() => interrupted.save({ version: 1, licenseKey: RENEWAL_KEY }), "write");
+  assert.equal(fileSyncs, 1, "ciphertext was not flushed before reporting the failure");
+  assert.equal(renames, 0, "unsynced ciphertext replaced the previous record");
+  assert.deepEqual(await fs.readFile(original.path), before);
+  assert.deepEqual(await original.load(), { version: 1, licenseKey: LICENSE_KEY });
+  assert.deepEqual(await fs.readdir(path.dirname(original.path)), [PRO_STORE_FILENAME]);
+});
+
 test("a backend or ciphertext-provider downgrade during record encryption stops before persistence", { skip: FILE_TEST_SKIP }, async (t) => {
   const directory = await userData(t);
   const { adapter, state } = safeStorageAdapter({
