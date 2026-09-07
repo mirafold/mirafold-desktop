@@ -1607,6 +1607,26 @@ security primitive the platform does not already provide.
   test theater is removed, no product behavior was changed in this pass, and
   all local/native/package gates are green.
 
+  **2026-09-07: implementation and local gates complete; PR closeout pending.**
+  Six test-design causes were repaired in the existing activation, store and
+  main-process suites: masked callback-method and exchange-status checks,
+  missing response identity and ciphertext-file sync evidence, incomplete
+  pending/purchased-key readback cases, and stale-browser progress assertions.
+  The 62-edit ledger records 61 caught behavior-breaking mutations and one
+  redundant guard removal that preserved the contract; every product edit was
+  restored exactly. Three unchanged final suites pass 330 tests with one
+  platform skip. Dependency and release-rehearsal gates pass. Retained unpacked
+  Linux, AppImage, tar and Debian artifacts pass fresh independent smokes, with
+  all 17 runtime files matching this branch and all 42 runtime/build/release
+  inputs unchanged from `ba17aed`. Evidence and test boundaries are in
+  [the audit report](docs/audits/phase13-test-audit.md). Worktree, handoff and
+  detailed local logs are preserved under
+  `/home/serrecchia/Projects/mirafold-desktop-dpc9`; exact mutation transcripts
+  are in the adjacent `mirafold-desktop-dpc9-evidence` directory.
+  Fresh cold review independently passed the 88 changed-suite tests and found
+  no remaining issue after an audit-ledger selector correction. Hosted CI and
+  PR review remain before closeout.
+
 - [ ] **Step 13.10 — freeze one release candidate without changing it.** From
   the exact commit that cleared Steps 13.7–13.9, run the full clean-room release
   rehearsal and native CI, build `.deb`, AppImage, and tar exactly once, inspect

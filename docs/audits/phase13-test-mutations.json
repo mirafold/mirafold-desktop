@@ -1,0 +1,1690 @@
+{
+  "base": "ba17aed5781af465422de74aaa064b1d56466a15",
+  "date": "2026-09-07",
+  "mutations": [
+    {
+      "id": "S01",
+      "source": "src/pro-store.js",
+      "suite": "test/pro-store.test.js",
+      "test": "preflight refuses every non-secret",
+      "before": "if (!ACCEPTED_LINUX_BACKENDS.has(backend))",
+      "after": "if (false)",
+      "sha256": "55dd45dbbe169b3a863e79ac87ef1659a29ac943cf1337681c8975ad7f564412",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'Missing expected rejection.'"
+      ],
+      "initialTest": "preflight refuses every non-secret",
+      "initialSuite": "test/pro-store.test.js",
+      "initialTestResults": [
+        "not ok 1 - preflight refuses every non-secret backend and a non-Linux caller"
+      ],
+      "finalTestResults": [
+        "not ok 1 - preflight refuses every non-secret backend and a non-Linux caller"
+      ]
+    },
+    {
+      "id": "S02",
+      "source": "src/pro-store.js",
+      "suite": "test/pro-store.test.js",
+      "test": "hard-coded v10",
+      "before": "|| !hasAcceptedCiphertextTag(encrypted)",
+      "after": "|| false",
+      "sha256": "55dd45dbbe169b3a863e79ac87ef1659a29ac943cf1337681c8975ad7f564412",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'Missing expected rejection.'"
+      ],
+      "initialTest": "hard-coded v10",
+      "initialSuite": "test/pro-store.test.js",
+      "initialTestResults": [
+        "not ok 1 - preflight refuses Electron's hard-coded v10 Posix fallback even behind a trusted backend name"
+      ],
+      "finalTestResults": [
+        "not ok 1 - preflight refuses Electron's hard-coded v10 Posix fallback even behind a trusted backend name"
+      ]
+    },
+    {
+      "id": "S03",
+      "source": "src/pro-store.js",
+      "suite": "test/pro-store.test.js",
+      "test": "downgrade during record",
+      "before": "if (!hasAcceptedCiphertextTag(ciphertext)) throw fail(\"unavailable\");",
+      "after": "if (false) throw fail(\"unavailable\");",
+      "sha256": "55dd45dbbe169b3a863e79ac87ef1659a29ac943cf1337681c8975ad7f564412",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'Missing expected rejection.'"
+      ],
+      "initialTest": "downgrade during record",
+      "initialSuite": "test/pro-store.test.js",
+      "initialTestResults": [
+        "not ok 1 - a backend or ciphertext-provider downgrade during record encryption stops before persistence"
+      ],
+      "finalTestResults": [
+        "not ok 1 - a backend or ciphertext-provider downgrade during record encryption stops before persistence"
+      ]
+    },
+    {
+      "id": "S04",
+      "source": "src/pro-store.js",
+      "suite": "test/pro-store.test.js",
+      "test": "owner identity",
+      "before": "|| stats.uid !== ownerUid",
+      "after": "|| false",
+      "sha256": "55dd45dbbe169b3a863e79ac87ef1659a29ac943cf1337681c8975ad7f564412",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'Missing expected rejection.'"
+      ],
+      "initialTest": "owner identity",
+      "initialSuite": "test/pro-store.test.js",
+      "initialTestResults": [
+        "not ok 1 - owner identity is checked independently from mode bits"
+      ],
+      "finalTestResults": [
+        "not ok 1 - owner identity is checked independently from mode bits"
+      ]
+    },
+    {
+      "id": "S05",
+      "source": "src/pro-store.js",
+      "suite": "test/pro-store.test.js",
+      "test": "symlinked, non-regular",
+      "before": "openFlags(\"O_RDONLY\", \"O_NOFOLLOW\", \"O_NONBLOCK\")",
+      "after": "openFlags(\"O_RDONLY\", \"O_NONBLOCK\")",
+      "sha256": "55dd45dbbe169b3a863e79ac87ef1659a29ac943cf1337681c8975ad7f564412",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'Missing expected rejection.'"
+      ],
+      "initialTest": "symlinked, non-regular",
+      "initialSuite": "test/pro-store.test.js",
+      "initialTestResults": [
+        "not ok 1 - symlinked, non-regular, wrong-mode, and oversized records fail closed"
+      ],
+      "finalTestResults": [
+        "not ok 1 - symlinked, non-regular, wrong-mode, and oversized records fail closed"
+      ]
+    },
+    {
+      "id": "S06",
+      "source": "src/pro-store.js",
+      "suite": "test/pro-store.test.js",
+      "test": "every write-capable open",
+      "before": "await syncUserDataParent();",
+      "after": "void 0;",
+      "sha256": "55dd45dbbe169b3a863e79ac87ef1659a29ac943cf1337681c8975ad7f564412",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'userData was not synced after its new child'",
+        "  expected: true",
+        "  actual: false"
+      ],
+      "initialTest": "every write-capable open",
+      "initialSuite": "test/pro-store.test.js",
+      "initialTestResults": [
+        "not ok 1 - every write-capable open syncs the store directory and userData parent, including retry"
+      ],
+      "finalTestResults": [
+        "not ok 1 - every write-capable open syncs the store directory and userData parent, including retry"
+      ]
+    },
+    {
+      "id": "S07",
+      "source": "src/pro-store.js",
+      "suite": "test/pro-store.test.js",
+      "test": "ciphertext-file sync failure",
+      "before": "await temporaryHandle.sync();",
+      "after": "void 0;",
+      "sha256": "55dd45dbbe169b3a863e79ac87ef1659a29ac943cf1337681c8975ad7f564412",
+      "initialExit": 0,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "repaired test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'Missing expected rejection.'"
+      ],
+      "initialTest": "every write-capable open|interruption before rename|round-trip",
+      "initialSuite": "test/pro-store.test.js",
+      "initialTestResults": [
+        "ok 1 - key-only, pending-only, and renewal state round-trip as ciphertext",
+        "ok 2 - every write-capable open syncs the store directory and userData parent, including retry",
+        "ok 3 - interruption before rename preserves the prior record and removes the temporary file"
+      ],
+      "finalTestResults": [
+        "not ok 1 - a ciphertext-file sync failure preserves the prior record before rename"
+      ]
+    },
+    {
+      "id": "S08",
+      "source": "src/pro-store.js",
+      "suite": "test/pro-store.test.js",
+      "test": "post-mutation sync failure",
+      "before": "await directory.sync();",
+      "after": "void 0;",
+      "sha256": "55dd45dbbe169b3a863e79ac87ef1659a29ac943cf1337681c8975ad7f564412",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'Missing expected rejection.'"
+      ],
+      "initialTest": "post-mutation sync failure",
+      "initialSuite": "test/pro-store.test.js",
+      "initialTestResults": [
+        "not ok 1 - a post-mutation sync failure reports uncertain durability before any retry"
+      ],
+      "finalTestResults": [
+        "not ok 1 - a post-mutation sync failure reports uncertain durability before any retry"
+      ]
+    },
+    {
+      "id": "S09",
+      "source": "src/pro-store.js",
+      "suite": "test/pro-store.test.js",
+      "test": "load expires only pending",
+      "before": "const pendingExpired = envelope.pending?.expiresAtMs <= nowMs;",
+      "after": "const pendingExpired = false;",
+      "sha256": "55dd45dbbe169b3a863e79ac87ef1659a29ac943cf1337681c8975ad7f564412",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected:",
+        "  actual:"
+      ],
+      "initialTest": "load expires only pending",
+      "initialSuite": "test/pro-store.test.js",
+      "initialTestResults": [
+        "not ok 1 - load expires only pending state and preserves a current key"
+      ],
+      "finalTestResults": [
+        "not ok 1 - load expires only pending state and preserves a current key"
+      ]
+    },
+    {
+      "id": "S10",
+      "source": "src/pro-store.js",
+      "suite": "test/pro-store.test.js",
+      "test": "rotation signal",
+      "before": "} else if (decrypted.shouldReEncrypt) {",
+      "after": "} else if (false) {",
+      "sha256": "55dd45dbbe169b3a863e79ac87ef1659a29ac943cf1337681c8975ad7f564412",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected:",
+        "  actual:"
+      ],
+      "initialTest": "rotation signal",
+      "initialSuite": "test/pro-store.test.js",
+      "initialTestResults": [
+        "not ok 1 - load follows safeStorage's rotation signal and atomically re-encrypts"
+      ],
+      "finalTestResults": [
+        "not ok 1 - load follows safeStorage's rotation signal and atomically re-encrypts"
+      ]
+    },
+    {
+      "id": "A01",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "request generation",
+      "before": "state: randomToken(randomBytes),",
+      "after": "state: verifier,",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected: 3",
+        "  actual: 2"
+      ],
+      "initialTest": "request generation",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "not ok 1 - request generation uses three independent 256-bit values and exact S256/site fields"
+      ],
+      "finalTestResults": [
+        "not ok 1 - request generation uses three independent 256-bit values and exact S256/site fields"
+      ]
+    },
+    {
+      "id": "A02",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "missing or changed readback",
+      "before": "|| !samePending(readBack.pending, pending)",
+      "after": "|| false",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": 0,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "repaired test",
+      "finalEvidence": [
+        "      failureType: 'testCodeFailure'",
+        "      error: 'Missing expected rejection.'",
+        "      failureType: 'testCodeFailure'",
+        "      error: 'Missing expected rejection.'",
+        "      failureType: 'testCodeFailure'",
+        "      error: 'Missing expected rejection.'",
+        "      failureType: 'testCodeFailure'",
+        "      error: 'Missing expected rejection.'",
+        "      failureType: 'testCodeFailure'",
+        "      error: 'Missing expected rejection.'",
+        "      failureType: 'testCodeFailure'",
+        "      error: 'Missing expected rejection.'",
+        "  failureType: 'subtestsFailed'",
+        "  error: '6 subtests failed'"
+      ],
+      "initialTest": "missing or changed readback",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "ok 1 - a missing or changed readback closes the listener before any browser launch"
+      ],
+      "finalTestResults": [
+        "not ok 1 - a missing or changed readback closes the listener before any browser launch"
+      ]
+    },
+    {
+      "id": "A03",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "missing or changed readback",
+      "before": "|| readBack.licenseKey !== next.licenseKey",
+      "after": "|| false",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": 0,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "repaired test",
+      "finalEvidence": [
+        "      failureType: 'testCodeFailure'",
+        "      error: 'Missing expected rejection.'",
+        "  failureType: 'subtestsFailed'",
+        "  error: '1 subtest failed'"
+      ],
+      "initialTest": "missing or changed readback",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "ok 1 - a missing or changed readback closes the listener before any browser launch"
+      ],
+      "finalTestResults": [
+        "not ok 1 - a missing or changed readback closes the listener before any browser launch"
+      ]
+    },
+    {
+      "id": "A04",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "listener bind, encrypted",
+      "before": "await store.save(next);",
+      "after": "void 0;",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'Mirafold Pro activation state could not be prepared safely.'"
+      ],
+      "initialTest": "listener bind, encrypted",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "not ok 1 - listener bind, encrypted save, readback, and browser open occur in that order"
+      ],
+      "finalTestResults": [
+        "not ok 1 - listener bind, encrypted save, readback, and browser open occur in that order"
+      ]
+    },
+    {
+      "id": "A05",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "wrong method, Host",
+      "before": "request?.method !== \"GET\"",
+      "after": "false",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": 0,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "repaired test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'POST without body headers was accepted'",
+        "  expected:",
+        "  actual: ''"
+      ],
+      "initialTest": "wrong method, Host",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "ok 1 - wrong method, Host, path, state, query, body, HTTP version, and oversized headers never exchange"
+      ],
+      "finalTestResults": [
+        "not ok 1 - wrong method, Host, path, state, query, body, HTTP version, and oversized headers never exchange"
+      ]
+    },
+    {
+      "id": "A06",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "wrong method, Host",
+      "before": "hosts.length !== 1 || hosts[0] !== expectedHost || request.headers.host !== expectedHost",
+      "after": "false",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'connect ECONNREFUSED 127.0.0.1:38509'"
+      ],
+      "initialTest": "wrong method, Host",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "not ok 1 - wrong method, Host, path, state, query, body, HTTP version, and oversized headers never exchange"
+      ],
+      "finalTestResults": [
+        "not ok 1 - wrong method, Host, path, state, query, body, HTTP version, and oversized headers never exchange"
+      ]
+    },
+    {
+      "id": "A07",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "wrong method, Host",
+      "before": "!request.url.startsWith(prefix) || !request.url.endsWith(suffix)",
+      "after": "!request.url.startsWith(prefix)",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'connect ECONNREFUSED 127.0.0.1:43619'"
+      ],
+      "initialTest": "wrong method, Host",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "not ok 1 - wrong method, Host, path, state, query, body, HTTP version, and oversized headers never exchange"
+      ],
+      "finalTestResults": [
+        "not ok 1 - wrong method, Host, path, state, query, body, HTTP version, and oversized headers never exchange"
+      ]
+    },
+    {
+      "id": "A09",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "exchange redirects",
+      "before": "redirect: \"manual\",",
+      "after": "redirect: \"follow\",",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected: 0",
+        "  actual: 1"
+      ],
+      "initialTest": "exchange redirects",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "not ok 1 - exchange redirects are never followed and a later exact callback may retry"
+      ],
+      "finalTestResults": [
+        "not ok 1 - exchange redirects are never followed and a later exact callback may retry"
+      ]
+    },
+    {
+      "id": "A10",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "malformed, extra-field",
+      "before": "response?.status !== 200",
+      "after": "false",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": 0,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "repaired test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected: 502",
+        "  actual: 200"
+      ],
+      "initialTest": "malformed, extra-field",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "ok 1 - malformed, extra-field, wrong-type, wrong-status, and oversized exchange bodies fail bounded"
+      ],
+      "finalTestResults": [
+        "not ok 1 - malformed, extra-field, wrong-type, wrong-status, and oversized exchange bodies fail bounded"
+      ]
+    },
+    {
+      "id": "A11",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "malformed, extra-field",
+      "before": "|| response.url !== exchangeUrl",
+      "after": "|| false",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": 0,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "repaired test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected: 502",
+        "  actual: 200"
+      ],
+      "initialTest": "malformed, extra-field",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "ok 1 - malformed, extra-field, wrong-type, wrong-status, and oversized exchange bodies fail bounded"
+      ],
+      "finalTestResults": [
+        "not ok 1 - malformed, extra-field, wrong-type, wrong-status, and oversized exchange bodies fail bounded"
+      ]
+    },
+    {
+      "id": "A12",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "oversized declared response",
+      "before": "!Number.isSafeInteger(expected) || expected > maxBytes",
+      "after": "!Number.isSafeInteger(expected)",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected: 1",
+        "  actual: 0"
+      ],
+      "initialTest": "oversized declared response",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "not ok 1 - an oversized declared response is canceled before its body can be opened"
+      ],
+      "finalTestResults": [
+        "not ok 1 - an oversized declared response is canceled before its body can be opened"
+      ]
+    },
+    {
+      "id": "A13",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "deadline also covers|deadline covers|fixed deadline",
+      "before": "Promise.race([request, deadlinePromise, cancellationPromise])",
+      "after": "Promise.race([request, cancellationPromise])",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'callback request timed out'"
+      ],
+      "initialTest": "deadline also covers|deadline covers|fixed deadline",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "not ok 1 - a non-cooperating exchange is aborted at its fixed deadline and remains retryable",
+        "ok 2 - the fixed exchange deadline covers a stalled response body and remains retryable"
+      ],
+      "finalTestResults": [
+        "not ok 1 - a non-cooperating exchange is aborted at its fixed deadline and remains retryable",
+        "ok 2 - the fixed exchange deadline covers a stalled response body and remains retryable"
+      ]
+    },
+    {
+      "id": "A14",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "restart resumes the exact stored port",
+      "before": "const { session } = await bind(current.pending.callbackPort);",
+      "after": "const { session } = await bind(0);",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": "timeout",
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'connect ECONNREFUSED 127.0.0.1:37723'"
+      ],
+      "initialTest": "restart re-binds|restart binds|occupied saved port",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "not ok 1 - restart refuses an occupied saved port without changing or exposing the pending flow"
+      ],
+      "finalTestResults": [
+        "not ok 1 - restart resumes the exact stored port and flow without reopening the browser"
+      ]
+    },
+    {
+      "id": "M01",
+      "source": "src/main.js",
+      "suite": "test/pro-main.test.js",
+      "test": "uncertain secure write",
+      "before": "&& stored.licenseKey === key",
+      "after": "&& true",
+      "sha256": "e8c3691540f3cf00afb6d892c8c23f759985cd4cc5feb553d7fedb4d6be00a2c",
+      "initialExit": 0,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "repaired test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "      actual: false,",
+        "      expected: true,",
+        "  expected: 0",
+        "  actual: 1"
+      ],
+      "initialTest": "uncertain secure write",
+      "initialSuite": "test/pro-main.test.js",
+      "initialTestResults": [
+        "ok 1 - an uncertain secure write proceeds only when exact readback proves the replacement key"
+      ],
+      "finalTestResults": [
+        "not ok 1 - an uncertain secure write proceeds only when exact readback proves the replacement key"
+      ]
+    },
+    {
+      "id": "M02",
+      "source": "src/main.js",
+      "suite": "test/pro-main.test.js",
+      "test": "uncertain secure write",
+      "before": "&& !Object.hasOwn(stored, \"pending\");",
+      "after": "&& true;",
+      "sha256": "e8c3691540f3cf00afb6d892c8c23f759985cd4cc5feb553d7fedb4d6be00a2c",
+      "initialExit": 0,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "repaired test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "      actual: false,",
+        "      expected: true,",
+        "  expected: 0",
+        "  actual: 1"
+      ],
+      "initialTest": "uncertain secure write",
+      "initialSuite": "test/pro-main.test.js",
+      "initialTestResults": [
+        "ok 1 - an uncertain secure write proceeds only when exact readback proves the replacement key"
+      ],
+      "finalTestResults": [
+        "not ok 1 - an uncertain secure write proceeds only when exact readback proves the replacement key"
+      ]
+    },
+    {
+      "id": "L01",
+      "source": "src/app-lifecycle.js",
+      "suite": "test/app-lifecycle.test.js",
+      "test": "every ordered lifecycle pair",
+      "before": "result = operationTail.then(async () => {",
+      "after": "result = Promise.resolve().then(async () => {",
+      "sha256": "f392f0223d82f4b7b0cfb93b319768abe79d2425f2ce0e72a7ae877ab34e0c9c",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected: 1",
+        "  actual: 2"
+      ],
+      "initialTest": "every ordered lifecycle pair",
+      "initialSuite": "test/app-lifecycle.test.js",
+      "initialTestResults": [
+        "not ok 1 - every ordered lifecycle pair has one owner and request-order completion"
+      ],
+      "finalTestResults": [
+        "not ok 1 - every ordered lifecycle pair has one owner and request-order completion"
+      ]
+    },
+    {
+      "id": "L02",
+      "source": "src/app-lifecycle.js",
+      "suite": "test/app-lifecycle.test.js",
+      "test": "first close is the sole",
+      "before": "if (closing && !allowClosing) return undefined;",
+      "after": "if (false) return undefined;",
+      "sha256": "f392f0223d82f4b7b0cfb93b319768abe79d2425f2ce0e72a7ae877ab34e0c9c",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected:",
+        "  actual:"
+      ],
+      "initialTest": "first close is the sole",
+      "initialSuite": "test/app-lifecycle.test.js",
+      "initialTestResults": [
+        "not ok 1 - the first close is the sole terminal owner and retires already queued work"
+      ],
+      "finalTestResults": [
+        "not ok 1 - the first close is the sole terminal owner and retires already queued work"
+      ]
+    },
+    {
+      "id": "D01",
+      "source": "src/daemon.js",
+      "suite": "test/daemon.test.js",
+      "test": "Linux daemon launch marks",
+      "before": "delete childEnv.MIRAFOLD_LICENSE_KEY;",
+      "after": "void 0;",
+      "sha256": "c3cc7e35c9ee1e96364343b71156e469dad3cfceb4aa385cc2cd4ada3c026cdc",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected: false",
+        "  actual: true"
+      ],
+      "initialTest": "Linux daemon launch marks",
+      "initialSuite": "test/daemon.test.js",
+      "initialTestResults": [
+        "not ok 1 - Linux daemon launch marks Desktop, owns a private pipe, and removes the ambient key"
+      ],
+      "finalTestResults": [
+        "not ok 1 - Linux daemon launch marks Desktop, owns a private pipe, and removes the ambient key"
+      ]
+    },
+    {
+      "id": "D02",
+      "source": "src/daemon.js",
+      "suite": "test/daemon.test.js",
+      "test": "private credential handoff writes",
+      "before": "bytes?.fill(0);",
+      "after": "void 0;",
+      "sha256": "c3cc7e35c9ee1e96364343b71156e469dad3cfceb4aa385cc2cd4ada3c026cdc",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'the producer buffer is cleared after transfer'",
+        "  expected: true",
+        "  actual: false"
+      ],
+      "initialTest": "private credential handoff writes",
+      "initialSuite": "test/daemon.test.js",
+      "initialTestResults": [
+        "not ok 1 - private credential handoff writes one exact EOF-framed key and clears its source buffer"
+      ],
+      "finalTestResults": [
+        "not ok 1 - private credential handoff writes one exact EOF-framed key and clears its source buffer"
+      ]
+    },
+    {
+      "id": "D03",
+      "source": "src/daemon-output.js",
+      "suite": "test/daemon.test.js",
+      "test": "redact|credentials",
+      "before": "const LICENSE_KEY_RE = /mf_[a-z2-7]{20,}/g;",
+      "after": "const LICENSE_KEY_RE = /mf_[a-z2-7]{20,40}(?![a-z2-7])/g;",
+      "sha256": "8ab013a08e6ddba5527b1f6d9a61b81dee669b99c52aa57f4b8b6c13e9c1f22e",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'maximum-length Pro license key followed by base32 text: complete-line redaction failed'",
+        "  expected: true",
+        "  actual: false"
+      ],
+      "initialTest": "redact|credentials",
+      "initialSuite": "test/daemon.test.js",
+      "initialTestResults": [
+        "not ok 1 - credentials are redacted across every possible stream boundary",
+        "ok 2 - adjacent credentials are all redacted without changing ordinary text",
+        "ok 3 - the crash buffer receives only stream-sanitized credentials"
+      ],
+      "finalTestResults": [
+        "not ok 1 - credentials are redacted across every possible stream boundary",
+        "ok 2 - adjacent credentials are all redacted without changing ordinary text",
+        "ok 3 - the crash buffer receives only stream-sanitized credentials"
+      ]
+    },
+    {
+      "id": "N01",
+      "source": "src/navigation.js",
+      "suite": "test/navigation.test.js",
+      "test": "only the exact activation marker",
+      "before": "rawUrl !== DESKTOP_ACTIVATION_URL",
+      "after": "!rawUrl.startsWith(DESKTOP_ACTIVATION_URL)",
+      "sha256": "6517630e0043f90a18c4d1f835f4b213806e94d00ec63e035cb5edb642cf7bc4",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected: false",
+        "  actual: true"
+      ],
+      "initialTest": "only the exact activation marker",
+      "initialSuite": "test/navigation.test.js",
+      "initialTestResults": [
+        "not ok 1 - only the exact activation marker while the current daemon document is trusted reaches native activation"
+      ],
+      "finalTestResults": [
+        "not ok 1 - only the exact activation marker while the current daemon document is trusted reaches native activation"
+      ]
+    },
+    {
+      "id": "A08",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "two simultaneous exact callbacks",
+      "before": "code === null || session.exchangeInFlight",
+      "after": "code === null",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'unhandledRejection'",
+        "  error: 'callback request timed out'"
+      ],
+      "initialTest": "two simultaneous exact callbacks",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "not ok 1 - two simultaneous exact callbacks still authorize only one exchange"
+      ],
+      "finalTestResults": [
+        "not ok 1 - two simultaneous exact callbacks still authorize only one exchange"
+      ]
+    },
+    {
+      "id": "M03",
+      "source": "src/main.js",
+      "suite": "test/pro-main.test.js",
+      "test": "trusted Desktop marker drives",
+      "before": "await proStore.preflight();",
+      "after": "void 0;",
+      "sha256": "e8c3691540f3cf00afb6d892c8c23f759985cd4cc5feb553d7fedb4d6be00a2c",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "      actual: -1,",
+        "      expected: -1,",
+        "  expected: 0",
+        "  actual: 1"
+      ],
+      "initialTest": "trusted Desktop marker drives",
+      "initialSuite": "test/pro-main.test.js",
+      "initialTestResults": [
+        "not ok 1 - the trusted Desktop marker drives preflight, durable activation, restart, and native UI in order"
+      ],
+      "finalTestResults": [
+        "not ok 1 - the trusted Desktop marker drives preflight, durable activation, restart, and native UI in order"
+      ]
+    },
+    {
+      "id": "M04",
+      "source": "src/main.js",
+      "suite": "test/pro-main.test.js",
+      "test": "durable replacement key reaches",
+      "before": "proLicenseKey = state.licenseKey;",
+      "after": "proLicenseKey = undefined;",
+      "sha256": "e8c3691540f3cf00afb6d892c8c23f759985cd4cc5feb553d7fedb4d6be00a2c",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "      actual: 'none',",
+        "      expected: 'new',",
+        "  expected: 0",
+        "  actual: 1"
+      ],
+      "initialTest": "durable replacement key reaches",
+      "initialSuite": "test/pro-main.test.js",
+      "initialTestResults": [
+        "not ok 1 - a durable replacement key reaches the first daemon without reopening activation"
+      ],
+      "finalTestResults": [
+        "not ok 1 - a durable replacement key reaches the first daemon without reopening activation"
+      ]
+    },
+    {
+      "id": "M05",
+      "source": "src/main.js",
+      "suite": "test/pro-main.test.js",
+      "test": "failed removal retains",
+      "before": "proLicenseKey = survivingKey;",
+      "after": "proRetryKey = undefined;\n  proLicenseKey = survivingKey;",
+      "sha256": "e8c3691540f3cf00afb6d892c8c23f759985cd4cc5feb553d7fedb4d6be00a2c",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "      actual: 1,",
+        "      expected: 0,",
+        "  expected: 0",
+        "  actual: 1"
+      ],
+      "initialTest": "failed removal retains",
+      "initialSuite": "test/pro-main.test.js",
+      "initialTestResults": [
+        "not ok 1 - failed removal retains the unsaved purchased key"
+      ],
+      "finalTestResults": [
+        "not ok 1 - failed removal retains the unsaved purchased key"
+      ]
+    },
+    {
+      "id": "M06",
+      "source": "src/main.js",
+      "suite": "test/pro-main.test.js",
+      "test": "failed updater recovery retains",
+      "before": "quitting = false;\n    proLicenseKey = undefined;",
+      "after": "quitting = false;\n    proRetryKey = undefined;\n    proLicenseKey = undefined;",
+      "sha256": "e8c3691540f3cf00afb6d892c8c23f759985cd4cc5feb553d7fedb4d6be00a2c",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "      actual: 1,",
+        "      expected: 0,",
+        "  expected: 0",
+        "  actual: 1"
+      ],
+      "initialTest": "failed updater recovery retains",
+      "initialSuite": "test/pro-main.test.js",
+      "initialTestResults": [
+        "not ok 1 - failed updater recovery retains the unsaved purchased key"
+      ],
+      "finalTestResults": [
+        "not ok 1 - failed updater recovery retains the unsaved purchased key"
+      ]
+    },
+    {
+      "id": "M07",
+      "source": "src/main.js",
+      "suite": "test/pro-main.test.js",
+      "test": "confirmed removal closes",
+      "before": "await proStore.remove();",
+      "after": "void 0;",
+      "sha256": "e8c3691540f3cf00afb6d892c8c23f759985cd4cc5feb553d7fedb4d6be00a2c",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "      actual: false,",
+        "      expected: true,",
+        "  expected: 0",
+        "  actual: 1"
+      ],
+      "initialTest": "confirmed removal closes",
+      "initialSuite": "test/pro-main.test.js",
+      "initialTestResults": [
+        "not ok 1 - confirmed removal closes Pro, stops once, deletes exact state, and restarts unentitled"
+      ],
+      "finalTestResults": [
+        "not ok 1 - confirmed removal closes Pro, stops once, deletes exact state, and restarts unentitled"
+      ]
+    },
+    {
+      "id": "M08",
+      "source": "src/main.js",
+      "suite": "test/pro-main.test.js",
+      "test": "canceling or duplicating",
+      "before": "if (response !== 0 || quitting || lifecycle.closing || !win) return false;",
+      "after": "if (quitting || lifecycle.closing || !win) return false;",
+      "sha256": "e8c3691540f3cf00afb6d892c8c23f759985cd4cc5feb553d7fedb4d6be00a2c",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "      actual: null,",
+        "      expected: { version: 1, licenseKey: 'mf_bbbbbbbbbbbbbbbbbbbb' },",
+        "  expected: 0",
+        "  actual: 1"
+      ],
+      "initialTest": "canceling or duplicating",
+      "initialSuite": "test/pro-main.test.js",
+      "initialTestResults": [
+        "not ok 1 - canceling or duplicating the removal confirmation changes no state"
+      ],
+      "finalTestResults": [
+        "not ok 1 - canceling or duplicating the removal confirmation changes no state"
+      ]
+    },
+    {
+      "id": "M09",
+      "source": "src/main.js",
+      "suite": "test/pro-main.test.js",
+      "test": "update ownership observes",
+      "before": "if (clean) daemon = null;",
+      "after": "daemon = null;",
+      "sha256": "e8c3691540f3cf00afb6d892c8c23f759985cd4cc5feb553d7fedb4d6be00a2c",
+      "initialExit": 0,
+      "finalExit": 0,
+      "restoredExit": 0,
+      "disposition": "no contract broken: daemonCleanupBlocked independently refuses installation",
+      "finalEvidence": [],
+      "initialTest": "update ownership observes",
+      "initialSuite": "test/pro-main.test.js",
+      "initialTestResults": [
+        "ok 1 - update ownership observes a replacement boot's failed cleanup proof"
+      ],
+      "finalTestResults": [
+        "ok 1 - update ownership observes a replacement boot's failed cleanup proof"
+      ]
+    },
+    {
+      "id": "M10",
+      "source": "src/main.js",
+      "suite": "test/pro-main.test.js",
+      "test": "quit does not wait for an open native",
+      "before": "return Promise.race([observed, whenClosing.then(() => closedValue)]);",
+      "after": "return observed;",
+      "sha256": "e8c3691540f3cf00afb6d892c8c23f759985cd4cc5feb553d7fedb4d6be00a2c",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "      actual: false,",
+        "      expected: true,",
+        "  expected: 0",
+        "  actual: 1"
+      ],
+      "initialTest": "quit does not wait for an open native",
+      "initialSuite": "test/pro-main.test.js",
+      "initialTestResults": [
+        "not ok 1 - quit does not wait for an open native crash dialog",
+        "ok 2 - quit does not wait for an open native folder picker"
+      ],
+      "finalTestResults": [
+        "not ok 1 - quit does not wait for an open native crash dialog",
+        "ok 2 - quit does not wait for an open native folder picker"
+      ]
+    },
+    {
+      "id": "M11",
+      "source": "src/main.js",
+      "suite": "test/pro-main.test.js",
+      "test": "quit closes a resumed activation",
+      "before": "shutdown = Promise.resolve(activation.shutdown());",
+      "after": "shutdown = Promise.resolve();",
+      "sha256": "e8c3691540f3cf00afb6d892c8c23f759985cd4cc5feb553d7fedb4d6be00a2c",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "      actual: false,",
+        "      expected: true,",
+        "  expected: 0",
+        "  actual: 1"
+      ],
+      "initialTest": "quit closes a resumed activation",
+      "initialSuite": "test/pro-main.test.js",
+      "initialTestResults": [
+        "not ok 1 - quit closes a resumed activation before stopping the daemon and preserves pending state"
+      ],
+      "finalTestResults": [
+        "not ok 1 - quit closes a resumed activation before stopping the daemon and preserves pending state"
+      ]
+    },
+    {
+      "id": "M12",
+      "source": "src/main.js",
+      "suite": "test/pro-main.test.js",
+      "test": "retired browser failure",
+      "before": "if (proActionPromise && proActivationUrl === url) {",
+      "after": "if (proActionPromise) {",
+      "sha256": "e8c3691540f3cf00afb6d892c8c23f759985cd4cc5feb553d7fedb4d6be00a2c",
+      "initialExit": 0,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "repaired test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "      actual: 'Mirafold \u2014 Finish Pro activation in your browser',",
+        "      expected: 'Mirafold \u2014 Saving Pro access securely\u2026',",
+        "  expected: 0",
+        "  actual: 1"
+      ],
+      "initialTest": "retired browser failure",
+      "initialSuite": "test/pro-main.test.js",
+      "initialTestResults": [
+        "ok 1 - a retired browser failure cannot clear a newer activation's progress"
+      ],
+      "finalTestResults": [
+        "not ok 1 - a retired browser failure cannot clear a newer activation's progress"
+      ]
+    },
+    {
+      "id": "A16",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "shutdown settles a non-cooperating",
+      "before": "session.cancelExchange?.();",
+      "after": "void 0;",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'shutdown waited for the exchange deadline instead of canceling it'"
+      ],
+      "initialTest": "shutdown settles a non-cooperating",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "not ok 1 - shutdown settles a non-cooperating exchange and clears its deadline"
+      ],
+      "finalTestResults": [
+        "not ok 1 - shutdown settles a non-cooperating exchange and clears its deadline"
+      ]
+    },
+    {
+      "id": "A17",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "listener bind, encrypted",
+      "before": "maxHeaderSize: PRO_CALLBACK_MAX_HEADER_BYTES,",
+      "after": "maxHeaderSize: 1024 * 1024,",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected: 8192",
+        "  actual: 1048576"
+      ],
+      "initialTest": "listener bind, encrypted",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "not ok 1 - listener bind, encrypted save, readback, and browser open occur in that order"
+      ],
+      "finalTestResults": [
+        "not ok 1 - listener bind, encrypted save, readback, and browser open occur in that order"
+      ]
+    },
+    {
+      "id": "A18",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "real loopback happy",
+      "before": "JSON.stringify({ code, verifier: session.pending.verifier })",
+      "after": "JSON.stringify({ code, verifier: session.pending.state })",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected: '{\"code\":\"EBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBA\",\"verifier\":\"DQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0\"}'",
+        "  actual: '{\"code\":\"EBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBA\",\"verifier\":\"Dw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8\"}'"
+      ],
+      "initialTest": "real loopback happy",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "not ok 1 - the real loopback happy path sends one exact exchange and returns one in-memory key"
+      ],
+      "finalTestResults": [
+        "not ok 1 - the real loopback happy path sends one exact exchange and returns one in-memory key"
+      ]
+    },
+    {
+      "id": "L03",
+      "source": "src/app-lifecycle.js",
+      "suite": "test/app-lifecycle.test.js",
+      "test": "ordinary quit is held",
+      "before": "await stop();",
+      "after": "void stop();",
+      "sha256": "f392f0223d82f4b7b0cfb93b319768abe79d2425f2ce0e72a7ae877ab34e0c9c",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected: 2",
+        "  actual: 1"
+      ],
+      "initialTest": "ordinary quit is held",
+      "initialSuite": "test/app-lifecycle.test.js",
+      "initialTestResults": [
+        "not ok 1 - ordinary quit is held until one shared asynchronous cleanup completes"
+      ],
+      "finalTestResults": [
+        "not ok 1 - ordinary quit is held until one shared asynchronous cleanup completes"
+      ]
+    },
+    {
+      "id": "S11",
+      "source": "src/pro-store.js",
+      "suite": "test/pro-store.test.js",
+      "test": "exact envelope and pending schemas",
+      "before": "const pending = hasPending ? validatePending(value.pending, nowMs, forWrite) : undefined;",
+      "after": "const pending = hasPending ? value.pending : undefined;",
+      "sha256": "55dd45dbbe169b3a863e79ac87ef1659a29ac943cf1337681c8975ad7f564412",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'Missing expected rejection.'"
+      ],
+      "initialTest": "exact envelope and pending schemas",
+      "initialSuite": "test/pro-store.test.js",
+      "initialTestResults": [
+        "not ok 1 - the exact envelope and pending schemas reject every malformed field class"
+      ],
+      "finalTestResults": [
+        "not ok 1 - the exact envelope and pending schemas reject every malformed field class"
+      ]
+    },
+    {
+      "id": "A15",
+      "source": "src/pro-activation.js",
+      "suite": "test/pro-activation.test.js",
+      "test": "fixed exchange deadline covers",
+      "before": "controller.abort();\n        } catch {\n          // Promise.race still enforces the caller-visible bound.",
+      "after": "void 0;\n        } catch {\n          // Promise.race still enforces the caller-visible bound.",
+      "sha256": "d819d893b279c2e7431fd1aa2f310d0caa8289c4a425384f67d62c697ba08590",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected: true",
+        "  actual: false"
+      ],
+      "initialTest": "fixed exchange deadline covers",
+      "initialSuite": "test/pro-activation.test.js",
+      "initialTestResults": [
+        "not ok 1 - the fixed exchange deadline covers a stalled response body and remains retryable"
+      ],
+      "finalTestResults": [
+        "not ok 1 - the fixed exchange deadline covers a stalled response body and remains retryable"
+      ]
+    },
+    {
+      "id": "M13",
+      "source": "src/main.js",
+      "suite": "test/pro-main.test.js",
+      "test": "update ownership observes",
+      "before": "return prepared === true;",
+      "after": "return true;",
+      "sha256": "e8c3691540f3cf00afb6d892c8c23f759985cd4cc5feb553d7fedb4d6be00a2c",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "      actual: true,",
+        "      expected: false,",
+        "  expected: 0",
+        "  actual: 1"
+      ],
+      "initialTest": "update ownership observes",
+      "initialSuite": "test/pro-main.test.js",
+      "initialTestResults": [
+        "not ok 1 - update ownership observes a replacement boot's failed cleanup proof"
+      ],
+      "finalTestResults": [
+        "not ok 1 - update ownership observes a replacement boot's failed cleanup proof"
+      ]
+    },
+    {
+      "id": "M14",
+      "source": "src/main.js",
+      "suite": "test/pro-main.test.js",
+      "test": "retired browser failure",
+      "before": "&& (owner === undefined || owner === proActivation);",
+      "after": "&& true;",
+      "sha256": "e8c3691540f3cf00afb6d892c8c23f759985cd4cc5feb553d7fedb4d6be00a2c",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "      actual: 'Mirafold \u2014 fixture-project',",
+        "      expected: /Finish Pro activation/,",
+        "  expected: 0",
+        "  actual: 1"
+      ],
+      "initialTest": "retired browser failure",
+      "initialSuite": "test/pro-main.test.js",
+      "initialTestResults": [
+        "not ok 1 - a retired browser failure cannot clear a newer activation's progress"
+      ],
+      "finalTestResults": [
+        "not ok 1 - a retired browser failure cannot clear a newer activation's progress"
+      ]
+    },
+    {
+      "id": "T01",
+      "source": "src/process-tree.js",
+      "suite": "test/ownership-fail-closed.test.js",
+      "test": "live Linux boundary",
+      "before": "const unidentifiedRootExists = () => rootIdentity === null\n      && (processExists(pid) || unixProcessGroupExists(pid));",
+      "after": "const unidentifiedRootExists = () => false;",
+      "sha256": "72d7fab276c5212a5c790665aa321b0668f9302dd5e80f486668f68dfa84ad86",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "      actual: true,",
+        "      expected: false,",
+        "  expected: 0",
+        "  actual: 1"
+      ],
+      "initialTest": "live Linux boundary",
+      "initialSuite": "test/ownership-fail-closed.test.js",
+      "initialTestResults": [
+        "not ok 1 - a live Linux boundary with no readable identity fails closed without being signalled"
+      ],
+      "finalTestResults": [
+        "not ok 1 - a live Linux boundary with no readable identity fails closed without being signalled"
+      ]
+    },
+    {
+      "id": "T02",
+      "source": "src/process-tree.js",
+      "suite": "test/ownership-fail-closed.test.js",
+      "test": "close proof|close rejection",
+      "before": "windowsJobClosed?.then(finish);",
+      "after": "windowsJobClosed?.then(() => finish(true));",
+      "sha256": "72d7fab276c5212a5c790665aa321b0668f9302dd5e80f486668f68dfa84ad86",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "      actual: true,",
+        "      expected: false,",
+        "  expected: 0",
+        "  actual: 1"
+      ],
+      "initialTest": "close proof|close rejection",
+      "initialSuite": "test/ownership-fail-closed.test.js",
+      "initialTestResults": [
+        "not ok 1 - a Windows Job close rejection fails closed even before the stop request settles"
+      ],
+      "finalTestResults": [
+        "not ok 1 - a Windows Job close rejection fails closed even before the stop request settles"
+      ]
+    },
+    {
+      "id": "D04",
+      "source": "src/daemon.js",
+      "suite": "test/pro-handoff.test.js",
+      "test": "Daemon.start delivers its stored key",
+      "before": "? sendDesktopCredential(child, licenseKey)",
+      "after": "? sendDesktopCredential(child, undefined)",
+      "sha256": "c3cc7e35c9ee1e96364343b71156e469dad3cfceb4aa385cc2cd4ada3c026cdc",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected: 'license-key'"
+      ],
+      "initialTest": "Daemon.start delivers its stored key",
+      "initialSuite": "test/pro-handoff.test.js",
+      "initialTestResults": [
+        "not ok 1 - Daemon.start delivers its stored key through the production launch path"
+      ],
+      "finalTestResults": [
+        "not ok 1 - Daemon.start delivers its stored key through the production launch path"
+      ]
+    },
+    {
+      "id": "D05",
+      "source": "src/daemon.js",
+      "suite": "test/pro-handoff.test.js",
+      "test": "published Shell receives only the pipe key",
+      "before": "delete childEnv.MIRAFOLD_LICENSE_KEY;",
+      "after": "void 0;",
+      "sha256": "c3cc7e35c9ee1e96364343b71156e469dad3cfceb4aa385cc2cd4ada3c026cdc",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected: false",
+        "  actual: true"
+      ],
+      "initialTest": "published Shell receives only the pipe key",
+      "initialSuite": "test/pro-handoff.test.js",
+      "initialTestResults": [
+        "not ok 1 - published Shell receives only the pipe key for entitlement, billing, and a real child"
+      ],
+      "finalTestResults": [
+        "not ok 1 - published Shell receives only the pipe key for entitlement, billing, and a real child"
+      ]
+    },
+    {
+      "id": "P01",
+      "source": "scripts/packaged-smoke.mjs",
+      "suite": "test/packaged-smoke.test.js",
+      "test": "smoke check refuses a packaged Shell",
+      "before": "invariant(report.shellVersion === expectedShellVersion,",
+      "after": "invariant(true,",
+      "sha256": "6addc8d858b15106e3407998b2b73f259ec0bdf5d71caaf28aa87c6d86b834a8",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'Missing expected exception.'",
+        "  expected:"
+      ],
+      "initialTest": "smoke check refuses a packaged Shell",
+      "initialSuite": "test/packaged-smoke.test.js",
+      "initialTestResults": [
+        "not ok 1 - the smoke check refuses a packaged Shell other than the reviewed pin"
+      ],
+      "finalTestResults": [
+        "not ok 1 - the smoke check refuses a packaged Shell other than the reviewed pin"
+      ]
+    },
+    {
+      "id": "P02",
+      "source": "scripts/packaged-smoke.mjs",
+      "suite": "test/packaged-smoke.test.js",
+      "test": "Linux packaged smoke requires only",
+      "before": "LINUX_EMPTY_CREDENTIAL_WARNING.test(text),",
+      "after": "true,",
+      "sha256": "6addc8d858b15106e3407998b2b73f259ec0bdf5d71caaf28aa87c6d86b834a8",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'Missing expected exception.'",
+        "  expected:"
+      ],
+      "initialTest": "Linux packaged smoke requires only",
+      "initialSuite": "test/packaged-smoke.test.js",
+      "initialTestResults": [
+        "not ok 1 - Linux packaged smoke requires only the fixed unactivated-Desktop warning"
+      ],
+      "finalTestResults": [
+        "not ok 1 - Linux packaged smoke requires only the fixed unactivated-Desktop warning"
+      ]
+    },
+    {
+      "id": "R01",
+      "source": "scripts/repository-hardening.mjs",
+      "suite": "test/repository-hardening.test.js",
+      "test": "GitHub client sends JSON",
+      "before": "args.push(\"--paginate\", \"--jq\", `${items} | @json`);",
+      "after": "args.push(\"--jq\", `${items} | @json`);",
+      "sha256": "72fe273595a791f4cadb6ff8fd49b4e9c96f387ccb799cbdc7f03180effc50ab",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected: true",
+        "  actual: false"
+      ],
+      "initialTest": "GitHub client sends JSON",
+      "initialSuite": "test/repository-hardening.test.js",
+      "initialTestResults": [
+        "not ok 1 - the GitHub client sends JSON without a shell, joins every page, and distinguishes enabled empty responses from 404"
+      ],
+      "finalTestResults": [
+        "not ok 1 - the GitHub client sends JSON without a shell, joins every page, and distinguishes enabled empty responses from 404"
+      ]
+    },
+    {
+      "id": "R02",
+      "source": "scripts/repository-hardening.mjs",
+      "suite": "test/repository-hardening.test.js",
+      "test": "apply rejects every repository-owner",
+      "before": "&& repo?.owner?.id === repository.owner.organizationId",
+      "after": "&& true",
+      "sha256": "72fe273595a791f4cadb6ff8fd49b4e9c96f387ccb799cbdc7f03180effc50ab",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected:",
+        "  actual:",
+        "  error: 'unexpected fake GitHub request GET /repos/mirafold/mirafold-desktop/commits/main/check-runs?per_page=100'"
+      ],
+      "initialTest": "apply rejects every repository-owner",
+      "initialSuite": "test/repository-hardening.test.js",
+      "initialTestResults": [
+        "not ok 1 - apply rejects every repository-owner identity mismatch before its first mutation"
+      ],
+      "finalTestResults": [
+        "not ok 1 - apply rejects every repository-owner identity mismatch before its first mutation"
+      ]
+    },
+    {
+      "id": "R03",
+      "source": "scripts/repository-hardening.mjs",
+      "suite": "test/repository-hardening.test.js",
+      "test": "ruleset recovery refuses checks split",
+      "before": "&& run.app?.id === check.integration_id",
+      "after": "&& true",
+      "sha256": "72fe273595a791f4cadb6ff8fd49b4e9c96f387ccb799cbdc7f03180effc50ab",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'Missing expected rejection.'",
+        "  expected:"
+      ],
+      "initialTest": "ruleset recovery refuses checks split",
+      "initialSuite": "test/repository-hardening.test.js",
+      "initialTestResults": [
+        "not ok 1 - ruleset recovery refuses checks split across commits or supplied by the wrong GitHub App"
+      ],
+      "finalTestResults": [
+        "not ok 1 - ruleset recovery refuses checks split across commits or supplied by the wrong GitHub App"
+      ]
+    },
+    {
+      "id": "R04",
+      "source": "scripts/repository-hardening.mjs",
+      "suite": "test/repository-hardening.test.js",
+      "test": "ruleset recovery accepts exact successful",
+      "before": "!pull.merged_at",
+      "after": "false",
+      "sha256": "72fe273595a791f4cadb6ff8fd49b4e9c96f387ccb799cbdc7f03180effc50ab",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'unexpected fake GitHub request /repos/mirafold/mirafold-desktop/commits/1111111111111111111111111111111111111111/check-runs?per_page=100'"
+      ],
+      "initialTest": "ruleset recovery accepts exact successful",
+      "initialSuite": "test/repository-hardening.test.js",
+      "initialTestResults": [
+        "not ok 1 - ruleset recovery accepts exact successful checks together on one recent canonical merged PR"
+      ],
+      "finalTestResults": [
+        "not ok 1 - ruleset recovery accepts exact successful checks together on one recent canonical merged PR"
+      ]
+    },
+    {
+      "id": "R05",
+      "source": "scripts/repository-hardening.mjs",
+      "suite": "test/repository-hardening.test.js",
+      "test": "live-state-shaped response",
+      "before": "if (equivalent(parameters[name], expected)) delete parameters[name];",
+      "after": "delete parameters[name];",
+      "sha256": "72fe273595a791f4cadb6ff8fd49b4e9c96f387ccb799cbdc7f03180effc50ab",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: |-",
+        "  expected: false",
+        "  actual: true"
+      ],
+      "initialTest": "live-state-shaped response",
+      "initialSuite": "test/repository-hardening.test.js",
+      "initialTestResults": [
+        "not ok 1 - a live-state-shaped response audits cleanly and any security drift is named"
+      ],
+      "finalTestResults": [
+        "not ok 1 - a live-state-shaped response audits cleanly and any security drift is named"
+      ]
+    },
+    {
+      "id": "P03",
+      "source": "electron-builder.yml",
+      "suite": "test/packaging.test.js",
+      "test": "electron-builder excludes every dotenv",
+      "before": "  - \"!**/*.env.*\"\n",
+      "after": "",
+      "sha256": "47868cd61906abf6ee589d48e0113f111b3da88cfc0f5f9d2f46cb0d6404f297",
+      "initialExit": 1,
+      "finalExit": 1,
+      "restoredExit": 0,
+      "disposition": "caught by existing test",
+      "finalEvidence": [
+        "  failureType: 'testCodeFailure'",
+        "  error: 'packaging does not exclude !**/*.env.*'",
+        "  expected: true",
+        "  actual: false"
+      ],
+      "initialTest": "electron-builder excludes every dotenv",
+      "initialSuite": "test/packaging.test.js",
+      "initialTestResults": [
+        "not ok 1 - electron-builder excludes every dotenv filename family from artifacts"
+      ],
+      "finalTestResults": [
+        "not ok 1 - electron-builder excludes every dotenv filename family from artifacts"
+      ]
+    }
+  ]
+}
