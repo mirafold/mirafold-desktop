@@ -267,8 +267,8 @@ assert.equal(
     killTimeoutMs: 0,
     windowsJobOwned: true,
     windowsJobClosed: new Promise(() => {}),
-    windowsStopEvent: "Local\\\\MirafoldDesktopStop-fixture",
-    windowsEnv: { SystemRoot: "C:\\\\Windows" },
+    windowsStopEvent: "Local\\MirafoldDesktopStop-fixture",
+    windowsEnv: { SystemRoot: "C:\\Windows" },
   }),
   false,
   "cleanup without a successful stop request or wrapper close cannot be proved",
@@ -304,13 +304,75 @@ assert.equal(
     killTimeoutMs: 100,
     windowsJobOwned: true,
     windowsJobClosed: Promise.reject(new Error("fixture rejected close proof")),
-    windowsStopEvent: "Local\\\\MirafoldDesktopStop-fixture",
-    windowsEnv: { SystemRoot: "C:\\\\Windows" },
+    windowsStopEvent: "Local\\MirafoldDesktopStop-fixture",
+    windowsEnv: { SystemRoot: "C:\\Windows" },
   }),
   false,
   "a rejected wrapper-close boundary cannot prove cleanup",
 );
 process.stdout.write("Windows rejected Job close failed closed\n");
+`;
+
+const WINDOWS_SHARED_DEADLINE_PROBE = String.raw`
+import { EventEmitter } from "node:events";
+import * as realChildProcess from "node:child_process";
+import { performance } from "node:perf_hooks";
+import { mock } from "node:test";
+import assert from "node:assert/strict";
+
+Object.defineProperty(process, "platform", { value: "win32" });
+let spawnCalls = 0;
+mock.module("node:child_process", {
+  namedExports: {
+    ...realChildProcess,
+    spawn() {
+      spawnCalls += 1;
+      const signaler = new EventEmitter();
+      signaler.kill = () => {};
+      if (spawnCalls === 2) {
+        setTimeout(() => signaler.emit("close", 1), 100);
+      }
+      return signaler;
+    },
+  },
+});
+
+const { terminateProcessTree } = await import(new URL(
+  "./src/process-tree.js?windows-shared-deadline",
+  import.meta.url,
+));
+let started = performance.now();
+assert.equal(
+  await terminateProcessTree(424242, [], {
+    killTimeoutMs: 250,
+    windowsJobOwned: true,
+    windowsJobClosed: new Promise((resolve) => setTimeout(resolve, 20)),
+    windowsStopEvent: "Local\\MirafoldDesktopStop-early-close",
+    windowsEnv: { SystemRoot: "C:\\Windows" },
+  }),
+  true,
+);
+const earlyCloseElapsed = performance.now() - started;
+assert.ok(
+  earlyCloseElapsed < 150,
+  "proved Job close waited for the hung stop-event helper",
+);
+
+started = performance.now();
+assert.equal(
+  await terminateProcessTree(424243, [], {
+    killTimeoutMs: 150,
+    windowsJobOwned: true,
+    windowsJobClosed: new Promise((resolve) => setTimeout(resolve, 220)),
+    windowsStopEvent: "Local\\MirafoldDesktopStop-shared-deadline",
+    windowsEnv: { SystemRoot: "C:\\Windows" },
+  }),
+  false,
+  "sequential helper and close waits exceeded the shared cleanup deadline",
+);
+const sharedDeadlineElapsed = performance.now() - started;
+assert.ok(sharedDeadlineElapsed < 200, "Windows Job cleanup exceeded its shared deadline");
+process.stdout.write("Windows Job cleanup used one shared deadline\n");
 `;
 
 const UNREADABLE_IDENTITY_PROBE = String.raw`
@@ -396,6 +458,10 @@ test("a failed Windows Job stop request without wrapper close remains unproved",
 
 test("a Windows Job close rejection fails closed even before the stop request settles", () => {
   runProbe(WINDOWS_REJECTED_JOB_PROBE);
+});
+
+test("Windows Job close and stop-event settlement share one cleanup deadline", () => {
+  runProbe(WINDOWS_SHARED_DEADLINE_PROBE);
 });
 
 test("a live Linux boundary with no readable identity fails closed without being signalled", {

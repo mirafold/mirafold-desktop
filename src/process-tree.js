@@ -291,41 +291,43 @@ export async function terminateProcessTree(pid, trackedIdentities = [], timings 
           windowsHide: true,
         },
       );
-      signaler.once("error", () => {});
       const windowsTimeoutMs = timings.killTimeoutMs ?? 10_000;
-      await new Promise((resolve) => {
-        let settled = false;
-        const finish = () => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timeout);
-          resolve();
-        };
-        const timeout = setTimeout(() => {
-          signaler.kill();
-          finish();
-        }, windowsTimeoutMs);
-        signaler.once("error", finish);
-        signaler.once("close", finish);
-      });
-      if (!windowsJobClosed) return false;
-      // ChildProcess `close` is stronger than `exit`: Node emits it only after
-      // the wrapper has exited and every inherited stdio handle is closed. The
-      // packaged daemon inherits those handles, so this also prevents stop()
-      // from racing the final loopback reachability check while Job teardown
-      // is still completing. Wrapper close remains authoritative when the
-      // stop-event opener fails because that failure can race the wrapper's
-      // own exit and kill-on-close Job teardown.
+      // The helper requests termination; only wrapper close proves it. Observe
+      // both from one deadline so an already-completed Job returns promptly and
+      // a slow helper cannot grant the close boundary a second full wait.
       return new Promise((resolve) => {
         let settled = false;
+        let signalerSettled = false;
+        let timeout;
+        const stopSignaler = () => {
+          if (signalerSettled) return;
+          try {
+            signaler.kill();
+          } catch {
+            // Wrapper close still proves Job teardown if this short helper
+            // vanished between its last event and the kill request.
+          }
+        };
         const finish = (clean) => {
           if (settled) return;
           settled = true;
           clearTimeout(timeout);
+          stopSignaler();
           resolve(clean);
         };
-        const timeout = setTimeout(() => finish(false), windowsTimeoutMs);
-        windowsJobClosed.then(finish);
+        const settleSignaler = () => {
+          signalerSettled = true;
+          if (!windowsJobClosed) finish(false);
+        };
+        signaler.once("error", settleSignaler);
+        signaler.once("close", settleSignaler);
+        timeout = setTimeout(() => finish(false), windowsTimeoutMs);
+        // ChildProcess close is stronger than exit: Node emits it only after
+        // the wrapper and every inherited stdio handle have closed. The
+        // packaged daemon inherits those handles, so this also keeps the final
+        // loopback check behind Job teardown. Close stays authoritative when
+        // the event opener fails because that failure can race wrapper exit.
+        windowsJobClosed?.then(finish);
       });
     }
     const killer = killTree(pid, "SIGTERM");

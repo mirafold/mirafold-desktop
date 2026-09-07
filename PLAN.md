@@ -1504,22 +1504,25 @@ security primitive the platform does not already provide.
   then proved a rejected close Promise could become an unhandled rejection if
   it settled before the stop-event helper.
 
-  Windows Job cleanup now settles the stop-event helper, then waits up to the
-  existing production ten-second bound for wrapper close regardless of whether
-  the helper opened the event. It still returns false when that close never
-  arrives, and it clears the losing timeout as soon as either outcome is known.
-  It also attaches a fail-closed normalization to the close Promise before its
-  first await, so an early rejection returns false instead of escaping.
+  Automatic PR review then identified, and a timing probe reproduced, a second
+  delay: waiting for the helper before wrapper close could hold a proved result
+  for the full timeout and then grant close a second timeout. Windows Job
+  cleanup now observes the helper and wrapper close concurrently under one
+  existing production ten-second deadline. Wrapper close returns its normalized
+  result immediately and stops a lingering helper; helper failure never proves
+  cleanup, and a missing or still-pending close returns false at the shared
+  deadline. The close Promise is normalized before the first await, so an early
+  rejection returns false instead of escaping.
   Permanent real-Daemon regressions cover the failed-start and ordinary-stop
   callers; sibling coverage retains the already-closed fast path and the
-  genuinely unproved and rejected results, while a bounded subprocess catches
-  a referenced timeout returning.
+  genuinely unproved and rejected results. Bounded subprocesses catch both a
+  referenced timeout returning and sequential helper/close deadlines.
 
-  The 27 focused daemon/ownership tests and the complete 313-test suite pass
-  with 312 passes and one existing platform skip. Syntax, whitespace,
+  The 28 focused daemon/ownership tests and the complete 314-test suite pass
+  with 313 passes and one existing platform skip. Syntax, whitespace,
   dependency integrity, and npm audit at moderate severity pass with zero
   vulnerabilities. One fresh nonpublishing build produced AppImage
-  (219,590,120 bytes), tar (207,311,056 bytes), and Debian (168,923,000 bytes)
+  (219,590,153 bytes), tar (207,310,655 bytes), and Debian (168,923,796 bytes)
   artifacts. Dotenv-excluding extraction found the changed process-tree module
   byte-identical in all three; each form passed native-module, MCP,
   environment-scrubbing, authenticated-loopback, renderer-stop, and
