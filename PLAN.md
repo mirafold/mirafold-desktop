@@ -1642,6 +1642,32 @@ security primitive the platform does not already provide.
   IDs, attestable inputs, package manifests, and hashes. Do not deploy or
   publish.
 
+  **2026-09-07 prerequisite complete: release preparation implemented and
+  reviewed through PR #65.** The prior `838e508` preflight proved that version,
+  notes, and artifact promotion were absent from the unchanged-input freeze.
+  Kyle's next `$next`, after the preparation explanation, authorized that
+  specific prerequisite. Desktop `0.4.0` still bundles exact Shell `0.9.0`.
+  A main-only first-attempt dispatch now retains one attested 17-file candidate
+  plus its identity/hash manifest for 90 days; a later annotated tag selects
+  that successful run and accepted manifest digest. The protected publisher
+  verifies and reuses its bytes without rebuilding or re-signing. Runtime and
+  installed dependencies have no changes. The affected review found and fixed
+  promotion-command test gaps and a version-bound fixture; all 11 mutation
+  probes are caught and cold review has no remaining findings.
+
+  Three final suites pass 341 tests with one skip; dependency, actionlint,
+  rehearsal, and all Linux package checks pass. Hosted CI `34168622219` passes
+  Linux and the real Windows packaged lifecycle. Fresh cold and automated PR
+  reviews report no remaining findings. Finish the required final-head checks
+  and PR merge, then reconstruct the reviewed tree on a release branch into `main`, require its checks and
+  review, record that exact merged commit, and only then dispatch the full
+  nonpublishing candidate build. Keep `main` fixed throughout freeze/acceptance.
+  This source preparation does not freeze a candidate. Automated releases stay
+  disabled, no signing policy changes, and DPC.11 remains dependent on 13.10.
+  [Original preflight](docs/candidate-freeze-preflight.md),
+  [preparation review](docs/audits/phase13-release-preparation.md), and persistent
+  `/home/serrecchia/Projects/mirafold-desktop-dpc10/HANDOFF.md` carry the evidence.
+
 - [ ] **Step 13.11 — accept the frozen candidate against production.** Require
   the reviewed site activation endpoints and D1 migration live first. Install
   Step 13.10's exact bytes through a candidate APT source on a clean supported
