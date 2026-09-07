@@ -7,10 +7,16 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+  DESKTOP_ACTIVATION_URL,
   daemonOriginFromUrl,
+  isDesktopActivationRequest,
   navigationVerdict,
   popupVerdict,
 } from "../src/navigation.js";
+import {
+  PRO_ACTIVATION_ORIGIN,
+  PRO_ACTIVATION_PATH,
+} from "../src/pro-activation.js";
 
 // Built the way main.js builds it (path.join on the app directory) so the
 // fixture is a real path on whichever platform the suite runs — a hardcoded
@@ -143,3 +149,67 @@ test("only Shell's exact new-session GET popup stays in the desktop window", () 
     "a form POST must not be converted into a bodyless GET",
   );
 });
+
+test("the native marker is the activation controller's canonical production path", () => {
+  assert.equal(DESKTOP_ACTIVATION_URL, PRO_ACTIVATION_ORIGIN + PRO_ACTIVATION_PATH);
+});
+
+test(
+  "only the exact activation marker while the current daemon document is trusted reaches native activation",
+  () => {
+    assert.equal(
+      isDesktopActivationRequest(DESKTOP_ACTIVATION_URL, DAEMON_URL, DAEMON_ORIGIN),
+      true,
+    );
+    assert.equal(
+      isDesktopActivationRequest(
+        DESKTOP_ACTIVATION_URL,
+        "http://127.0.0.1:31337/session/one",
+        DAEMON_ORIGIN,
+      ),
+      true,
+    );
+
+    for (const marker of [
+      "https://mirafold.com/activate/",
+      "https://mirafold.com/activate?again=1",
+      "https://mirafold.com/activate#fragment",
+      "https://MIRAFOLD.com/activate",
+      "http://mirafold.com/activate",
+      "https://mirafold.com.evil.example/activate",
+    ]) {
+      assert.equal(
+        isDesktopActivationRequest(marker, DAEMON_URL, DAEMON_ORIGIN),
+        false,
+        marker,
+      );
+    }
+
+    for (const currentMainUrl of [
+      pathToFileURL(LOADING).href,
+      "http://127.0.0.1:41337/",
+      "http://user@127.0.0.1:31337/",
+      "not a url",
+    ]) {
+      assert.equal(
+        isDesktopActivationRequest(
+          DESKTOP_ACTIVATION_URL,
+          currentMainUrl,
+          DAEMON_ORIGIN,
+        ),
+        false,
+        currentMainUrl,
+      );
+    }
+
+    assert.equal(
+      isDesktopActivationRequest(DESKTOP_ACTIVATION_URL, DAEMON_URL, null),
+      false,
+    );
+    assert.equal(
+      isDesktopActivationRequest(DESKTOP_ACTIVATION_URL, DAEMON_URL, DAEMON_ORIGIN, true),
+      false,
+      "a form POST cannot become a native activation request",
+    );
+  },
+);

@@ -18,6 +18,8 @@
 
 import { fileURLToPath } from "node:url";
 
+export const DESKTOP_ACTIVATION_URL = "https://mirafold.com/activate";
+
 /**
  * Reduce the private URL reported by the daemon to the one web origin this
  * window may trust. Require the explicit IPv4-loopback-and-port form emitted
@@ -113,4 +115,41 @@ export function popupVerdict(rawUrl, daemonOrigin = null, hasPostBody = false) {
     return "same-window";
   }
   return "external";
+}
+
+/**
+ * Recognize Shell's one native-activation marker without trusting the target
+ * URL alone. The current top-level document must still belong to this launch's
+ * exact daemon origin; loading pages, old daemon ports, form posts, and URL
+ * lookalikes remain ordinary navigation inputs. Shell's sandboxed artifact
+ * frames have no popup permission, so only its top-level UI can reach the
+ * window-open callback with this marker.
+ *
+ * Electron's window-open callback is installed on the one trusted
+ * BrowserWindow. `currentMainUrl` is read from that WebContents at callback
+ * time, so a marker delivered after a restart cannot inherit the old daemon's
+ * authority.
+ */
+export function isDesktopActivationRequest(
+  rawUrl,
+  currentMainUrl,
+  daemonOrigin = null,
+  hasPostBody = false,
+) {
+  if (
+    hasPostBody
+    || rawUrl !== DESKTOP_ACTIVATION_URL
+    || daemonOrigin === null
+    || typeof currentMainUrl !== "string"
+  ) {
+    return false;
+  }
+  try {
+    const current = new URL(currentMainUrl);
+    return current.origin === daemonOrigin
+      && current.username === ""
+      && current.password === "";
+  } catch {
+    return false;
+  }
 }

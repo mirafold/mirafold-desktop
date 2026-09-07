@@ -1,0 +1,112 @@
+[
+  {
+    "name": "run_source",
+    "file": "scripts/release-candidate.mjs",
+    "before": "  assert.equal(run.head_sha, commit);",
+    "after": "",
+    "initialExit": 1,
+    "finalExit": 1,
+    "initialSelector": "only a successful first",
+    "finalSelector": "only a successful first"
+  },
+  {
+    "name": "run_attempt",
+    "file": "scripts/release-candidate.mjs",
+    "before": "  assert.equal(run.run_attempt, 1, \"rerun candidates require a new freeze and acceptance\");",
+    "after": "",
+    "initialExit": 1,
+    "finalExit": 1,
+    "initialSelector": "only a successful first",
+    "finalSelector": "only a successful first"
+  },
+  {
+    "name": "run_result",
+    "file": "scripts/release-candidate.mjs",
+    "before": "  assert.equal(run.conclusion, \"success\");",
+    "after": "",
+    "initialExit": 1,
+    "finalExit": 1,
+    "initialSelector": "only a successful first",
+    "finalSelector": "only a successful first"
+  },
+  {
+    "name": "run_workflow",
+    "file": "scripts/release-candidate.mjs",
+    "before": "  assert.equal(run.path, WORKFLOW);",
+    "after": "",
+    "initialExit": 1,
+    "finalExit": 1,
+    "initialSelector": "only a successful first",
+    "finalSelector": "only a successful first"
+  },
+  {
+    "name": "artifact_expiry",
+    "file": "scripts/release-candidate.mjs",
+    "before": "  assert.equal(artifact.expired, false, \"candidate artifact expired\");",
+    "after": "",
+    "initialExit": 1,
+    "finalExit": 1,
+    "initialSelector": "candidate artifact selection",
+    "finalSelector": "candidate artifact selection"
+  },
+  {
+    "name": "artifact_run",
+    "file": "scripts/release-candidate.mjs",
+    "before": "  assert.equal(artifact.workflow_run?.id, Number(runId));",
+    "after": "",
+    "initialExit": 1,
+    "finalExit": 1,
+    "initialSelector": "candidate artifact selection",
+    "finalSelector": "candidate artifact selection"
+  },
+  {
+    "name": "manifest_pin",
+    "file": "scripts/release-candidate.mjs",
+    "before": "  assert.equal((await hashFile(manifestPath)).sha256, manifestSha256, \"accepted manifest hash differs\");",
+    "after": "",
+    "initialExit": 1,
+    "finalExit": 1,
+    "initialSelector": "candidate manifest cannot",
+    "finalSelector": "candidate manifest cannot"
+  },
+  {
+    "name": "file_hashes",
+    "file": "scripts/release-candidate.mjs",
+    "before": "  assert.deepEqual(manifest, await describeCandidate(directory, identity, { hasManifest: true }),\n    \"candidate identity or accepted file hashes differ\");",
+    "after": "",
+    "initialExit": 1,
+    "finalExit": 1,
+    "initialSelector": "candidate verification refuses changed bytes",
+    "finalSelector": "candidate verification refuses changed bytes"
+  },
+  {
+    "name": "main_tip",
+    "file": "scripts/release-candidate.mjs",
+    "before": "  assert.equal(commit, command(\"git\", [\"rev-parse\", \"refs/remotes/origin/main\"]), \"tag must be main's current tip\");",
+    "after": "",
+    "initialExit": 0,
+    "finalExit": 1,
+    "initialSelector": ".*",
+    "finalSelector": "promotion commands"
+  },
+  {
+    "name": "verify_run_binding",
+    "file": "scripts/release-candidate.mjs",
+    "before": "    assert.equal(selected.runId, expectedRun);",
+    "after": "",
+    "initialExit": 0,
+    "finalExit": 1,
+    "initialSelector": ".*",
+    "finalSelector": "promotion commands"
+  },
+  {
+    "name": "verify_digest_binding",
+    "file": "scripts/release-candidate.mjs",
+    "before": "    assert.equal(selected.manifestSha256, expectedDigest);",
+    "after": "",
+    "initialExit": 0,
+    "finalExit": 1,
+    "initialSelector": ".*",
+    "finalSelector": "promotion commands"
+  }
+]

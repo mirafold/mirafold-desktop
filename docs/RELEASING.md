@@ -18,7 +18,7 @@ releases.
 
 | branch | what it is | protection (GitHub rulesets, `.github/repository-hardening.json`) |
 | --- | --- | --- |
-| `main` | the production mirror — every commit on it is inside some release | pull-request-only, `test (linux)` + `test (windows)` + `DCO` required, branch must be up to date, linear history, no force-push/delete. **One bypass:** the GitHub Actions App, so the audited automated release writer can push its version commit + tag directly. |
+| `main` | the production mirror — every commit on it is inside some release | pull-request-only, `test (linux)` + `test (windows)` + `DCO` required, branch must be up to date, linear history, no force-push/delete. **One bypass:** the DeployKey actor class. Apply and audit require the single policy-pinned writable release key and reject every other writable deploy key. |
 | `next` | staging — day-to-day work accumulates here | pull-request-only for everyone, same three required checks, linear history, no force-push/delete, **no bypass at all** |
 | `feature/*`, `fix/*`, `refactor/*`, `docs/*` | working branches, cut from `next` | none — name them anything, force-push freely |
 | `release/x.y.z` | short-lived Desktop release prep, cut from `next` (or from `main` for a hotfix) | none — it exists for hours |
@@ -91,9 +91,9 @@ repository, erases its temporary GnuPG home, and uploads an immutable artifact.
 The provenance job independently verifies the signature and attests all 17
 files. The publisher independently verifies it again before receiving or using
 repository write access. A nonpublishing rehearsal runs from canonical `main`
-and obtains the signer from the main-only `automated-release` environment. A
-real `v*` tag obtains the signer from `manual-release`; signing and publication
-are then separate reviewer-protected deployments.
+and obtains the signer from the main-only `automated-release` environment. A later `v*` tag selects those already signed files; only publication enters
+the reviewer-protected, tag-only `manual-release` environment. No signing key
+is exposed during promotion.
 
 Key rotation is an overlapping release operation, never a same-day swap: bump
 the archive-keyring package version, ship both old and new public keys while
@@ -113,14 +113,21 @@ builds and smoke-checks native Linux and Windows packages, signs the APT index,
 attests provenance,
 and then — in one isolated job that installs no dependencies — commits the
 version bump, tags it, pushes commit and tag atomically to `main` (the ruleset
-bypass), and publishes the verified 17-file GitHub Release. Retries resume;
-nothing partial ever becomes visible.
+bypass), and publishes the verified 17-file GitHub Release. The push uses the
+single writable deploy key pinned by `.github/repository-hardening.json`; its
+private half exists only as `MIRAFOLD_RELEASE_DEPLOY_KEY` in the main-only
+`automated-release` environment. The release commit includes `[skip ci]` so
+that the deploy-key tag push does not recursively start the manual/tag release
+workflow. Retries resume; nothing partial ever becomes visible.
 
 It publishes only while the repository variable `MIRAFOLD_AUTOMATED_RELEASES`
 is exactly `enabled`. It was kept dormant through the first signed APT release
 (0.3.2) and its nonpublishing rehearsals (Path B, below), so routine
 publication could not start before the new repository channel existed and had
-been exercised; **the variable was set 2026-08-30 and Path A is live.** The
+been exercised; the variable was first enabled 2026-08-30. **DPC.8 hold,
+2026-09-07: it is now `disabled`. Keep it disabled until a later normal Desktop
+release carries the reviewed deploy-key writer to `main` and its live behavior
+is verified.** When enabled, the
 scheduler is best-effort (polls can land an hour or more apart), so a Shell
 release that should not wait can be carried immediately with **Actions → Shell
 intake → Run workflow** on `main` — the manual run publishes only because the
@@ -181,29 +188,67 @@ for the one-time bridge release.
    git diff --cached --check
    git commit -s -m "release: vx.y.z"
    ```
-4. **PR `release/x.y.z` → `main`**, merge on green.
-5. **Rehearse the exact merged commit without publishing:** manually dispatch
-   the `Release` workflow from `main` with `fail_platform=none`. The workflow
-   requires canonical `main` before dependency code, builds and smoke-checks
-   both native packages, signs the APT repository with the production key from
-   the main-only `automated-release` environment, verifies all 17 files, and
-   creates provenance attestations. The publication job is event-gated to tag
-   pushes and must remain skipped. Diagnose any failure before creating a tag.
-6. **Tag and push — this is the release, and it is a human act:**
+   For an accepted-candidate release, prepare these inputs on `next` before
+   the release correctness, security, and test reviews. If already prepared,
+   carry those exact versions and notes through reconstruction without a second
+   bump. Any executable, dependency, workflow, or package-content change after
+   review requires the affected reviews again before a candidate can be frozen.
+4. **PR `release/x.y.z` → `main`**, merge on green. Review the final source tree
+   and record the merged commit before building. Advancing `main` stages release
+   inputs; it does not publish packages. Keep automated releases disabled
+   throughout a manual freeze/acceptance cycle so `main` cannot advance beneath
+   the selected candidate.
+5. **Build and retain the exact merged candidate without publishing:** manually
+   dispatch the `Release` workflow from `main` with `fail_platform=none`. It
+   requires canonical `main` and attempt 1 before dependency code, builds and
+   smoke-checks both native packages, signs the APT repository using the
+   main-only `automated-release` environment, verifies all 17 files, and creates
+   provenance attestations. It then creates `candidate.json` and retains those
+   18 files together as the immutable `release-candidate` Actions artifact for
+   90 days. The manifest records the source commit, workflow, run, versions,
+   and every release file's size and SHA-256. The workflow summary gives its
+   own SHA-256. Both candidate selection and publication jobs remain skipped.
 
-   ```
-   git switch main && git pull --ff-only
-   git tag -s vx.y.z -m "Mirafold Desktop vx.y.z"
-   git push origin vx.y.z
+   Require the whole run to finish successfully. Download this exact artifact
+   and retain it, the manifest digest, and run evidence under `Projects` before
+   acceptance. For Phase 13, perform Steps 13.10 and 13.11 against these bytes;
+   the build alone does not establish installed acceptance. Do not rerun jobs:
+   a failed or expired candidate requires a fresh dispatch, fresh hashes, and
+   fresh acceptance. Never rebuild during publication. Do not move `main`
+   between freeze and publication; even a documentation commit would no longer
+   equal the candidate's recorded source commit.
+6. **Select the accepted candidate in the signed tag, then push.** This is the
+   public-release action Kyle performs only after acceptance. The tag must
+   point directly at the candidate's exact commit, which must still be main's
+   current tip. Its message must contain exactly one of each field:
+
+   ```text
+   Candidate-run: ACCEPTED_RUN_ID
+   Candidate-manifest-sha256: ACCEPTED_MANIFEST_SHA256
    ```
 
-   The tag push triggers `.github/workflows/release.yml`: main-tip guard,
-   tag↔version guard, script-free pinned install with signature verification,
-   tests, native Linux + Windows builds, packaged and NSIS smoke checks,
-   read-only APT signing job, 17-file contract check, provenance attestation,
-   then the write-capable publish job. The signing job and publisher each run
-   in the `manual-release` environment and wait for Kyle's approval in the
-   Actions UI before they may use the archive key or create the release.
+   Replace both placeholders with the recorded successful run ID and the
+   SHA-256 of the accepted `candidate.json`. Put the release title and these
+   fields in a local tag-message file retained under `Projects`; use
+   `git tag -s vx.y.z --file TAG_MESSAGE_FILE CANDIDATE_COMMIT`, then push only
+   that tag. The signature remains Kyle's signing procedure; the workflow
+   validates the annotated tag object and relies on repository write access
+   plus the protected environment's reviewer for publishing authority, rather than
+   claiming to independently establish the signer's identity.
+
+   The tag-triggered workflow resolves the selected run with a read-only
+   token: same canonical repository, exact Release workflow, main dispatch,
+   matching commit, successful completion, attempt 1, and one unexpired
+   `release-candidate` artifact. The publisher waits for the existing
+   `manual-release` environment approval and downloads that exact artifact ID
+   from that run, with archive digest mismatches treated as errors. After the
+   approval wait it repeats the live main/tag/run checks, verifies the accepted
+   manifest hash and every file hash, then verifies the signed APT repository
+   and complete 17-file contract. The manifest is retained as workflow evidence
+   and is not an eighteenth public release asset. Publication uploads the
+   original 17 files and retains the existing draft/remote-digest checks.
+   The tag run installs no project dependencies, builds no packages, creates
+   no new APT signatures, and preserves the candidate's existing attestations.
 7. **Verify the same day**: the run is green including both guards; the
    Release page shows all 17 files and `latest`; download one installer
    anonymously and check its SHA-256 against `SHA256SUMS-<platform>.txt`.

@@ -5,6 +5,7 @@
 // `audit` is read-only, and `apply` requires an exact repository confirmation.
 
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -35,6 +36,61 @@ function sortedPolicies(policies) {
   return [...policies]
     .map(({ name, type }) => ({ name, type }))
     .sort((left, right) => `${left.type}:${left.name}`.localeCompare(`${right.type}:${right.name}`));
+}
+
+function repositoryOwnerMatches(repository, repo) {
+  return repo?.owner?.login === repository.owner.login
+    && repo?.owner?.id === repository.owner.organizationId
+    && repo?.owner?.type === "Organization";
+}
+
+export function deployKeyFingerprint(publicKey) {
+  if (typeof publicKey !== "string") return null;
+  const [type, encoded] = publicKey.trim().split(/\s+/);
+  if (type !== "ssh-ed25519" || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded ?? "")) return null;
+  const bytes = Buffer.from(encoded, "base64");
+  if (
+    bytes.length === 0
+    || bytes.toString("base64").replace(/=+$/, "") !== encoded.replace(/=+$/, "")
+  ) {
+    return null;
+  }
+  return `SHA256:${createHash("sha256").update(bytes).digest("base64").replace(/=+$/, "")}`;
+}
+
+function expectedDeployKey(policy, key) {
+  const writer = policy.releaseWriter;
+  return deployKeyFingerprint(key?.key) === writer.deployKeyFingerprint;
+}
+
+function releaseWriterPrerequisiteMismatches(policy, observed, { allowMissingKey = false } = {}) {
+  const writer = policy.releaseWriter;
+  const keys = Array.isArray(observed.deployKeys) ? observed.deployKeys : [];
+  const expected = keys.filter((key) => expectedDeployKey(policy, key));
+  const mismatches = [];
+  if (expected.length !== 1 && !(allowMissingKey && expected.length === 0)) {
+    mismatches.push("the policy-pinned automated release deploy key is absent or duplicated");
+  }
+  if (expected.some((key) => (
+    key.title !== writer.deployKeyTitle
+    || key.read_only !== false
+    || key.verified !== true
+  ))) {
+    mismatches.push("the policy-pinned automated release deploy key metadata differs");
+  }
+  const unexpectedWritable = keys.filter(
+    (key) => key.read_only === false && !expectedDeployKey(policy, key),
+  );
+  if (unexpectedWritable.length > 0) {
+    mismatches.push(
+      `unowned writable deploy keys exist: ${unexpectedWritable.map((key) => key.title ?? key.id).join(", ")}`,
+    );
+  }
+  const secretNames = new Set((observed.releaseWriterSecrets?.secrets ?? []).map((secret) => secret.name));
+  if (!secretNames.has(writer.secretName)) {
+    mismatches.push(`${writer.environment} environment secret ${writer.secretName} is absent`);
+  }
+  return mismatches;
 }
 
 export function loadHardeningPolicy(file = DEFAULT_POLICY) {
@@ -98,9 +154,30 @@ export function validateHardeningPolicy(policy) {
   invariant(repository?.fullName === "mirafold/mirafold-desktop", "policy targets the wrong repository");
   invariant(repository.visibility === "public", "artifact attestations require this policy's public repository");
   invariant(repository.defaultBranch === "main", "policy default branch must be main");
-  invariant(repository.owner?.login === "kserrec" && repository.owner.userId === 32747715, "policy owner identity changed");
+  invariant(
+    repository.owner?.login === "mirafold" && repository.owner.organizationId === 304260636,
+    "policy repository-owner identity changed",
+  );
+  invariant(
+    repository.maintainer?.login === "kserrec" && repository.maintainer.userId === 32747715,
+    "policy maintainer identity changed",
+  );
   invariant(policy.integrations?.githubActionsAppId === 15368, "GitHub Actions integration identity changed");
   invariant(policy.integrations.dcoAppId === 1861, "DCO GitHub App identity changed");
+  invariant(
+    equivalent(policy.releaseWriter, {
+      deployKeyTitle: "Mirafold automated release writer",
+      deployKeyPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAaGIu8fPr9kVYIruh8r2aWMWrlH7xar+LsBLcAmGE9a mirafold-desktop automated release writer",
+      deployKeyFingerprint: "SHA256:UJR3Gv0QtEUbOWZeWMDYhGxepjHjR0mDK+vtvOqcVBc",
+      environment: "automated-release",
+      secretName: "MIRAFOLD_RELEASE_DEPLOY_KEY",
+    }),
+    "automated release writer identity changed",
+  );
+  invariant(
+    deployKeyFingerprint(policy.releaseWriter.deployKeyPublicKey) === policy.releaseWriter.deployKeyFingerprint,
+    "automated release writer public key does not match its fingerprint",
+  );
   invariant(
     equivalent(policy.actionsPermissions, {
       default_workflow_permissions: "read",
@@ -129,7 +206,7 @@ export function validateHardeningPolicy(policy) {
     "free public-repository secret protections changed without review",
   );
   invariant(
-    equivalent(policy.security.unavailableOnCurrentFreeUserOwnedRepository, [
+    equivalent(policy.security.unavailableOnCurrentPlan, [
       "secret_scanning_non_provider_patterns",
       "secret_scanning_validity_checks",
     ]),
@@ -159,7 +236,7 @@ export function validateHardeningPolicy(policy) {
     "automated releases must originate from main",
   );
   invariant(
-    equivalent(manual.reviewers, [{ type: "User", id: repository.owner.userId }]),
+    equivalent(manual.reviewers, [{ type: "User", id: repository.maintainer.userId }]),
     "manual release approval must belong to the repository owner",
   );
   invariant(
@@ -177,12 +254,8 @@ export function validateHardeningPolicy(policy) {
   validateRuleset(policy, main, {
     describe: "the default branch",
     conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
-    bypassActors: [{
-      actor_id: policy.integrations.githubActionsAppId,
-      actor_type: "Integration",
-      bypass_mode: "always",
-    }],
-    bypassMessage: "only the GitHub Actions integration may bypass the main ruleset",
+    bypassActors: [{ actor_id: null, actor_type: "DeployKey", bypass_mode: "always" }],
+    bypassMessage: "only repository deploy keys may bypass the main ruleset",
     strict: true,
   });
   // next is staging: pull-request-only for everyone, no bypass at all, and
@@ -206,7 +279,7 @@ export function evaluateMainUpdate(policy, scenario) {
   const bypass = main.bypass_actors.some(
     (candidate) => candidate.actor_type === actor.type && candidate.actor_id === actor.id && candidate.bypass_mode === "always",
   );
-  if (bypass) return { allowed: true, reason: "reviewed GitHub Actions ruleset bypass" };
+  if (bypass) return { allowed: true, reason: "reviewed automated-release deploy-key bypass" };
   if (scenario.operation === "delete" && rules.has("deletion")) {
     return { allowed: false, reason: "default-branch deletion is blocked" };
   }
@@ -250,30 +323,30 @@ export function compatibilityDemonstration(policy) {
   };
   return {
     humanDirectPush: evaluateMainUpdate(policy, {
-      actor: { type: "User", id: policy.repository.owner.userId },
+      actor: { type: "User", id: policy.repository.maintainer.userId },
       operation: "update",
       viaPullRequest: false,
     }),
     humanCheckedPullRequest: evaluateMainUpdate(policy, {
       ...pullRequest,
-      actor: { type: "User", id: policy.repository.owner.userId },
+      actor: { type: "User", id: policy.repository.maintainer.userId },
     }),
     dependabotCheckedPullRequest: evaluateMainUpdate(policy, {
       ...pullRequest,
       actor: { type: "Integration", id: -1 },
     }),
     automatedReleasePush: evaluateMainUpdate(policy, {
-      actor: { type: "Integration", id: policy.integrations.githubActionsAppId },
+      actor: { type: "DeployKey", id: null },
       operation: "update",
       viaPullRequest: false,
     }),
     humanForcePush: evaluateMainUpdate(policy, {
-      actor: { type: "User", id: policy.repository.owner.userId },
+      actor: { type: "User", id: policy.repository.maintainer.userId },
       operation: "force",
       viaPullRequest: false,
     }),
     humanBranchDeletion: evaluateMainUpdate(policy, {
-      actor: { type: "User", id: policy.repository.owner.userId },
+      actor: { type: "User", id: policy.repository.maintainer.userId },
       operation: "delete",
       viaPullRequest: false,
     }),
@@ -346,6 +419,32 @@ export function hardeningMutations(policy, state = {}) {
     }
   }
 
+  const deployKeys = Array.isArray(state.deployKeys) ? state.deployKeys : [];
+  const expectedKeys = deployKeys.filter((key) => expectedDeployKey(policy, key));
+  const unexpectedWritable = deployKeys.filter(
+    (key) => key.read_only === false && !expectedDeployKey(policy, key),
+  );
+  invariant(unexpectedWritable.length === 0, "unowned writable deploy keys exist; refusing to broaden the ruleset bypass");
+  invariant(expectedKeys.length <= 1, "the policy-pinned automated release deploy key is duplicated");
+  if (expectedKeys.length === 0) {
+    requests.push({
+      method: "POST",
+      path: `/repos/${repository}/keys`,
+      body: {
+        title: policy.releaseWriter.deployKeyTitle,
+        key: policy.releaseWriter.deployKeyPublicKey,
+        read_only: false,
+      },
+    });
+  } else {
+    invariant(
+      expectedKeys[0].title === policy.releaseWriter.deployKeyTitle
+        && expectedKeys[0].read_only === false
+        && expectedKeys[0].verified === true,
+      "the policy-pinned automated release deploy key metadata differs",
+    );
+  }
+
   for (const ruleset of policy.rulesets) {
     const existingId = state.rulesetIds?.[ruleset.name];
     requests.push({
@@ -361,7 +460,16 @@ export function hardeningMutations(policy, state = {}) {
 
 export function createGhClient({ spawn = spawnSync } = {}) {
   return {
-    async request(method, endpoint, body, { allowNotFound = false } = {}) {
+    async request(method, endpoint, body, { allowNotFound = false, paginate = false } = {}) {
+      invariant(
+        paginate === false || paginate === true || typeof paginate === "string",
+        "pagination must describe an array response or its item field",
+      );
+      invariant(
+        typeof paginate !== "string" || /^[A-Za-z_][A-Za-z0-9_]*$/.test(paginate),
+        "pagination item field is invalid",
+      );
+      invariant(!paginate || (method === "GET" && body === undefined), "only body-free GET requests may paginate");
       const args = [
         "api",
         "--method",
@@ -370,8 +478,12 @@ export function createGhClient({ spawn = spawnSync } = {}) {
         "Accept: application/vnd.github+json",
         "-H",
         `X-GitHub-Api-Version: ${API_VERSION}`,
-        endpoint,
       ];
+      if (paginate) {
+        const items = paginate === true ? ".[]" : `.${paginate}[]`;
+        args.push("--paginate", "--jq", `${items} | @json`);
+      }
+      args.push(endpoint);
       if (body !== undefined) args.push("--input", "-");
       const result = spawn("gh", args, {
         encoding: "utf8",
@@ -384,9 +496,15 @@ export function createGhClient({ spawn = spawnSync } = {}) {
         throw new Error(`${method} ${endpoint} failed: ${detail}`);
       }
       const output = String(result.stdout ?? "").trim();
-      if (output === "") return method === "GET" ? {} : null;
+      if (output === "") {
+        if (paginate === true) return [];
+        if (typeof paginate === "string") return { [paginate]: [] };
+        return method === "GET" ? {} : null;
+      }
       try {
-        return JSON.parse(output);
+        if (!paginate) return JSON.parse(output);
+        const items = output.split("\n").map((line) => JSON.parse(line));
+        return paginate === true ? items : { [paginate]: items };
       } catch {
         throw new Error(`${method} ${endpoint} returned invalid JSON`);
       }
@@ -396,7 +514,27 @@ export function createGhClient({ spawn = spawnSync } = {}) {
 
 function selectedRuleset(value) {
   if (!value) return null;
-  return rulesetBody(value);
+  const body = rulesetBody(value);
+  if (!Array.isArray(body.rules)) return body;
+  // GitHub's 2026-03-10 API added these exact values to both rulesets on
+  // 2026-09-07 although the write payload omitted them. Normalize only those
+  // observed defaults; changed values and unknown fields still fail audit.
+  const responseDefaults = {
+    required_reviewers: [],
+    dismissal_restriction: { enabled: false, allowed_actors: [] },
+    require_extra_approval_for_unattributed_changes: true,
+  };
+  return {
+    ...body,
+    rules: body.rules.map((rule) => {
+      if (rule.type !== "pull_request" || !rule.parameters) return rule;
+      const parameters = { ...rule.parameters };
+      for (const [name, expected] of Object.entries(responseDefaults)) {
+        if (equivalent(parameters[name], expected)) delete parameters[name];
+      }
+      return { ...rule, parameters };
+    }),
+  };
 }
 
 function observedEnvironmentBody(value) {
@@ -416,15 +554,37 @@ function observedEnvironmentBody(value) {
 export async function observeHardening(policy, client) {
   validateHardeningPolicy(policy);
   const repository = policy.repository.fullName;
-  const [repo, actions, rulesets, vulnerabilityAlerts, dependabotSecurityUpdates, privateReporting] = await Promise.all([
+  const releaseEnvironment = encodeURIComponent(policy.releaseWriter.environment);
+  const [
+    repo,
+    actions,
+    rulesets,
+    vulnerabilityAlerts,
+    dependabotSecurityUpdates,
+    privateReporting,
+    deployKeys,
+    releaseWriterSecrets,
+  ] = await Promise.all([
     client.request("GET", `/repos/${repository}`),
     client.request("GET", `/repos/${repository}/actions/permissions/workflow`),
-    client.request("GET", `/repos/${repository}/rulesets?per_page=100`),
+    client.request("GET", `/repos/${repository}/rulesets?per_page=100`, undefined, { paginate: true }),
     client.request("GET", `/repos/${repository}/vulnerability-alerts`, undefined, { allowNotFound: true }),
     client.request("GET", `/repos/${repository}/automated-security-fixes`, undefined, { allowNotFound: true }),
     client.request("GET", `/repos/${repository}/private-vulnerability-reporting`),
+    client.request("GET", `/repos/${repository}/keys?per_page=100`, undefined, { paginate: true }),
+    client.request(
+      "GET",
+      `/repos/${repository}/environments/${releaseEnvironment}/secrets?per_page=100`,
+      undefined,
+      { allowNotFound: true, paginate: "secrets" },
+    ),
   ]);
   invariant(Array.isArray(rulesets), "GitHub returned an invalid ruleset list");
+  invariant(Array.isArray(deployKeys), "GitHub returned an invalid deploy-key list");
+  invariant(
+    releaseWriterSecrets === null || Array.isArray(releaseWriterSecrets.secrets),
+    "GitHub returned an invalid release-writer secret list",
+  );
   const ownedNames = new Set(policy.rulesets.map((ruleset) => ruleset.name));
   const observedRulesets = {};
   const rulesetIds = {};
@@ -458,6 +618,8 @@ export async function observeHardening(policy, client) {
       const response = await client.request(
         "GET",
         `/repos/${repository}/environments/${encodedName}/deployment-branch-policies?per_page=100`,
+        undefined,
+        { paginate: "branch_policies" },
       );
       branchPoliciesByEnvironment[environment.name] = sortedPolicies(response.branch_policies ?? []);
     }
@@ -471,6 +633,8 @@ export async function observeHardening(policy, client) {
     vulnerabilityAlerts: vulnerabilityAlerts !== null,
     dependabotSecurityUpdates,
     privateReporting,
+    deployKeys,
+    releaseWriterSecrets: releaseWriterSecrets ?? { secrets: [] },
     environments,
     branchPoliciesByEnvironment,
   };
@@ -486,6 +650,9 @@ export async function auditHardening(policy, client) {
     ["default_branch", repository.defaultBranch],
   ]) {
     if (observed.repo?.[actualKey] !== expected) mismatches.push(`repository ${actualKey} is not ${expected}`);
+  }
+  if (!repositoryOwnerMatches(repository, observed.repo)) {
+    mismatches.push("repository owner identity differs");
   }
   for (const [key, expected] of Object.entries(policy.mergePolicy)) {
     if (observed.repo?.[key] !== expected) mismatches.push(`repository ${key} is not ${expected}`);
@@ -503,6 +670,7 @@ export async function auditHardening(policy, client) {
   if (observed.privateReporting?.enabled !== policy.security.privateVulnerabilityReporting) {
     mismatches.push("private vulnerability reporting differs");
   }
+  mismatches.push(...releaseWriterPrerequisiteMismatches(policy, observed));
   for (const ruleset of policy.rulesets) {
     const actual = observed.rulesets[ruleset.name];
     if (actual === null) {
@@ -530,33 +698,109 @@ export async function auditHardening(policy, client) {
   return { ok: mismatches.length === 0, mismatches, observed };
 }
 
-async function requireSuccessfulPolicyChecks(policy, client) {
-  const repository = policy.repository.fullName;
+function hasSuccessfulPolicyChecks(required, runs) {
+  return required.every((check) => runs.some(
+    (run) => run.name === check.context
+      && run.app?.id === check.integration_id
+      && run.conclusion === "success",
+  ));
+}
+
+function protectedBranchNames(policy) {
+  const names = new Set([policy.repository.defaultBranch]);
+  for (const ruleset of policy.rulesets) {
+    for (const include of ruleset.conditions?.ref_name?.include ?? []) {
+      if (include === "~DEFAULT_BRANCH") {
+        names.add(policy.repository.defaultBranch);
+        continue;
+      }
+      const match = /^refs\/heads\/([A-Za-z0-9._\/-]+)$/.exec(include);
+      if (match) names.add(match[1]);
+    }
+  }
+  return names;
+}
+
+async function successfulChecksForRef(client, repository, ref, required) {
   const response = await client.request(
     "GET",
-    `/repos/${repository}/commits/${encodeURIComponent(policy.repository.defaultBranch)}/check-runs?per_page=100`,
+    `/repos/${repository}/commits/${encodeURIComponent(ref)}/check-runs?per_page=100`,
+    undefined,
+    { paginate: "check_runs" },
   );
-  const runs = response.check_runs ?? [];
+  const runs = Array.isArray(response.check_runs) ? response.check_runs : [];
+  return hasSuccessfulPolicyChecks(required, runs);
+}
+
+export async function requireSuccessfulPolicyChecks(policy, client) {
+  const repository = policy.repository.fullName;
   const required = rulesByType(mainRuleset(policy)).get("required_status_checks").parameters.required_status_checks;
-  for (const check of required) {
-    const match = runs.find(
-      (run) => run.name === check.context && run.app?.id === check.integration_id && run.conclusion === "success",
-    );
-    invariant(match, `main has no successful ${check.context} check from GitHub App ${check.integration_id}; refusing to activate the rulesets`);
+  if (await successfulChecksForRef(
+    client,
+    repository,
+    policy.repository.defaultBranch,
+    required,
+  )) {
+    return { source: "default-branch", ref: policy.repository.defaultBranch };
   }
+
+  // Automated release commits deliberately suppress recursive push workflows;
+  // older releases used GITHUB_TOKEN, which GitHub also suppresses. The current
+  // main commit can therefore legitimately have no CI or DCO checks. In that
+  // state, prove the exact check names and GitHub App identities together on
+  // one recent merged PR from this repository into either protected branch.
+  const pulls = await client.request(
+    "GET",
+    `/repos/${repository}/pulls?state=closed&sort=updated&direction=desc&per_page=100`,
+  );
+  invariant(Array.isArray(pulls), "GitHub returned an invalid pull-request list");
+  const protectedBranches = protectedBranchNames(policy);
+  const checked = new Set();
+  for (const pull of pulls) {
+    const sha = pull.head?.sha;
+    if (
+      !pull.merged_at
+      || pull.base?.repo?.full_name !== repository
+      || !protectedBranches.has(pull.base?.ref)
+      || pull.head?.repo?.full_name !== repository
+      || typeof sha !== "string"
+      || !/^[0-9a-f]{40}$/.test(sha)
+      || checked.has(sha)
+    ) {
+      continue;
+    }
+    checked.add(sha);
+    if (await successfulChecksForRef(client, repository, sha, required)) {
+      return { source: "merged-pull-request", number: pull.number, ref: sha };
+    }
+  }
+  throw new Error(
+    "neither current main nor any recent canonical merged protected-branch PR head has all required successful policy checks on one commit; refusing to activate the rulesets",
+  );
 }
 
 export async function applyHardening(policy, client) {
   validateHardeningPolicy(policy);
   const before = await observeHardening(policy, client);
   invariant(before.repo?.full_name === policy.repository.fullName, "authenticated GitHub repository identity differs");
+  invariant(repositoryOwnerMatches(policy.repository, before.repo), "repository owner identity differs");
   invariant(before.repo.visibility === policy.repository.visibility, "repository visibility differs from the free public policy");
   invariant(before.repo.default_branch === policy.repository.defaultBranch, "repository default branch differs");
   invariant(before.otherActiveRulesets.length === 0, "unowned active branch rulesets exist; refusing to compound them");
+  const writerMismatches = releaseWriterPrerequisiteMismatches(
+    policy,
+    before,
+    { allowMissingKey: true },
+  );
+  invariant(
+    writerMismatches.length === 0,
+    `automated release writer is not ready: ${writerMismatches.join("; ")}`,
+  );
   await requireSuccessfulPolicyChecks(policy, client);
   const mutations = hardeningMutations(policy, {
     rulesetIds: before.rulesetIds,
     branchPoliciesByEnvironment: before.branchPoliciesByEnvironment,
+    deployKeys: before.deployKeys,
   });
   for (const mutation of mutations) {
     await client.request(mutation.method, mutation.path, mutation.body);
