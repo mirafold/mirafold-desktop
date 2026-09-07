@@ -1354,7 +1354,7 @@ security primitive the platform does not already provide.
   process-tree shutdown. No dependency, package manifest, renderer bridge,
   Windows activation behavior, release, deployment, or website claim changed.
 
-- [ ] **Step 13.6 — prove the real Linux packages and secret-store boundary.**
+- [x] **Step 13.6 — prove the real Linux packages and secret-store boundary.**
   Build `.deb`, AppImage, and tar candidates outside the checkout and inspect
   their exact bundled Shell, native modules, flags, file modes, and absence of
   plaintext fixtures. Launch from the installed desktop entry—not a terminal—
@@ -1369,6 +1369,69 @@ security primitive the platform does not already provide.
   recovery, restart, removal, private daemon input, exact published Shell,
   native-module load, and zero remaining daemon/agent/listener or plaintext
   credential; record artifact paths/hashes and observations without publishing.
+
+  **Completed 2026-09-06 — all three real Linux forms passed, and the proof
+  found and repaired one confirmed package security defect.** Before the fix,
+  launching the exact AppImage from an isolated desktop entry on a host where
+  its user-namespace probe failed made electron-builder's generated `AppRun`
+  add `--no-sandbox`; the packaged app then created its renderer and started
+  Shell. Packaged main now fails closed on that flag, waits for an explanatory
+  native error to be acknowledged, and exits with status 1 before taking the
+  single-instance lock, creating any renderer, or starting the daemon. The
+  exact rebuilt AppImage repeated the trigger and proved the native refusal,
+  absent renderer and daemon, untouched credential state, and complete exit.
+  Explicit no-sandbox startup remains development-only. A permanent real-main
+  regression pins the refusal before application startup.
+
+  The final candidates were built outside the checkout at
+  `/tmp/mirafold-dpc6-final-artifacts.SO0Ht0`: AppImage SHA-256
+  `c1e6c7fe36987b8acde0d1673f3dd882fe029a1090abcfd55da51a20b96148ca`,
+  tar SHA-256
+  `82180b7d81b496225bf558f2825b948c98c42f4698b1889f8edddb92b1320e7b`,
+  and Debian SHA-256
+  `59f353b64e7c9b0b736c37c692ee054756ae35990d967efb2baeae22b5c1b23a`.
+  Every extracted form contains Desktop `0.3.16`, exact published Shell
+  `0.9.0`, byte-identical main/activation/store/daemon/bootstrap source, and
+  the Linux x64 node-pty and glibc watcher binaries. Their packaged smoke
+  loaded both native modules, initialized all 18 render tools, served the
+  authenticated loopback UI, preserved Electron child-mode isolation, and
+  proved complete daemon-tree shutdown. Desktop entries contain no
+  unconditional sandbox downgrade; sandboxed desktop-entry launches of all
+  three forms reached local Shell and completed ordinary quit with their
+  staged entry and user data removed.
+
+  Against a real isolated GNOME Secret Service, each form completed the exact
+  fake-site PKCE exchange, fake billing, entitlement-gated relay, encrypted
+  remote pairing and demo turn, active subscription query, encrypted restart,
+  device removal, and unentitled restart. The `v11` credential record used
+  `0700`/`0600` directory/file modes and contained no plaintext fixture. While
+  the activated daemon was live, all eight observed Desktop/Shell process
+  command lines and environments were inspected; the key appeared in none,
+  proving the daemon's private stdin handoff. Each form also passed all four
+  forced crash checkpoints: before callback, after callback validation before
+  replacement, after the exchange response before consumption, and after
+  durable credential replacement. The first three reopened only their exact
+  saved transaction; the fourth loaded the encrypted key without reopening
+  the browser.
+
+  Forced `basic_text`, unavailable and locked Secret Service, corrupt
+  ciphertext, and a symlinked store all refused activation before browser
+  launch, preserved the unsafe bytes or target, and left local sessions usable.
+  Dotenv-excluding scans covered 2,998 tar, 3,003 Debian, and 3,007 AppImage
+  files with no plaintext fixture. System/user journals and ten final package
+  logs covered 12 files, 25,342 bytes, and 212 lines with no plaintext key,
+  raw daemon token, raw pairing code, activation capability, or credential
+  environment variable. Final host snapshots found no remaining Desktop,
+  daemon, agent, callback, debugger, billing, proxy, relay, or package-test
+  listener/process.
+
+  The complete suite passes 298 tests with one existing platform skip;
+  syntax, whitespace, `npm ls --all`, and `npm audit` pass with zero
+  vulnerabilities. Executable change is limited to the packaged sandbox
+  refusal in `src/main.js`; test change is the real-main regression; README and
+  builder-comment changes describe the observed Linux boundary. No dependency,
+  package manifest, renderer bridge, ordinary sandboxed behavior, Windows Pro
+  behavior, release, deployment, frozen candidate, or website claim changed.
 
 - [ ] **Step 13.7 — run the feature-delta correctness hunt.** Review the exact
   Phase 13 product delta and adjacent startup, update, folder, and daemon

@@ -36,6 +36,10 @@ let folderDialogs = 0;
 let menuTemplate = null;
 let failStops = false;
 let quitCalls = 0;
+const exitCalls = [];
+const sandboxErrors = [];
+let singleInstanceLockCalls = 0;
+let readyCalls = 0;
 let updaterStarts = 0;
 let releaseStaleStart;
 const staleStart = new Promise((resolve) => { releaseStaleStart = resolve; });
@@ -154,12 +158,14 @@ class FakeWindow extends EventEmitter {
 }
 
 const app = new EventEmitter();
-app.isPackaged = mode === "apt-managed";
-app.requestSingleInstanceLock = () => true;
-app.whenReady = () => Promise.resolve();
+app.isPackaged = mode === "apt-managed" || mode === "packaged-no-sandbox";
+app.commandLine = { hasSwitch: (name) => mode === "packaged-no-sandbox" && name === "no-sandbox" };
+app.requestSingleInstanceLock = () => { singleInstanceLockCalls += 1; return true; };
+app.whenReady = () => { readyCalls += 1; return Promise.resolve(); };
 app.getPath = () => "/fixture-home";
 app.getVersion = () => "0.1.1";
 app.quit = () => { quitCalls += 1; };
+app.exit = (code) => { exitCalls.push(code); };
 
 const autoUpdater = new EventEmitter();
 const safeStorage = {};
@@ -170,6 +176,10 @@ const dialog = {
     return { canceled: false, filePaths: ["/next-project"] };
   },
   async showMessageBox(...args) {
+    if (mode === "packaged-no-sandbox") {
+      sandboxErrors.push(args.at(-1));
+      return { response: 0 };
+    }
     if (
       mode !== "cleanup-failure"
       && mode !== "crash-during-load"
@@ -264,6 +274,18 @@ async function waitFor(predicate, message) {
   assert.ok(predicate(), message);
 }
 
+if (mode === "packaged-no-sandbox") {
+  await waitFor(() => exitCalls.length === 1, "the sandbox refusal did not settle");
+  assert.deepEqual(exitCalls, [1], "the unsafe packaged process must exit with failure");
+  assert.equal(sandboxErrors.length, 1, "the refusal must explain why the app cannot open");
+  assert.match(sandboxErrors[0].title, /Chromium sandbox/);
+  assert.match(sandboxErrors[0].message, /cannot open safely/);
+  assert.equal(singleInstanceLockCalls, 0, "unsafe startup must stop before acquiring app ownership");
+  assert.equal(readyCalls, 1, "unsafe startup must reach readiness only to display its refusal");
+  assert.equal(windows.length, 0, "unsafe startup must not create a renderer window");
+  assert.equal(daemonInstances.length, 0, "unsafe startup must not launch the Shell daemon");
+  process.stdout.write("main lifecycle probe passed\n");
+} else {
 await waitFor(
   () => menuTemplate !== null && (
     mode === "loading-file-failure"
@@ -578,6 +600,7 @@ assert.deepEqual(
 );
 process.stdout.write("main lifecycle probe passed\n");
 }
+}
 `;
 
 function runProbe(mode) {
@@ -638,4 +661,8 @@ test("a packaged Debian install with the archive marker leaves updates to APT", 
   skip: process.platform !== "linux",
 }, () => {
   runProbe("apt-managed");
+});
+
+test("a packaged launch refuses to disable Chromium's sandbox before opening the app", () => {
+  runProbe("packaged-no-sandbox");
 });

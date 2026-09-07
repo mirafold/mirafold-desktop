@@ -221,9 +221,11 @@ npm start
 ```
 
 On a Linux dev checkout, Electron's `chrome-sandbox` helper isn't installed with
-the root ownership it needs, and the app aborts. Use `npm run start:nosandbox`
-while developing — packaged builds install the sandbox correctly and don't need
-it.
+the root ownership it needs, and the app may abort. `npm run start:nosandbox`
+is available only for local development. Release builds refuse to open if
+Chromium's sandbox is disabled. The `.deb` installs the required sandbox support;
+portable AppImage and tar builds require a host that permits unprivileged user
+namespaces and stop safely when it does not.
 
 Tests:
 

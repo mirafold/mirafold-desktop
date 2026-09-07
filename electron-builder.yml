@@ -109,9 +109,10 @@ linux:
 
 # electron-builder's legacy FUSE2 AppImage target otherwise hard-codes
 # `--no-sandbox` into the desktop entry. AppRun already performs a runtime
-# user-namespace capability check and adds that flag only when the host cannot
+# user-namespace capability check and adds that flag when the host cannot
 # provide Chromium's user-namespace sandbox. An empty explicit list removes the
-# unconditional desktop-entry downgrade without breaking that fallback.
+# unconditional desktop-entry downgrade; the packaged main process refuses the
+# launch if AppRun still requests that unsafe fallback.
 appImage:
   executableArgs: []
 
