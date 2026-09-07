@@ -1323,7 +1323,23 @@ export function buildMenu(isPackaged = app.isPackaged) {
 // One instance per machine. A second launch would otherwise start a second
 // daemon, and the two would fight over ports and over the same project folder's
 // agent state. Instead, focus the window that already exists.
-if (!app.requestSingleInstanceLock()) {
+// electron-builder's AppImage launcher adds --no-sandbox when its user-
+// namespace probe fails. Mirafold renders agent-controlled content, so a
+// packaged build must fail closed instead of accepting that downgrade.
+if (app.isPackaged && app.commandLine.hasSwitch("no-sandbox")) {
+  void app.whenReady()
+    .then(() => dialog.showMessageBox({
+      type: "error",
+      title: "Mirafold requires the Chromium sandbox",
+      message: "Mirafold cannot open safely on this Linux host.",
+      detail: "Chromium's sandbox is disabled. Install the Mirafold .deb package or enable unprivileged user namespaces, then reopen Mirafold.",
+      buttons: ["Close"],
+      defaultId: 0,
+      cancelId: 0,
+    }))
+    .catch(() => undefined)
+    .finally(() => app.exit(1));
+} else if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
