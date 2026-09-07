@@ -79,8 +79,23 @@ validates release.yml; all 10 deterministic release-rehearsal scenarios pass.
 Three final unchanged suites passed 341 tests with one platform skip, in
 17.53, 18.39 and 15.32 seconds. The additional command regression adds about
 three seconds in isolation. Local packaging initially failed because the
-sandbox could not chmod electron-builder's home cache; the same build is being
-rerun with that cache permission. Package/hosted results follow at closeout.
+sandbox could not chmod electron-builder's home cache; the same build completed successfully with that cache permission. The first
+extraction/manifest attempt ran before the builder completed and correctly
+reported the absent tar/Debian files; those checks were rerun after the final
+builder exit, without a code change.
+
+Unpacked Linux and independently extracted AppImage, tar and Debian packages
+pass. Each final form matches all 17 runtime source files, loads both native
+modules, exercises render-MCP, starts the authenticated daemon and proves its
+complete shutdown without orphans. Linux manifest and platform verification
+pass for 0.4.0. These remain development validation packages, not frozen files.
+
+PR #65 implementation `5901114` passed hosted CI `34168622219`: Linux and
+Windows, including the actual Windows unpacked package/lifecycle, plus DCO.
+Automated PR review completed 2026-09-07 23:06:40 UTC with a thumbs-up and no
+review findings or unresolved threads. This closeout changes only the plan and
+review record; the reviewed executable/test/release-input bytes stay identical.
+The final PR head must also pass required checks before merge.
 
 The review does not claim a hosted candidate or a public promotion was tested:
 that requires the reviewed source on main, a successful nonpublishing dispatch,
