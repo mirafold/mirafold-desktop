@@ -1433,7 +1433,7 @@ security primitive the platform does not already provide.
   package manifest, renderer bridge, ordinary sandboxed behavior, Windows Pro
   behavior, release, deployment, frozen candidate, or website claim changed.
 
-- [ ] **Step 13.7 — run the feature-delta correctness hunt.** Review the exact
+- [x] **Step 13.7 — run the feature-delta correctness hunt.** Review the exact
   Phase 13 product delta and adjacent startup, update, folder, and daemon
   ownership logic for concrete incorrect behavior. Diagnose and reproduce each
   finding before editing, make the narrow fix and a class-level regression test,
@@ -1443,6 +1443,54 @@ security primitive the platform does not already provide.
   confirmed correctness finding is fixed, no speculative hardening is mixed
   into this pass, and the package smoke still proves all three Linux forms. Do
   not publish or freeze hashes.
+
+  Completed 2026-09-06. The hunt confirmed and repaired ten correctness
+  failures: a failed daemon start discarded an unproved cleanup result; an
+  unreadable live Linux process identity could be mistaken for a proved stop;
+  a stalled native browser launch could hold quit; the same reopen command
+  retained lifecycle ownership and could hold Pro removal or update
+  preparation; ordinary
+  pending-flow expiry produced a false startup error and could open the fresh
+  activation URL twice; rejected terminal recovery dialogs and the initial
+  folder picker escaped their asynchronous owner; the AppImage-specific
+  no-sandbox refusal leaked into Windows startup; a rejected ordinary project
+  picker escaped while a healthy session remained; and a retired browser
+  launch could clear a newer activation's progress. Finally, a ready Windows
+  Job that closed before reporting its daemon URL fell through to `taskkill`
+  and cached a false unsafe-cleanup result. The fixes preserve failed startup
+  cleanup authority, fail closed without signalling an unidentified Linux PID,
+  keep uncancellable native browser waits outside lifecycle ownership with
+  stale-owner checks, reconcile normal expiry before starting one fresh
+  activation, settle native UI rejections according to whether the current
+  session remains usable, restrict the packaged sandbox refusal to Linux, and
+  retain an already-completed Windows Job as authoritative cleanup proof.
+
+  Every repaired finding has a class-level regression. The final suite passes
+  308 tests with one existing platform skip; the 47 changed-file tests, syntax,
+  whitespace, `npm ls --all`, and `npm audit --audit-level=moderate` all pass,
+  with zero reported vulnerabilities. A fresh-agent cold review found three
+  additional ownership cases and one platform-scope correction during the
+  pass; automatic PR review found the tenth completed-Job case. The final
+  no-edit review found fixes 1–10 sound and proved one further shared timing
+  failure: a stop-event opener can lose to a later wrapper close and return
+  false before consuming that close proof during either failed startup or an
+  ordinary stop. That over-cap finding is routed into Step 13.7C below. Fresh
+  AppImage, tar, and Debian artifacts each contain the reviewed ten-fix runtime
+  modules and pass native-module, MCP, authenticated loopback,
+  environment-scrubbing, renderer-stop, and daemon-tree cleanup smoke. No
+  dependency, package manifest, renderer bridge, release, deployment, frozen
+  hash, or website claim changed.
+
+- [ ] **Step 13.7C — complete the over-cap correctness continuation.** Repair
+  the routed Windows Job close-proof race shared by failed-start cleanup and
+  ordinary successful-start `stop()`: when opening the registered stop event
+  loses to wrapper close, consume that completed Job boundary before caching
+  an unproved result. Reproduce both callers before editing; retain class-level
+  regressions for already closed, late close, and genuinely unproved cleanup;
+  run the focused and complete gates, protected Linux and Windows CI, all three
+  Linux package smokes, and the required fresh-agent cold review. Done when the
+  routed finding is fixed and no confirmed correctness finding remains. Do not
+  publish or freeze hashes.
 
 - [ ] **Step 13.8 — run the feature-delta security audit.** Attack the exact
   fixed candidate for callback theft, wrong state/path/host, concurrent
