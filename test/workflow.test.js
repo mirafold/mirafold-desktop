@@ -12,6 +12,7 @@ const workflow = readFileSync(new URL("../.github/workflows/release.yml", import
   .split("\r\n")
   .join("\n");
 const releaseContract = readFileSync(new URL("../scripts/release-contract.mjs", import.meta.url), "utf8");
+const candidateContract = readFileSync(new URL("../scripts/release-candidate.mjs", import.meta.url), "utf8");
 const aptContract = readFileSync(new URL("../scripts/apt-repository.mjs", import.meta.url), "utf8");
 
 /** The text of one top-level job block, by name. */
@@ -88,14 +89,13 @@ test("the build job installs with the script-free pinned npm toolchain", () => {
   assert.doesNotMatch(build, /run: npm ci\s*$/m, "no unhardened npm ci may remain");
 });
 
-test("tag identity and stable-channel policy are checked before dependency code", () => {
-  const build = job("build");
-  const tip = build.indexOf("Tag must be main's current tip");
-  const identity = build.indexOf("release-contract.mjs identity");
-  assert.ok(tip !== -1 && tip < identity, "a pushed tag must be proven to be main's tip before anything else");
-  assert.match(build, /git fetch --depth=1 origin main/);
-  const install = build.indexOf("npm ci");
-  assert.ok(identity !== -1 && install !== -1 && identity < install);
+test("tag identity and stable-channel policy are checked before candidate retrieval", () => {
+  const candidate = job("candidate");
+  assert.match(candidate, /if: github\.event_name == 'push'/);
+  assert.match(candidate, /release-candidate\.mjs resolve/);
+  assert.match(job("build"), /if: github\.event_name == 'workflow_dispatch'/);
+  assert.match(job("release"), /needs: candidate/);
+  assert.doesNotMatch(candidate, /npm |electron-builder|contents: write/);
 });
 
 test("manual release notes bind the included versions before dependency code", () => {
@@ -109,7 +109,7 @@ test("manual release notes bind the included versions before dependency code", (
 test("only the release job may write repository contents", () => {
   const release = job("release");
   assert.match(release, /permissions:\s*\n\s+contents: write/);
-  assert.match(release, /needs: \[build, apt, attest\]/);
+  assert.match(release, /needs: candidate/);
   assert.match(release, /environment: manual-release/);
   assert.match(release, /concurrency:\s*\n\s+group: mirafold-desktop-publication\s*\n\s+cancel-in-progress: false/);
   assert.equal(workflow.match(/contents: write/g)?.length, 1);
@@ -124,7 +124,7 @@ test("the archive key is isolated in a read-only dependency-free signing job", (
   assert.match(apt, /needs: build/);
   assert.match(
     apt,
-    /environment: \$\{\{ github\.event_name == 'push' && 'manual-release' \|\| 'automated-release' \}\}/,
+    /environment: automated-release/,
   );
   assert.match(apt, /permissions:\s*\n\s+contents: read/);
   assert.doesNotMatch(apt, /contents: write/);
@@ -225,7 +225,7 @@ test("the write-capable release job runs no installed dependency code", () => {
 });
 
 test("the release verifier keeps dependency code out of its static writer path", () => {
-  const imports = [releaseContract, aptContract]
+  const imports = [releaseContract, aptContract, candidateContract]
     .flatMap((source) => [...source.matchAll(/\bfrom\s+["']([^"']+)["']/g)].map((match) => match[1]));
   assert.ok(imports.length > 0, "release verifier import scan found nothing");
   assert.deepEqual(
@@ -283,4 +283,24 @@ test("the workflow default is read-only", () => {
 test("no fork-triggered run can reach these permissions", () => {
   assert.doesNotMatch(workflow, /pull_request_target/);
   assert.doesNotMatch(workflow, /\bpull_request\b/);
+});
+
+
+test("tag publication downloads the accepted candidate and verifies it before upload", () => {
+  const release = job("release");
+  assert.match(release, /artifact-ids: \$\{\{ needs\.candidate\.outputs\.artifactId \}\}/);
+  assert.match(release, /run-id: \$\{\{ needs\.candidate\.outputs\.runId \}\}/);
+  assert.match(release, /github-token: \$\{\{ github\.token \}\}/);
+  assert.match(release, /digest-mismatch: error/);
+  assert.match(release, /actions: read/);
+  const verify = release.indexOf('release-candidate.mjs verify artifacts "$CANDIDATE_RUN" "$CANDIDATE_SHA256"');
+  const move = release.indexOf('mv artifacts/candidate.json "$RUNNER_TEMP/accepted-candidate.json"');
+  const upload = release.indexOf('gh release upload');
+  assert.ok(verify !== -1 && verify < move && move < upload);
+  assert.doesNotMatch(release, /electron-builder|apt-repository\.mjs assemble/);
+  const attest = job("attest");
+  assert.ok(attest.indexOf('uses: actions/attest@') < attest.indexOf('release-candidate.mjs create'));
+  assert.match(attest, /name: release-candidate/);
+  assert.match(attest, /retention-days: 90/);
+  assert.match(job("build"), /test "\$GITHUB_RUN_ATTEMPT" = "1"/);
 });

@@ -24,17 +24,24 @@ const STDERR_LINE_CHARS = 1000;
 const OUTPUT_LINE_CHARS = 16_384;
 const OUTPUT_LINE_ELISION = "[mirafold desktop] overlong daemon output line elided";
 
-// The daemon mints both values. The auth token grants local daemon access; the
-// relay pairing code grants remote session access. Anything that leaves this
-// process — mirrored child output or crash text — must strip both. The app's
-// stdout/stderr is captured by the system journal when launched from a desktop
-// menu, and a crash dialog is exactly what a user screenshots and shares.
+// The daemon mints the auth token and pairing code, while Desktop may hand it a
+// Pro license key. Anything that leaves this process — mirrored child output or
+// crash text — must strip all three. The app's stdout/stderr is captured by the
+// system journal when launched from a desktop menu, and a crash dialog is
+// exactly what a user screenshots and shares.
 const TOKEN_RE = /([?&]token=)[^\s&"'<>]+/gi;
 const PAIRING_CODE_RE = /(\bpairing code\s*:\s*)[A-Za-z0-9_-]+/gi;
+// Consume the whole base32 run once it is long enough to be a key. A valid
+// 40-character key can be immediately followed by base32-looking diagnostic
+// text, and requiring a delimiter would leave the credential visible.
+const LICENSE_KEY_RE = /mf_[a-z2-7]{20,}/g;
 
 /** Replace complete credential values in one logical piece of text. */
 export function redactCredentials(text) {
-  return text.replace(TOKEN_RE, "$1<redacted>").replace(PAIRING_CODE_RE, "$1<redacted>");
+  return text
+    .replace(TOKEN_RE, "$1<redacted>")
+    .replace(PAIRING_CODE_RE, "$1<redacted>")
+    .replace(LICENSE_KEY_RE, "<redacted>");
 }
 
 /**

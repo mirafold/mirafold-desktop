@@ -5,18 +5,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+  DESKTOP_CREDENTIAL_FLAG,
   Daemon,
   WINDOWS_WRAPPER_READY_MARKER,
   createStartupDeadline,
   daemonLaunchSpec,
   findStartupUrl,
+  sendDesktopCredential,
 } from "../src/daemon.js";
 import { CredentialSafeLineStream, appendStderr, redactCredentials } from "../src/daemon-output.js";
 import { LinuxProcessTreeTracker, terminateProcessTree } from "../src/process-tree.js";
@@ -74,6 +76,16 @@ const CREDENTIAL_LINES = [
     name: "pairing code",
     secret: "dummy-pairing-code_456",
     text: "[relay] dialing wss://relay.invalid — pairing code: dummy-pairing-code_456\r\n",
+  },
+  {
+    name: "Pro license key",
+    secret: `mf_${"c".repeat(26)}`,
+    text: `daemon diagnostic contains mf_${"c".repeat(26)} before shutdown\n`,
+  },
+  {
+    name: "maximum-length Pro license key followed by base32 text",
+    secret: `mf_${"d".repeat(40)}`,
+    text: `daemon diagnostic contains mf_${"d".repeat(40)}beyond\n`,
   },
 ];
 
@@ -209,14 +221,16 @@ test("an overlong logical line is wholly elided", () => {
 test("the crash buffer receives only stream-sanitized credentials", () => {
   const stream = new CredentialSafeLineStream();
   let lines = [];
-  const input = "failure http://127.0.0.1:3000/?token=dummy-crash-token pairing code: dummy-crash-code\n";
+  const licenseKey = `mf_${"d".repeat(26)}`;
+  const input = `failure http://127.0.0.1:3000/?token=dummy-crash-token pairing code: dummy-crash-code license ${licenseKey}\n`;
   for (const chunk of [...input]) lines = appendStderr(lines, stream.push(chunk));
   lines = appendStderr(lines, stream.end());
   const crashText = lines.join("\n");
 
   assert.ok(!crashText.includes("dummy-crash-token"), crashText);
   assert.ok(!crashText.includes("dummy-crash-code"), crashText);
-  assert.equal((crashText.match(/<redacted>/g) ?? []).length, 2, crashText);
+  assert.ok(!crashText.includes(licenseKey), crashText);
+  assert.equal((crashText.match(/<redacted>/g) ?? []).length, 3, crashText);
   assert.equal(redactCredentials("nothing to redact here"), "nothing to redact here");
 });
 
@@ -499,6 +513,107 @@ test("Windows daemon launches inside the packaged kill-on-close Job Object wrapp
   ]);
   assert.equal(spec.env.ELECTRON_RUN_AS_NODE, "1");
   assert.equal(spec.detached, false);
+  assert.equal(spec.stdin, "ignore");
+});
+
+test("Linux daemon launch marks Desktop, owns a private pipe, and removes the ambient key", () => {
+  const ambient = `mf_${"b".repeat(26)}`;
+  const env = Object.freeze({
+    PATH: "fixture-path",
+    MIRAFOLD_LICENSE_KEY: ambient,
+    UNRELATED_SETTING: "kept",
+  });
+  const spec = daemonLaunchSpec({
+    platform: "linux",
+    executable: "/opt/mirafold/Mirafold",
+    bootstrapEntry: "/opt/mirafold/resources/app/src/daemon-bootstrap.cjs",
+    daemonEntry: "/opt/mirafold/resources/app/node_modules/mirafold/dist-server/index.js",
+    env,
+  });
+
+  assert.equal(spec.command, "/opt/mirafold/Mirafold");
+  assert.deepEqual(spec.args, [
+    "/opt/mirafold/resources/app/src/daemon-bootstrap.cjs",
+    "/opt/mirafold/resources/app/node_modules/mirafold/dist-server/index.js",
+    DESKTOP_CREDENTIAL_FLAG,
+  ]);
+  assert.equal(spec.stdin, "pipe");
+  assert.equal(spec.detached, true);
+  assert.equal(spec.env.ELECTRON_RUN_AS_NODE, "1");
+  assert.equal(spec.env.UNRELATED_SETTING, "kept");
+  assert.equal(Object.hasOwn(spec.env, "MIRAFOLD_LICENSE_KEY"), false);
+  assert.equal(env.MIRAFOLD_LICENSE_KEY, ambient, "the caller's environment is not mutated");
+  assert.ok(!JSON.stringify(spec).includes(ambient));
+});
+
+function fakeCredentialChild(end) {
+  const child = new EventEmitter();
+  const input = new EventEmitter();
+  input.end = end.bind(input, child);
+  input.destroy = () => input.emit("close");
+  child.stdin = input;
+  return child;
+}
+
+test("private credential handoff writes one exact EOF-framed key and clears its source buffer", async () => {
+  const key = `mf_${"c".repeat(26)}`;
+  let source;
+  let wire;
+  let calls = 0;
+  const child = fakeCredentialChild(function end(_child, chunk, completed) {
+    calls += 1;
+    source = chunk;
+    wire = Buffer.from(chunk);
+    queueMicrotask(() => {
+      completed();
+      this.emit("close");
+    });
+  });
+
+  await sendDesktopCredential(child, key);
+  assert.equal(calls, 1);
+  assert.equal(wire.toString("utf8"), key);
+  assert.equal(wire.includes(0x0a), false, "EOF, not a newline, frames the key");
+  assert.ok(source.every((byte) => byte === 0), "the producer buffer is cleared after transfer");
+});
+
+test("an unactivated handoff closes the private pipe without writing a credential frame", async () => {
+  let calls = 0;
+  let argumentCount = null;
+  const child = fakeCredentialChild(function end(_child, ...args) {
+    calls += 1;
+    argumentCount = args.length;
+    const [completed] = args;
+    queueMicrotask(() => {
+      completed();
+      this.emit("close");
+    });
+  });
+
+  await sendDesktopCredential(child);
+  assert.equal(calls, 1);
+  assert.equal(argumentCount, 1, "no empty payload is written before EOF");
+});
+
+test("pipe errors and early child exit reject with a credential-free error and clear bytes", async () => {
+  const key = `mf_${"d".repeat(26)}`;
+  for (const failure of ["pipe", "exit"]) {
+    let source;
+    const child = fakeCredentialChild(function end(owner, chunk) {
+      source = chunk;
+      queueMicrotask(() => {
+        if (failure === "pipe") this.emit("error", new Error(`failed ${key}`));
+        else owner.emit("exit", 1, null);
+      });
+    });
+    await assert.rejects(
+      sendDesktopCredential(child, key),
+      (error) => error?.code === "desktop-credential-handoff"
+        && !error.message.includes(key),
+    );
+    assert.ok(source.every((byte) => byte === 0), `${failure} left plaintext bytes behind`);
+  }
+  assert.throws(() => sendDesktopCredential(new EventEmitter(), `${key}\n`), /invalid Desktop Pro license key/);
 });
 
 test(

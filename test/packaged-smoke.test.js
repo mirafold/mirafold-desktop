@@ -12,6 +12,7 @@ import {
 } from "../scripts/packaged-smoke.mjs";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const LINUX_DESKTOP_WARNING = "[2026-09-06T00:00:00.000Z] [mirafold] warn: Desktop Pro credential unavailable (missing-input); local sessions remain available.\n";
 
 function jsonText(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
@@ -88,6 +89,9 @@ export class Daemon {
 
   start() {
     return new Promise((resolve, reject) => {
+      if (process.platform === "linux") {
+        process.stderr.write(${JSON.stringify(LINUX_DESKTOP_WARNING)});
+      }
       this.#server = http.createServer((request, response) => {
         const url = new URL(request.url, "http://127.0.0.1");
         if (url.searchParams.get("token") === "fixture-secret") {
@@ -176,10 +180,11 @@ test("the packaged MCP smoke requires the real initialize/list/call and isolated
   const report = runPackagedMcpProbe({
     executable: process.execPath,
     appDirectory: app,
+    platform: "linux",
     temporaryDirectory: root,
     spawn(command, args, options) {
       calls.push({ command, args, options });
-      return { error: null, signal: null, status: 0, stderr: "", stdout: mcpSmokeText() };
+      return { error: null, signal: null, status: 0, stderr: LINUX_DESKTOP_WARNING, stdout: mcpSmokeText() };
     },
   });
 
@@ -209,18 +214,45 @@ test("the packaged MCP smoke requires the real initialize/list/call and isolated
   assert.equal(report.ordinaryChildRunAsNode, null);
 });
 
+test("Linux packaged smoke requires only the fixed unactivated-Desktop warning", (t) => {
+  const { root, app } = fixture(t);
+  for (const stderr of [
+    "",
+    `${LINUX_DESKTOP_WARNING}unexpected diagnostic\n`,
+    `unexpected diagnostic ${LINUX_DESKTOP_WARNING}`,
+  ]) {
+    assert.throws(
+      () => runPackagedMcpProbe({
+        executable: process.execPath,
+        appDirectory: app,
+        platform: "linux",
+        temporaryDirectory: root,
+        spawn: () => ({
+          error: null,
+          signal: null,
+          status: 0,
+          stderr,
+          stdout: mcpSmokeText(),
+        }),
+      }),
+      /stderr differed from the one expected unactivated-Desktop warning/,
+    );
+  }
+});
+
 test("the packaged MCP smoke rejects a renderer that does not advertise exactly 18 tools", (t) => {
   const { root, app } = fixture(t);
   assert.throws(
     () => runPackagedMcpProbe({
       executable: process.execPath,
       appDirectory: app,
+      platform: "linux",
       temporaryDirectory: root,
       spawn: () => ({
         error: null,
         signal: null,
         status: 0,
-        stderr: "",
+        stderr: LINUX_DESKTOP_WARNING,
         stdout: mcpSmokeText({ tools: 17 }),
       }),
     }),
@@ -234,12 +266,13 @@ test("the packaged MCP smoke rejects any adapter environment beyond Electron chi
     () => runPackagedMcpProbe({
       executable: process.execPath,
       appDirectory: app,
+      platform: "linux",
       temporaryDirectory: root,
       spawn: () => ({
         error: null,
         signal: null,
         status: 0,
-        stderr: "",
+        stderr: LINUX_DESKTOP_WARNING,
         stdout: mcpSmokeText({ adapterEnvKeys: ["ELECTRON_RUN_AS_NODE", "UNEXPECTED"] }),
       }),
     }),

@@ -256,6 +256,15 @@ export async function terminateProcessTree(pid, trackedIdentities = [], timings 
 
   if (process.platform === "win32") {
     if (timings.windowsJobOwned === true) {
+      // Attach both outcomes before the first await below. A caller-supplied
+      // close boundary that rejects while the stop-event helper is still
+      // running is unproved cleanup, not an unhandled process rejection.
+      const windowsJobClosed = timings.windowsJobClosed
+        ? Promise.resolve(timings.windowsJobClosed).then(
+          () => true,
+          () => false,
+        )
+        : null;
       // The wrapper registered this event with a native callback after joining
       // its kill-on-close Job. Signal it from a short stock-PowerShell process;
       // the callback calls TerminateJobObject, which is an authoritative tree
@@ -282,32 +291,44 @@ export async function terminateProcessTree(pid, trackedIdentities = [], timings 
           windowsHide: true,
         },
       );
-      signaler.once("error", () => {});
-      const signaled = await new Promise((resolve) => {
+      const windowsTimeoutMs = timings.killTimeoutMs ?? 10_000;
+      // The helper requests termination; only wrapper close proves it. Observe
+      // both from one deadline so an already-completed Job returns promptly and
+      // a slow helper cannot grant the close boundary a second full wait.
+      return new Promise((resolve) => {
         let settled = false;
+        let signalerSettled = false;
+        let timeout;
+        const stopSignaler = () => {
+          if (signalerSettled) return;
+          try {
+            signaler.kill();
+          } catch {
+            // Wrapper close still proves Job teardown if this short helper
+            // vanished between its last event and the kill request.
+          }
+        };
         const finish = (clean) => {
           if (settled) return;
           settled = true;
           clearTimeout(timeout);
+          stopSignaler();
           resolve(clean);
         };
-        const timeout = setTimeout(() => {
-          signaler.kill();
-          finish(false);
-        }, 10_000);
-        signaler.once("error", () => finish(false));
-        signaler.once("close", (code) => finish(code === 0));
+        const settleSignaler = () => {
+          signalerSettled = true;
+          if (!windowsJobClosed) finish(false);
+        };
+        signaler.once("error", settleSignaler);
+        signaler.once("close", settleSignaler);
+        timeout = setTimeout(() => finish(false), windowsTimeoutMs);
+        // ChildProcess close is stronger than exit: Node emits it only after
+        // the wrapper and every inherited stdio handle have closed. The
+        // packaged daemon inherits those handles, so this also keeps the final
+        // loopback check behind Job teardown. Close stays authoritative when
+        // the event opener fails because that failure can race wrapper exit.
+        windowsJobClosed?.then(finish);
       });
-      if (!signaled || !timings.windowsJobClosed) return false;
-      // ChildProcess `close` is stronger than `exit`: Node emits it only after
-      // the wrapper has exited and every inherited stdio handle is closed. The
-      // packaged daemon inherits those handles, so this also prevents stop()
-      // from racing the final loopback reachability check while Job teardown
-      // is still completing.
-      return Promise.race([
-        timings.windowsJobClosed.then(() => true),
-        delay(10_000).then(() => false),
-      ]);
     }
     const killer = killTree(pid, "SIGTERM");
     if (!killer) return !processExists(pid);
@@ -351,6 +372,11 @@ export async function terminateProcessTree(pid, trackedIdentities = [], timings 
 
     const rootIdentity = retainedRoot ?? currentRoot;
     const originalGroupIsOwned = currentLinuxIdentity(rootIdentity) !== null;
+    // An unreadable identity cannot authorize a signal, but a still-live PID
+    // or group also cannot count as proof that cleanup finished. Keep polling
+    // that boundary and fail closed if it remains after both bounded waits.
+    const unidentifiedRootExists = () => rootIdentity === null
+      && (processExists(pid) || unixProcessGroupExists(pid));
     const termSignalled = new Set();
     const killSignalled = new Set();
 
@@ -371,6 +397,7 @@ export async function terminateProcessTree(pid, trackedIdentities = [], timings 
     const treeExists = (signal, signalled) => {
       signalNewIdentities(signal, signalled);
       return (
+        unidentifiedRootExists() ||
         (originalGroupIsOwned && unixProcessGroupExists(pid)) ||
         [...identities.values()].some(runningLinuxIdentity)
       );

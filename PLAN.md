@@ -871,6 +871,850 @@ environment. This work remains separate from Shell's cleanup PR.
   regression against that pin, run native Windows CI, and complete installed
   public-artifact acceptance.
 
+### Phase 13 — Linux Desktop owns Mirafold Pro securely
+
+Opened 2026-09-04 at Kyle's express request. This phase supersedes only the
+old statement that Desktop handles zero **Mirafold-owned Pro credentials**;
+the separate provider-credential GUI remains parked. It is an oversized
+feature phase: every numbered Step is one independently executable pass with
+its own verification and dated plan update. `$next` works one Step and stops.
+
+**Outcome and release gate.** A person who starts Mirafold from an app-center
+icon on Linux clicks the existing Pair flow, completes purchase or connects an
+existing Pro key in their normal browser, returns automatically, and gets a
+working relay QR without opening a terminal or storing a key themselves. The
+credential survives app restarts only when the operating system supplies a
+real secret store. This installed Linux path must pass production end to end
+before mirafold.com removes the demo's browser bar or mentions Desktop as a
+use option. Windows remains behaviorally unchanged and unclaimed in this
+phase; it has a separate proof phase below.
+
+#### Verified starting state — 2026-09-04
+
+- `src/main.js` creates one sandboxed BrowserWindow with context isolation,
+  no Node integration, no preload, and no IPC. Its navigation guards hand all
+  ordinary HTTP(S) links to the system browser. There is no activation
+  controller, loopback callback listener, credential menu, or `safeStorage`
+  import.
+- `src/daemon.js` obtains a login-shell environment, starts the exact bundled
+  `mirafold` daemon with `stdio: ["ignore", "pipe", "pipe"]`, and copies the
+  environment into the child. It has no private secret input channel.
+  `src/daemon-bootstrap.cjs` removes Desktop's PID-ledger and Electron Node-mode
+  variables before importing Shell, but reads no credential.
+- `src/state.js` persists only project folder and interface scale as ordinary
+  JSON in Electron's per-user data directory. No source file stores a Pro key.
+- The pinned Electron 43.4.0 type surface contains asynchronous
+  `safeStorage.encryptStringAsync`, `decryptStringAsync`, and
+  `isAsyncEncryptionAvailable`. Electron documents that Linux may fall back to
+  `basic_text`, where the encrypted value is protected by a hard-coded
+  plaintext password; that backend is not acceptable for a Pro key. Source:
+  [Electron safeStorage](https://www.electronjs.org/docs/latest/api/safe-storage).
+- Shell's Pair card links to `https://mirafold.com/pay`; the current generic
+  navigation path opens it externally. The app already holds a single-instance
+  lock, so a second process cannot become a competing activation receiver.
+
+#### Approved implementation boundary
+
+Phase 13 may create `src/pro-store.js`, `src/pro-activation.js`,
+`test/pro-store.test.js`, and `test/pro-activation.test.js`. It may modify
+`src/main.js`, `src/daemon.js`, `src/daemon-bootstrap.cjs`, `src/navigation.js`,
+`src/app-lifecycle.js`, `package.json`, and `package-lock.json`, plus their
+directly corresponding tests, package probes, and release evidence. Manifest
+changes are limited to pinning the exact published Shell version; no package is
+added. The runtime creates one versioned ciphertext file below Electron
+`userData`, not a project file or repository artifact.
+
+`src/state.js`, the sandboxed renderer configuration, the absence of preload
+and IPC, generic external navigation, project-folder data, updater trust and
+release policy, ordinary no-key startup, and all Windows launch code—including
+`src/windows-daemon-job.ps1`—stay behaviorally unchanged in Phase 13. Phase 14
+is the only authority to change Windows credential carriage. Any need for
+another executable file, renderer bridge, package, stored file, platform, or
+service stops the Step for an explicit boundary amendment before the change.
+
+#### Locked design and threat boundary
+
+Use the system browser plus an IPv4-loopback callback and RFC 7636 S256 PKCE,
+the standard native-application pattern in
+[RFC 8252](https://www.rfc-editor.org/rfc/rfc8252.html) and
+[RFC 7636](https://www.rfc-editor.org/rfc/rfc7636.html). Electron main creates
+a 32-byte verifier, 32-byte state, and random callback-path nonce; derives the
+S256 challenge; binds an ephemeral listener to literal `127.0.0.1` **before**
+opening the browser; durably encrypts the exact pending flow before launch; and
+sends only version, port, state, callback nonce, and challenge to the site. The
+verifier is plaintext only inside Electron main and the final HTTPS request;
+its expiring at-rest copy is protected by the same accepted safeStorage backend
+as the key. It never uses `localhost`, a LAN/wildcard bind, a custom URL scheme,
+or an embedded Electron login window.
+
+The listener accepts one bounded GET on the exact random path with the exact
+state, returns a constant local success page, and closes on success or a short
+deadline. A callback code alone cannot redeem: Electron main posts it with the
+main-process-only plaintext verifier over HTTPS, and the site's D1 conditional
+redemption lets one caller win. On restart, Desktop may resume only the exact
+unexpired stored port/path/state/challenge/verifier and must re-bind that port;
+the still-open or history-reopened browser welcome can then retry. Desktop
+cannot reconstruct a Paddle transaction if that browser context is also gone,
+and it never rebinds a completed transaction to fresh parameters. Wrong paths,
+methods, hosts, state, duplicate callbacks, early browser close, timeout, and
+app shutdown all fail without affecting local Mirafold. Never echo the code or
+state into the local HTML or a diagnostic.
+
+On Linux, initialize asynchronous `safeStorage` before opening purchase UI.
+If encryption is unavailable, temporarily unavailable, reports `basic_text`,
+or cannot complete an encrypt/decrypt probe, stop **before checkout** and say
+that a supported system secret service is required. Never call
+`setUsePlainTextEncryption`. Store only safeStorage ciphertext in a dedicated
+versioned secret-state file under Electron `userData`, created through an
+owner-only, no-follow, atomic replace; never mix it into `state.json`. The
+envelope may hold the current permanent key, at most one bounded pending
+activation record, or both during renewal; it never holds arbitrary site data.
+The pending record expires no later than the existing 48-hour transaction-claim
+window. Validate every decrypted field, support safeStorage's re-encryption
+signal, erase only expired pending state while preserving a current key, and
+make a corrupt/tampered/unavailable record a generic recoverable activation
+error—not a log of bytes or an app-start failure.
+
+After activation, keep the key plaintext only in Electron main memory, encrypt
+and durably replace the old credential while clearing the pending field first,
+then restart the daemon. A failed exchange or store preserves the prior
+credential plus any still-valid encrypted pending flow so the same committed
+transaction can retry; a success or expiry removes only the pending field.
+When a stored credential exists, remove any ambient `MIRAFOLD_LICENSE_KEY` from
+the child environment before spawn and pass only the stored key to the exact
+compatible Shell over a pipe connected to standard input, with one fixed non-
+secret internal flag in argv. With no stored credential, preserve today's
+legacy environment behavior. Close the parent pipe immediately; Shell consumes
+and closes its end before sessions can start. The key must never
+enter Desktop or daemon environment variables, command arguments, renderer or
+preload state, IPC, a WireMsg, browser storage/DOM/clipboard, project files,
+stdout/stderr, system journal, updater metadata, crash dialogs, or agent child
+processes. The existing renderer isolation stays absolute: native activation,
+storage, exchange, restart, and removal all live in main-process modules.
+
+Only an exact Shell-owned Desktop Pro URL from the current daemon origin starts
+activation. Other HTTP(S) navigation remains the user's ordinary browser;
+other schemes remain blocked. Agent-authored content can mimic a link, so the
+native controller must treat link activation as an untrusted request: it may
+open the browser after explicit user navigation, but it exposes no credential,
+does not accept site-supplied arbitrary callback URLs, and cannot overwrite the
+stored key until the complete state/PKCE/site validation succeeds.
+
+The first accountless release has an honest recovery limit: a new Desktop buyer
+does not need to see or save the key, but a lost machine or deleted credential
+cannot silently authorize a second installation. An existing subscriber may
+use the site's deliberate existing-key field; a new buyer without that key
+uses support after device loss. Do not disguise this as account recovery, and
+do not add accounts, email magic links, key export to clipboard, hardware
+attestation, certificate pinning, or a device-token service inside this phase.
+A confirmed user need for self-serve multi-device recovery is the trigger for
+a separate design. The same support boundary applies when both an encrypted
+pending activation and its browser transaction context are lost after payment.
+
+An existing subscriber's already-held key is handled differently from a new
+purchase: it passes transiently through the site's dedicated, first-party-only
+`/activate` password form and no-store request. That page loads no Paddle or
+other third-party resource and never puts the key in a URL, storage, clipboard,
+redirect, or response. A browser extension can still read a key the user types;
+the new-purchase path never exposes one to the browser at all.
+
+**Residual authority:** root/administrator, malware already executing as the
+same desktop user, a compromised OS secret service, compromised Mirafold/site/
+Paddle code, or a substituted installer can still obtain or use the key. The
+feature protects at-rest bytes from other users and ordinary file disclosure,
+removes the key from ambient process metadata and renderer/agent surfaces, and
+blocks callback interception/replay; it does not claim endpoint compromise is
+solvable from inside that endpoint. OS crash dumps, swap, and hibernation remain
+within the operating-system security boundary. Electron and Shell necessarily
+handle JavaScript strings, which cannot be reliably zeroized; references and
+lifetimes are minimized, but heap remnants remain part of that same endpoint
+boundary.
+
+No dependency is added. Electron's built-in safeStorage, Node HTTP/crypto/fs,
+and the site's existing Web APIs cover the protocol. A package would add
+installed bytes, transitive code, and advisory surface without supplying a
+security primitive the platform does not already provide.
+
+- [x] **Step 13.1 — build the fail-closed encrypted secret-state store.** Create
+  a small injected main-process module for asynchronous safeStorage readiness,
+  backend policy, exact credential/pending-flow schemas, expiry, ciphertext
+  load/decrypt/re-encrypt, and owner-only atomic replacement/removal. Use a
+  dedicated versioned secret path; reject symlinks, non-regular files,
+  oversized blobs, `basic_text`, temporary unavailability, corrupt ciphertext,
+  and malformed plaintext without logging supplied bytes. Do not make ordinary
+  app startup depend on Pro storage. Done when focused tests exercise each
+  provider/result/error, key-only, pending-only, and renewal-combined records,
+  the 48-hour pending ceiling and expiry that preserves an existing key,
+  permission and atomicity behavior; interrupted writes preserve the prior
+  record; removal is confirmation-ready and idempotent; mutations of the basic-
+  text refusal/no-follow/mode/size/expiry checks fail; and the complete Desktop
+  suite plus `npm ls --all` and audit remain green with no dependency change.
+
+  **Completed 2026-09-06.** `src/pro-store.js` is an injected, Linux-only main-
+  process store that accepts only Electron 43.4.0's four named secret-service
+  backends, completes an asynchronous encrypt/decrypt probe, rechecks the
+  backend before committing bytes, and requires the pinned secure-provider
+  ciphertext tags (`v11` Secret Service/KWallet or `v12` Secret Portal).
+  Electron's `v10` Posix fallback uses a public hard-coded key and is refused
+  even when the configured backend still has a trusted name. The exact
+  version-1 envelope supports key-
+  only, pending-only, and renewal records; validates the deployed license-key
+  shape plus every 256-bit callback/PKCE field and the verifier's S256
+  challenge; caps pending state at 48 hours; and removes expired pending state
+  without removing a current key. Ciphertext lives only at owner-owned mode
+  `0600` below an owner-owned mode `0700` directory, with no-follow opens,
+  bounded reads, same-directory exclusive temporary files, file and directory
+  synchronization (including the `userData` parent before every write),
+  atomic rename, crash-orphan reconciliation, safe rotation rewrites, inspected
+  removal, and idempotent absence. A failure after rename or unlink returns the
+  distinct `durability-uncertain` result so the caller must inspect or load the
+  visible state before retrying. The module has no startup import, Electron
+  import, renderer bridge, dependency, or logging path.
+  `test/pro-store.test.js` adds 19 focused tests. Twelve product-code mutations—
+  allowing `basic_text`, accepting the `v10` fallback tag, re-decrypting rotated
+  ciphertext instead of using its first successful result, removing no-follow,
+  weakening mode validation, allowing the first oversized byte, changing
+  exact-boundary expiry, skipping the required parent-sync retry, ignoring the
+  reserved temporary namespace, and collapsing post-commit uncertainty into an
+  ordinary write error, plus hiding a failed pre-rename cleanup behind that
+  ordinary error and letting a recovery read skip the confirming directory
+  sync—failed their focused test before the original bytes were restored. Final
+  evidence: focused 19/19; complete suite 230 tests with 229
+  passing and the one existing platform skip; syntax checks,
+  `npm ls --all`, and `npm audit` green with zero vulnerabilities; `package.json`
+  and `package-lock.json` unchanged.
+
+- [x] **Step 13.2 — build and attack the browser/loopback PKCE client in
+  isolation.** Create pure activation-request and controller modules with
+  injected clock, randomness, browser opener, fetch, and HTTP server. Generate
+  256-bit verifier/state/path entropy, S256 only, canonical site parameters,
+  literal-loopback ephemeral binding before open, persist and read back the
+  encrypted pending flow before browser launch, an exact method/Host/path/state
+  gate, bounded headers/query/body/response reads, one active flow, one
+  exchange, exact-flow restart resumption, and deterministic expiry/shutdown
+  cleanup. Accept only the exact HTTPS production activation origin and a test-
+  injected loopback origin; never follow an exchange redirect or trust a
+  callback URL supplied by the site.
+  Done when interception, replay, wrong-state/path/host/method, port pre-bind,
+  oversized/malformed JSON, non-HTTPS production, redirect, timeout, duplicate
+  click, crash/restart with the original port free or occupied, expired pending
+  state, and shutdown tests all fail closed while the happy path returns one
+  in-memory key; seeded code/verifier/state values are absent from every log and
+  local success page; mutations prove PKCE/state/path/TLS/deadline/durable-
+  pending checks bite.
+
+  **Completed 2026-09-06.** `src/pro-activation.js` is an isolated main-process
+  activation request and controller with injected storage, clock, randomness,
+  browser opener, fetch, HTTP server, and timers. It draws three separate
+  256-bit values, derives only an S256 challenge from the verifier, accepts the
+  exact `https://mirafold.com` production origin or a canonical explicit IPv4-
+  loopback test origin, binds literal `127.0.0.1` on an ephemeral port before
+  request creation, and saves and reads back the exact pending record through
+  the encrypted DPC.1 store before opening the browser. The module has no
+  Electron import, startup import, dependency, renderer bridge, or logging
+  path; its browser URL necessarily carries state and callback capabilities but
+  never the verifier.
+
+  The callback listener admits only one exact HTTP/1.1 `GET` with one exact
+  `Host`, raw callback path, query order, canonical code, and matching state.
+  It caps simultaneous sockets, header count and bytes, requests per socket,
+  request time, query size, and local response size. The exchange sends one
+  exact credential-free JSON `POST`, follows no redirect, requires the exact
+  response URL/status/media type/one-field JSON shape, and applies its fixed
+  deadline to both response headers and the bounded 256-byte body. One flow and
+  one exchange are authoritative at a time; restart re-binds only the saved
+  port and never reopens the browser; expiry clears only that pending flow;
+  shutdown closes the listener and waits for active encrypted-state work; and
+  success returns one key in memory while leaving DPC.4 to perform the atomic
+  store-before-restart transition.
+
+  `test/pro-activation.test.js` adds 27 focused tests covering the real
+  loopback happy path, interception gates, replay, concurrent callbacks,
+  failed persistence/readback/browser opening, redirects, malformed and
+  oversized responses, stalled headers and bodies, timeout, shutdown races
+  including a fetch that ignores abort, restart with the original port free or
+  occupied, expiry cleanup, and the real encrypted DPC.1 store. Seven
+  product-code mutations weakening PKCE S256,
+  state, callback path, production TLS, listener deadline, durable pending
+  readback, and immediate shutdown cancellation each failed its targeted test
+  before the final source bytes were restored. Final evidence: focused 27/27;
+  complete suite 257 tests with 256
+  passing and the one existing platform skip; syntax and whitespace checks,
+  `npm ls --all`, and `npm audit` green with zero vulnerabilities;
+  `package.json` and `package-lock.json` unchanged.
+
+- [x] **Step 13.3 — carry the stored key to the published Shell over a private
+  pipe.** Use the exact published Shell containing Phase DA's reviewed input
+  contract. Every Linux Desktop launch passes the fixed internal marker through
+  the existing bootstrap and owns a standard-input pipe. Clone `daemonEnv` and
+  remove `MIRAFOLD_LICENSE_KEY` before spawn: a flagged Shell refuses ambient
+  fallback, so retaining that ignored secret would expose it through process
+  metadata and descendants for no benefit. A launch with a decrypted key writes
+  its exact bounded bytes once and ends the pipe without a newline; an
+  unactivated launch ends the pipe without writing bytes. The latter remains a
+  free local launch but now correctly identifies its Desktop host so Shell can
+  offer browser activation. All other environment, argument, and startup
+  behavior remains unchanged; Windows retains its existing ignored input and
+  arguments.
+
+  Drop the launcher's plaintext binding after starting the handoff and clear its
+  producer buffer when the writable completes. Await both input delivery and the
+  startup URL; a write failure, closed pipe, or early child exit rejects through
+  the existing complete-tree teardown before any replacement can start. Never
+  put the stored key in `daemonEnv`, PowerShell, ledger files, launch diagnostics,
+  or child metadata. Done when unit and real-child probes inspect `/proc`
+  environment/cmdline, the private descriptor identity, daemon and child output,
+  persistent test records, and cleanup; neither the stored nor a seeded ambient
+  key appears, the exact published daemon gets Pro entitlement and billing
+  state, free no-key startup works, and package tests prove the registry-locked
+  Shell rather than a vendored or local substitute.
+
+  **Completed 2026-09-06.** Desktop already pinned registry-published
+  `mirafold@0.9.0` exactly, so `package.json` and `package-lock.json` did not
+  change. `src/daemon.js` now gives every Linux launch
+  `--mirafold-desktop`, removes the ambient license from the cloned child
+  environment, uses one EOF-framed standard-input write for an optional validated
+  key, clears the producer buffer on every outcome, and joins that handoff to
+  startup ownership. Missing input is an intentional unactivated Desktop launch;
+  unsupported-platform key delivery and malformed keys fail before spawn. The
+  existing bootstrap already forwarded the marker exactly and required no source
+  change. Windows and other non-Linux launch specifications retain ignored input
+  and their prior arguments.
+
+  `test/pro-handoff.test.js` adds five package and real-process tests. They bind
+  local fake entitlement, relay, and subscription services; run the exact locked
+  Shell through both `Daemon.start()` and the production launch specification;
+  prove the pipe key reaches entitlement and billing; inspect Linux daemon
+  environment, command line, and the original descriptor identity; execute a
+  real pseudo-terminal child; scan credential-free outputs and persistent fixture
+  records; preserve a free local turn after empty input; and prove startup failure
+  retires a descendant. `test/daemon.test.js` pins the launch specification,
+  one-write/EOF contract, empty handoff, fixed error, and producer-buffer clearing.
+  The packaged smoke gate now requires exactly Shell's one credential-free Linux
+  missing-input warning and still refuses any additional standard-error output;
+  Windows continues to require none.
+
+  Seven product-code mutations removing the Desktop marker, ambient-key scrub,
+  private pipe, EOF framing, buffer clearing, write-error propagation, or
+  production `Daemon.start()` key delivery each failed its targeted test before
+  the exact source hash was restored. Final evidence: focused daemon/handoff
+  tests 25/25; complete suite 267 tests with 266 passing and the one existing
+  platform skip; unpacked Linux build and full packaged smoke passed with Shell
+  `0.9.0`, both native modules, render MCP, authenticated daemon lifecycle, and
+  complete process-tree shutdown; syntax and whitespace checks, `npm ls --all`,
+  and `npm audit` passed with zero vulnerabilities. No secure-store read,
+  activation lifecycle, renderer bridge, release, deployment, or public claim
+  occurred; Step 13.4 owns loading the stored key and the store-before-restart
+  transition.
+
+- [x] **Step 13.4 — integrate activation and restart into the native
+  lifecycle.** Recognize only the fixed Desktop marker on an external URL from
+  the current trusted daemon main frame; preflight secure storage; run one
+  activation at a time; open the fully parameterized site URL in the system
+  browser; store before success; then use the existing serialized stop/boot
+  ownership path to restart in the same folder and surface the relay QR. Add
+  native, non-secret progress/failure/success messages. Resume an unexpired
+  pending flow after app restart and leave a failed post-purchase store
+  retryable only through that exact flow. Done when the main-process probe
+  proves the URL provenance, preflight-before-browser ordering, pending-state
+  durability, store-before-restart ordering, success/failure UI, and crashes
+  before callback, after exchange, and after durable key replacement; generic
+  navigation/permissions remain unchanged, no renderer bridge exists, and the
+  complete Desktop suite passes.
+
+  **Completed 2026-09-06.** `src/main.js` now constructs the Linux-only DPC.1
+  encrypted store and DPC.2 activation controller after Electron is ready. A
+  no-state launch uses the filesystem-only inspection path and does not invoke
+  the system keyring; a saved validated key reaches the first daemon through
+  DPC.3's private input pipe, and an unexpired pending record rebinds its exact
+  listener without opening a browser on startup. The one fixed
+  `https://mirafold.com/activate` popup is native only while the current
+  top-level document still belongs to this launch's exact daemon origin and
+  carries no POST body. Inexact markers, loading state, and stale daemon ports
+  retain the existing generic popup policy. Shell artifact frames remain
+  sandboxed without popup permission, and Desktop adds no preload, IPC, or
+  renderer Node access.
+
+  A trusted marker first preflights a Secret Service/KWallet-backed
+  `safeStorage`, then starts one controller flow. The controller's already
+  durable, fully parameterized request opens in the system browser. Automatic
+  restart resumption stays quiet; a later explicit trusted marker can reopen
+  the same saved flow, including recovery from a browser-open failure, without
+  creating a new activation. The returned key is retained only in main-process
+  memory while Desktop atomically replaces pending state, reads back the exact
+  key-only envelope, and only then stops and boots the same folder with Pro.
+  An uncertain write may proceed only when that readback proves it committed;
+  an unconfirmed post-purchase write leaves the old daemon and pending record
+  intact and makes the same in-memory key retryable only through another exact
+  trusted marker. Native window-title progress and fixed, credential-free
+  failure/success dialogs own all user-visible outcomes. Quit shuts down and
+  settles the activation controller before daemon teardown.
+
+  `test/pro-main.test.js` adds eight isolated Electron-main probes for exact
+  provenance and duplicate clicks, preflight-before-browser ordering,
+  pending-store readback, browser recovery, confirmed and uncertain key writes,
+  store retry, same-folder store-before-restart ordering, renewal, startup
+  recovery before callback and after exchange, durable-key replacement, fixed
+  native UI, secret-free errors, and activation-before-daemon quit cleanup.
+  `test/navigation.test.js` pins every marker lookalike and stale/loading/POST
+  case; the existing main probe was adapted only for the new injected Electron
+  capability and daemon start option. Seven one-at-a-time product mutations
+  weakening the exact marker, preflight, key readback, daemon handoff, pending
+  resume, post-restart success, or quit ordering each failed its targeted test
+  before the source was restored.
+
+  Final evidence: focused main/navigation/Pro lifecycle tests 29/29; complete
+  suite 277 tests with 276 passing and the one existing platform skip; syntax,
+  whitespace, `npm ls --all`, and `npm audit` passed with zero vulnerabilities.
+  A fresh unpacked Linux build contained byte-identical lifecycle modules and
+  the full packaged smoke passed with Shell `0.9.0`, both native modules,
+  render MCP, authenticated daemon lifecycle, and complete process-tree
+  shutdown. `README.md` now describes the native Linux boundary. No dependency,
+  package manifest, renderer bridge, Windows activation behavior, release,
+  deployment, or public website claim changed.
+
+- [x] **Step 13.5 — close removal and competing-lifecycle races.** Add a
+  neutral native menu item to remove Pro access from this device behind a
+  confirmation that states the accountless recovery consequence. Removal must
+  first cancel any pending activation and close its listener, cleanly stop the
+  daemon, delete only the encrypted Pro state, and restart unentitled in the
+  same folder; canceling removal changes nothing. Serialize app quit, folder
+  change, updater install, daemon crash, duplicate activation click, callback,
+  exchange completion, credential removal, and restart so each race has one
+  owner, one terminal state, no stale listener, and at most one dialog. Done
+  when focused model and real main-process probes cover every pairwise ordering,
+  key/pending files survive only the intended outcomes, no daemon or pipe is
+  orphaned, and the complete Desktop suite passes.
+
+  **Completed 2026-09-06.** Linux now enables one ordinary Project-menu command
+  only while encrypted Pro state is present. Its confirmation defaults to
+  keeping access and says removal deletes the encrypted key and unfinished browser
+  handoff, that Mirafold has no account recovery, and that reconnecting without
+  an existing key requires support. Canceling changes nothing. Confirmation
+  retires the current controller synchronously; the removal owner then proves
+  the listener/exchange and activation action settled, proves the daemon tree
+  stopped, invokes only the dedicated Pro store's removal, confirms the
+  keyring-independent postcondition, and starts the same folder without a key.
+  A committed deletion wins even when its durability call failed. A proved
+  surviving valid envelope restores its exact key/pending status and session;
+  an unknowable result starts no replacement and quits rather than guessing.
+
+  `src/app-lifecycle.js` now supplies one request-order owner for activation
+  startup and exchange completion, folder changes, removal, daemon crashes,
+  initial/recovery restarts, updater installation/recovery, and quit. Quit
+  closes the queue synchronously, retires queued work, and shares one terminal
+  cleanup. Long browser waits remain outside the queue so their own callback
+  can complete; controller identity prevents a retired result from saving,
+  restarting, or reporting. Duplicate activation/reopen/removal/folder actions
+  are single-flight, and all native messages and folder dialogs share one
+  presentation queue with a final relevance check. A presented folder chooser
+  waits outside lifecycle ownership because Electron cannot cancel it; terminal
+  quit therefore closes independently and any late choice is discarded. The
+  coordinator's terminal signal likewise retires active crash,
+  startup-recovery, Pro-result, and removal-failure waits without giving their
+  late results authority.
+  Failed cleanup proof takes priority over stale boot ownership after start,
+  malformed daemon output, or page-load failure. Update installation closes
+  the activation listener before daemon teardown and invalidates replacement
+  boots only after it owns the queue; a pre-quit installer failure reloads the
+  exact encrypted state, restarts the daemon, and resumes only its saved
+  pending flow.
+
+  The focused model exercises all 72 orderings of the nine distinct lifecycle
+  actions plus duplicate, rejection, and terminal cases. Real main-process
+  probes cover confirmed key/pending removal, cancellation, duplicate clicks,
+  post-unlink uncertainty, known and unknowable failure, an exchange resolving
+  during retirement, stale success behind the confirmation, a crash during
+  explicit stop, clean and unclean crash interleavings, terminal quit during an
+  open folder chooser or crash dialog, updater ownership during a gated boot
+  whose stop proof fails, returned-but-unsaved key survival across failed
+  removal and updater recovery, failed cleanup behind stale startup ownership,
+  terminal quit during startup error/recovery UI, Pro success, update-recovery
+  failure, and both removal-failure outcomes, and quit immediately before and
+  after deletion. Focused lifecycle/Pro/main/updater tests pass 101/101; the
+  complete suite passes 297 of 298 tests, with the one existing platform skip.
+  One initial complete
+  run hit the existing daemon-test cleanup race (`ESRCH` after its probe process
+  had exited); that exact unchanged test passed 6/6 repetitions and all later
+  complete runs passed. Twenty product-code mutations, run one at a time,
+  covered queue closure, shared ownership, activation
+  retirement, menu-state clearing, stale-dialog ownership, update retirement
+  and recovery, folder single-flight/quit behavior, unclean-crash replacement,
+  unsaved-key rollback, terminal dialog release, update boot ownership, and
+  stale-boot reference retention, cleanup-before-freshness ordering, and
+  startup-recovery and Pro-result terminal release each failed its targeted
+  test before source restoration. The first four automated review passes found
+  nine real lifecycle races (four P1 and five P2); thirteen permanent
+  real-main/coordinator regressions cover those classes and the shared
+  stale-retirement paths they exposed.
+  Syntax, whitespace, `npm ls --all`, and `npm audit` pass with zero
+  vulnerabilities. A fresh unpacked Linux build contains byte-identical main
+  and Pro lifecycle modules, and the full packaged smoke passes Shell `0.9.0`,
+  both native modules, render MCP, authenticated daemon lifecycle, and complete
+  process-tree shutdown. No dependency, package manifest, renderer bridge,
+  Windows activation behavior, release, deployment, or website claim changed.
+
+- [x] **Step 13.6 — prove the real Linux packages and secret-store boundary.**
+  Build `.deb`, AppImage, and tar candidates outside the checkout and inspect
+  their exact bundled Shell, native modules, flags, file modes, and absence of
+  plaintext fixtures. Launch from the installed desktop entry—not a terminal—
+  against a real supported Secret Service and complete a local fake-site/
+  fake-billing/gated-relay activation, restart, subscription-status call,
+  remote encrypted pairing, remove, and unentitled restart. Force
+  `--password-store=basic`, unavailable/locked keyring, corrupt/symlinked store,
+  and system-journal inspection. Kill and reopen the app before callback, after
+  exchange, and before/after credential replacement; resume only the exact
+  pending request. Exercise ordinary quit and package cleanup for every form.
+  Done when each real artifact has evidence for encrypted persistence, crash
+  recovery, restart, removal, private daemon input, exact published Shell,
+  native-module load, and zero remaining daemon/agent/listener or plaintext
+  credential; record artifact paths/hashes and observations without publishing.
+
+  **Completed 2026-09-06 — all three real Linux forms passed, and the proof
+  found and repaired one confirmed package security defect.** Before the fix,
+  launching the exact AppImage from an isolated desktop entry on a host where
+  its user-namespace probe failed made electron-builder's generated `AppRun`
+  add `--no-sandbox`; the packaged app then created its renderer and started
+  Shell. Packaged main now fails closed on that flag, waits for an explanatory
+  native error to be acknowledged, and exits with status 1 before taking the
+  single-instance lock, creating any renderer, or starting the daemon. The
+  exact rebuilt AppImage repeated the trigger and proved the native refusal,
+  absent renderer and daemon, untouched credential state, and complete exit.
+  Explicit no-sandbox startup remains development-only. A permanent real-main
+  regression pins the refusal before application startup.
+
+  The final candidates were built outside the checkout at
+  `/tmp/mirafold-dpc6-final-artifacts.SO0Ht0`: AppImage SHA-256
+  `c1e6c7fe36987b8acde0d1673f3dd882fe029a1090abcfd55da51a20b96148ca`,
+  tar SHA-256
+  `82180b7d81b496225bf558f2825b948c98c42f4698b1889f8edddb92b1320e7b`,
+  and Debian SHA-256
+  `59f353b64e7c9b0b736c37c692ee054756ae35990d967efb2baeae22b5c1b23a`.
+  Every extracted form contains Desktop `0.3.16`, exact published Shell
+  `0.9.0`, byte-identical main/activation/store/daemon/bootstrap source, and
+  the Linux x64 node-pty and glibc watcher binaries. Their packaged smoke
+  loaded both native modules, initialized all 18 render tools, served the
+  authenticated loopback UI, preserved Electron child-mode isolation, and
+  proved complete daemon-tree shutdown. Desktop entries contain no
+  unconditional sandbox downgrade; sandboxed desktop-entry launches of all
+  three forms reached local Shell and completed ordinary quit with their
+  staged entry and user data removed.
+
+  Against a real isolated GNOME Secret Service, each form completed the exact
+  fake-site PKCE exchange, fake billing, entitlement-gated relay, encrypted
+  remote pairing and demo turn, active subscription query, encrypted restart,
+  device removal, and unentitled restart. The `v11` credential record used
+  `0700`/`0600` directory/file modes and contained no plaintext fixture. While
+  the activated daemon was live, all eight observed Desktop/Shell process
+  command lines and environments were inspected; the key appeared in none,
+  proving the daemon's private stdin handoff. Each form also passed all four
+  forced crash checkpoints: before callback, after callback validation before
+  replacement, after the exchange response before consumption, and after
+  durable credential replacement. The first three reopened only their exact
+  saved transaction; the fourth loaded the encrypted key without reopening
+  the browser.
+
+  Forced `basic_text`, unavailable and locked Secret Service, corrupt
+  ciphertext, and a symlinked store all refused activation before browser
+  launch, preserved the unsafe bytes or target, and left local sessions usable.
+  Dotenv-excluding scans covered 2,998 tar, 3,003 Debian, and 3,007 AppImage
+  files with no plaintext fixture. System/user journals and ten final package
+  logs covered 12 files, 25,342 bytes, and 212 lines with no plaintext key,
+  raw daemon token, raw pairing code, activation capability, or credential
+  environment variable. Final host snapshots found no remaining Desktop,
+  daemon, agent, callback, debugger, billing, proxy, relay, or package-test
+  listener/process.
+
+  The complete suite passes 298 tests with one existing platform skip;
+  syntax, whitespace, `npm ls --all`, and `npm audit` pass with zero
+  vulnerabilities. Executable change is limited to the packaged sandbox
+  refusal in `src/main.js`; test change is the real-main regression; README and
+  builder-comment changes describe the observed Linux boundary. No dependency,
+  package manifest, renderer bridge, ordinary sandboxed behavior, Windows Pro
+  behavior, release, deployment, frozen candidate, or website claim changed.
+
+- [x] **Step 13.7 — run the feature-delta correctness hunt.** Review the exact
+  Phase 13 product delta and adjacent startup, update, folder, and daemon
+  ownership logic for concrete incorrect behavior. Diagnose and reproduce each
+  finding before editing, make the narrow fix and a class-level regression test,
+  fix no more than ten confirmed findings, run the focused loop then the full
+  gates, and end with the required fresh-agent cold review. If more than ten
+  fixes are required, insert a continuation Step before 13.8. Done when every
+  confirmed correctness finding is fixed, no speculative hardening is mixed
+  into this pass, and the package smoke still proves all three Linux forms. Do
+  not publish or freeze hashes.
+
+  Completed 2026-09-06. The hunt confirmed and repaired ten correctness
+  failures: a failed daemon start discarded an unproved cleanup result; an
+  unreadable live Linux process identity could be mistaken for a proved stop;
+  a stalled native browser launch could hold quit; the same reopen command
+  retained lifecycle ownership and could hold Pro removal or update
+  preparation; ordinary
+  pending-flow expiry produced a false startup error and could open the fresh
+  activation URL twice; rejected terminal recovery dialogs and the initial
+  folder picker escaped their asynchronous owner; the AppImage-specific
+  no-sandbox refusal leaked into Windows startup; a rejected ordinary project
+  picker escaped while a healthy session remained; and a retired browser
+  launch could clear a newer activation's progress. Finally, a ready Windows
+  Job that closed before reporting its daemon URL fell through to `taskkill`
+  and cached a false unsafe-cleanup result. The fixes preserve failed startup
+  cleanup authority, fail closed without signalling an unidentified Linux PID,
+  keep uncancellable native browser waits outside lifecycle ownership with
+  stale-owner checks, reconcile normal expiry before starting one fresh
+  activation, settle native UI rejections according to whether the current
+  session remains usable, restrict the packaged sandbox refusal to Linux, and
+  retain an already-completed Windows Job as authoritative cleanup proof.
+
+  Every repaired finding has a class-level regression. The final suite passes
+  308 tests with one existing platform skip; the 47 changed-file tests, syntax,
+  whitespace, `npm ls --all`, and `npm audit --audit-level=moderate` all pass,
+  with zero reported vulnerabilities. A fresh-agent cold review found three
+  additional ownership cases and one platform-scope correction during the
+  pass; automatic PR review found the tenth completed-Job case. The final
+  no-edit review found fixes 1–10 sound and proved one further shared timing
+  failure: a stop-event opener can lose to a later wrapper close and return
+  false before consuming that close proof during either failed startup or an
+  ordinary stop. That over-cap finding is routed into Step 13.7C below. Fresh
+  AppImage, tar, and Debian artifacts each contain the reviewed ten-fix runtime
+  modules and pass native-module, MCP, authenticated loopback,
+  environment-scrubbing, renderer-stop, and daemon-tree cleanup smoke. No
+  dependency, package manifest, renderer bridge, release, deployment, frozen
+  hash, or website claim changed.
+
+- [x] **Step 13.7C — complete the over-cap correctness continuation.** Repair
+  the routed Windows Job close-proof race shared by failed-start cleanup and
+  ordinary successful-start `stop()`: when opening the registered stop event
+  loses to wrapper close, consume that completed Job boundary before caching
+  an unproved result. Reproduce both callers before editing; retain class-level
+  regressions for already closed, late close, and genuinely unproved cleanup;
+  run the focused and complete gates, protected Linux and Windows CI, all three
+  Linux package smokes, and the required fresh-agent cold review. Done when the
+  routed finding is fixed and no confirmed correctness finding remains. Do not
+  publish or freeze hashes.
+
+  Completed 2026-09-06. Caller-level probes against the unchanged 885f063
+  starting point reproduced both paths: after the Windows Job wrapper became
+  ready, a failed stop-event opener made failed-start cleanup and ordinary
+  stop() each return and cache false, even though wrapper close arrived
+  20 milliseconds later and proved kill-on-close Job teardown. The shared
+  cause was in terminateProcessTree(): it treated failure to issue the stop
+  request as conclusive before consuming the independent authoritative close
+  Promise. The same focused run proved the prior successful-close
+  Promise.race() left its losing ten-second timer referenced. Fresh cold review
+  then proved a rejected close Promise could become an unhandled rejection if
+  it settled before the stop-event helper.
+
+  Automatic PR review then identified, and a timing probe reproduced, a second
+  delay: waiting for the helper before wrapper close could hold a proved result
+  for the full timeout and then grant close a second timeout. Windows Job
+  cleanup now observes the helper and wrapper close concurrently under one
+  existing production ten-second deadline. Wrapper close returns its normalized
+  result immediately and stops a lingering helper; helper failure never proves
+  cleanup, and a missing or still-pending close returns false at the shared
+  deadline. The close Promise is normalized before the first await, so an early
+  rejection returns false instead of escaping.
+  Permanent real-Daemon regressions cover the failed-start and ordinary-stop
+  callers; sibling coverage retains the already-closed fast path and the
+  genuinely unproved and rejected results. Bounded subprocesses catch both a
+  referenced timeout returning and sequential helper/close deadlines.
+
+  The 28 focused daemon/ownership tests and the complete 314-test suite pass
+  with 313 passes and one existing platform skip. Syntax, whitespace,
+  dependency integrity, and npm audit at moderate severity pass with zero
+  vulnerabilities. One fresh nonpublishing build produced AppImage
+  (219,590,153 bytes), tar (207,310,655 bytes), and Debian (168,923,796 bytes)
+  artifacts. Dotenv-excluding extraction found the changed process-tree module
+  byte-identical in all three; each form passed native-module, MCP,
+  environment-scrubbing, authenticated-loopback, renderer-stop, and
+  daemon-tree cleanup smoke. No dependency, package manifest, daemon caller,
+  release, deployment, frozen hash, or website claim changed.
+
+- [x] **Step 13.8 — run the feature-delta security audit.** Attack the exact
+  fixed candidate for callback theft, wrong state/path/host, concurrent
+  callback, exchange replay, parameter substitution, hostile renderer links,
+  ciphertext/symlink replacement, pipe and descriptor inheritance, process
+  metadata, browser/Paddle separation, billing-key authority, crash dumps/logs/
+  journal, stale pending flows, and quit/folder/update races. Prove each finding
+  before editing, turn it into a regression test, fix no more than ten confirmed
+  findings, and end with the required fresh-agent cold review; insert a
+  continuation Step before 13.9 if the cap is exceeded. Done when no confirmed
+  in-scope security finding remains and all focused, full, native, audit, and
+  packaging gates pass. Do not publish or freeze hashes.
+
+  Audit completed 2026-09-07 on `audit/desktop-feature-delta`, submitted as
+  PR #63 targeting `next`. The complete Phase
+  13 delta has been attacked across activation/PKCE, encrypted storage, private
+  daemon handoff, renderer navigation, lifecycle ownership, packaging, release
+  automation, and repository policy. Confirmed findings repaired in the local
+  candidate include missing dotenv source/package exclusions; Pro key exposure
+  in daemon journal/crash output, including a maximum-length adjacency case;
+  an automated-main check preflight that lacked a same-commit canonical merged
+  PR fallback; incomplete pagination of security inventories; and repository
+  owner identity verification occurring after mutations. The repository's
+  transfer to organization `mirafold` also invalidated the old GitHub Actions
+  bypass model, so the reviewed replacement uses one fingerprint-pinned
+  environment deploy key, rejects every other writable deploy key, exposes it
+  only to the dependency-free writer checkout, and suppresses recursive release
+  pushes with `[skip ci]`.
+
+  The final local suite has 319 tests: 318 pass and one existing platform test
+  is skipped. Focused hardening and daemon regressions, syntax, whitespace,
+  dependency integrity, the zero-vulnerability audit, and registry signatures
+  pass. A final fresh-agent cold review found no remaining security finding.
+  Recovery on 2026-09-07 reran the full suite with the same result, rebuilt the
+  final runtime without publishing, and passed the unpacked application smoke
+  plus independent extracted AppImage, tar, and Debian smokes. Each form's 17
+  runtime source files matched the final candidate byte-for-byte; native
+  modules, render-MCP, daemon authentication, and process shutdown passed.
+  Policy validation and whitespace checks passed. Logs are beside HANDOFF.md.
+
+  Live closeout verified 2026-09-07 after Kyle enabled repository deploy keys.
+  Apply created the pinned verified writable key `162581331` and active rulesets
+  `main-release-safety` (`22483133`) / `next-staging-safety` (`22483136`). Its
+  first post-apply audit exposed a read-only comparison defect: GitHub expanded
+  omitted pull-request defaults into three additional fields, while every
+  submitted field matched. The comparison now accepts only those exact
+  observed defaults and rejects changed or unknown settings; regressions cover
+  both rulesets without changing write payloads or live permissions. The
+  independent live audit is clean, the final 319-test suite passes 318 with one
+  platform skip, and fresh cold review found no remaining finding. This final
+  script/test correction is excluded from the packaged runtime; the three
+  completed Linux package proofs remain applicable. Hosted CI run
+  `34161562854` on signed-off commit `a1f7b7b` passed both Linux and Windows,
+  including dependency integrity, vulnerability/signature checks, the full
+  suite, and the real Windows packaged lifecycle. DCO also passed. The final
+  follow-up changes only this completion record; PR review and merge must
+  finish before continuing to Step 13.9.
+
+  The repository variable `MIRAFOLD_AUTOMATED_RELEASES` is still disabled and
+  must remain disabled until a later
+  normal Desktop release carries this reviewed workflow to `main`. Nothing has
+  been published, deployed, released, or frozen in this Step.
+
+  Continuation location recovered 2026-09-07:
+  `/home/serrecchia/Projects/mirafold-desktop-dpc8/HANDOFF.md`. The original
+  temporary worktree was found intact and moved into Projects with Git; all
+  14 modified tracked files and the handoff matched their pre-move hashes.
+  Resume in that worktree, not the canonical Desktop checkout.
+
+- [x] **Step 13.9 — falsify the Phase 13 test suite.** Run the repository's
+  test-audit procedure against every claimed protection and lifecycle outcome,
+  using mutations in product code—not comments or the proof itself—to establish
+  which tests really fail. Repair every evidence-backed missing or wrong-target
+  test, keep each hunter as a permanent regression, rerun three unchanged full
+  suites to characterize flakes, and finish with the required fresh-agent cold
+  review. Done when every named Phase 13 contract has load-bearing evidence,
+  test theater is removed, no product behavior was changed in this pass, and
+  all local/native/package gates are green.
+
+  **2026-09-07: audit complete.**
+  Six test-design causes were repaired in the existing activation, store and
+  main-process suites: masked callback-method and exchange-status checks,
+  missing response identity and ciphertext-file sync evidence, incomplete
+  pending/purchased-key readback cases, and stale-browser progress assertions.
+  The 62-edit ledger records 61 caught behavior-breaking mutations and one
+  redundant guard removal that preserved the contract; every product edit was
+  restored exactly. Three unchanged final suites pass 330 tests with one
+  platform skip. Dependency and release-rehearsal gates pass. Retained unpacked
+  Linux, AppImage, tar and Debian artifacts pass fresh independent smokes, with
+  all 17 runtime files matching this branch and all 42 runtime/build/release
+  inputs unchanged from `ba17aed`. Evidence and test boundaries are in
+  [the audit report](docs/audits/phase13-test-audit.md). Worktree, handoff and
+  detailed local logs are preserved under
+  `/home/serrecchia/Projects/mirafold-desktop-dpc9`; exact mutation transcripts
+  are in the adjacent `mirafold-desktop-dpc9-evidence` directory.
+  Fresh cold review independently passed the 88 changed-suite tests and found
+  no remaining issue after an audit-ledger selector correction. Desktop
+  [PR #64](https://github.com/mirafold/mirafold-desktop/pull/64), signed-off
+  implementation `0dbf6a5`, passed hosted Linux and Windows CI (run
+  `34166008224`, including the real Windows package lifecycle) and DCO.
+  Automated PR review completed without findings on that implementation.
+  The closeout follow-up changes only this plan and the audit report.
+  Step 13.10 is next and has not started; automated releases remain disabled.
+
+- [ ] **Step 13.10 — freeze one release candidate without changing it.** From
+  the exact commit that cleared Steps 13.7–13.9, run the full clean-room release
+  rehearsal and native CI, build `.deb`, AppImage, and tar exactly once, inspect
+  their contents and secret-free metadata, and record immutable hashes. Any
+  source, test, dependency, workflow, or package-content change invalidates the
+  candidate and returns work to the owning review Step; it is not folded into
+  this pass. Done when one unchanged set of bytes has all required green run
+  IDs, attestable inputs, package manifests, and hashes. Do not deploy or
+  publish.
+
+  **2026-09-07 prerequisite complete: release preparation implemented and
+  reviewed through PR #65.** The prior `838e508` preflight proved that version,
+  notes, and artifact promotion were absent from the unchanged-input freeze.
+  Kyle's next `$next`, after the preparation explanation, authorized that
+  specific prerequisite. Desktop `0.4.0` still bundles exact Shell `0.9.0`.
+  A main-only first-attempt dispatch now retains one attested 17-file candidate
+  plus its identity/hash manifest for 90 days; a later annotated tag selects
+  that successful run and accepted manifest digest. The protected publisher
+  verifies and reuses its bytes without rebuilding or re-signing. Runtime and
+  installed dependencies have no changes. The affected review found and fixed
+  promotion-command test gaps and a version-bound fixture; all 11 mutation
+  probes are caught and cold review has no remaining findings.
+
+  Three final suites pass 341 tests with one skip; dependency, actionlint,
+  rehearsal, and all Linux package checks pass. Hosted CI `34168622219` passes
+  Linux and the real Windows packaged lifecycle. Fresh cold and automated PR
+  reviews report no remaining findings. Finish the required final-head checks
+  and PR merge, then reconstruct the reviewed tree on a release branch into `main`, require its checks and
+  review, record that exact merged commit, and only then dispatch the full
+  nonpublishing candidate build. Keep `main` fixed throughout freeze/acceptance.
+  This source preparation does not freeze a candidate. Automated releases stay
+  disabled, no signing policy changes, and DPC.11 remains dependent on 13.10.
+  [Original preflight](docs/candidate-freeze-preflight.md),
+  [preparation review](docs/audits/phase13-release-preparation.md), and persistent
+  `/home/serrecchia/Projects/mirafold-desktop-dpc10/HANDOFF.md` carry the evidence.
+
+- [ ] **Step 13.11 — accept the frozen candidate against production.** Require
+  the reviewed site activation endpoints and D1 migration live first. Install
+  Step 13.10's exact bytes through a candidate APT source on a clean supported
+  Linux desktop and launch from the app center. First activate with an existing
+  real Pro key to prove the no-charge path; Kyle types it in his own system
+  browser, never pastes it into chat, and the assistant never reads it. Then,
+  only with Kyle's explicit authorization in that future turn, run one fresh
+  live monthly Paddle trial: it charges $0 immediately but becomes a recurring
+  $12/month charge after
+  seven days unless canceled; cancel it during the same acceptance pass after
+  proving activation so no charge is expected. Prove browser return, hidden
+  key, entitlement exchange, QR, phone session, app restart, machine restart,
+  subscription management, removal, and reconnect/support fallback. Record
+  only redacted production request/result evidence and confirm ordinary npm/
+  browser checkout is unchanged. Done when the frozen hashes—not a rebuilt
+  approximation—pass the full installed arc. Do not publish or edit
+  mirafold.com in this Step.
+
+- [ ] **Step 13.12 — publish exactly the accepted Linux release.** Reconfirm the
+  candidate hashes equal Step 13.11, then use the protected Desktop release path
+  without source changes. Verify the tag, release manifests, attestations,
+  anonymous assets, APT index/signature, and installed version; update one
+  existing APT installation through the real channel and repeat activation
+  persistence plus relay pairing after update. Record versions, commits, run
+  IDs, artifacts, hashes, and observations. Only this completed Step unlocks
+  the site's public-positioning phase; it does not itself edit mirafold.com.
+
+### Phase 14 — Windows Desktop Pro activation proof (deferred; not a Linux gate)
+
+Windows may not inherit the Linux result by analogy. Its current PowerShell Job
+Object wrapper passes only standard handles to the daemon, Electron safeStorage
+uses DPAPI with same-user rather than app-isolated semantics, and no
+maintainer-owned human Windows test machine has been established. Do not start
+this phase through `$next`; Kyle must expressly open it.
+
+- [ ] **Step 14.1 — carry the private pipe through the real Windows wrapper.**
+  Extend and prove handle inheritance without weakening kill-on-close ownership
+  or leaking plaintext into PowerShell command lines, environment, transcripts,
+  event names, or diagnostics. Run native runner attacks and inspect the packed
+  process tree.
+- [ ] **Step 14.2 — prove DPAPI storage and the full installed flow on ordinary
+  Windows.** Exercise another-user refusal, same-user residual behavior,
+  installer/update survival, uninstall residue, browser callback, ConPTY
+  children, SmartScreen/wizard behavior, restart, removal, and no orphans on a
+  real human desktop. Only a green result can justify “Windows preview” Pro
+  language; until then Windows users are not told Desktop Pro works.
+
 ### Audit and test-audit pass — 2026-08-14
 
 Completed 2026-08-14, on this same branch. A full security audit found one

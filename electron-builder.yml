@@ -27,6 +27,12 @@ files:
   - build/icon.png
   - package.json
   - node_modules/**/*
+  # Defense in depth: keep local dotenv secrets out even if one is created
+  # below an otherwise packaged source or production-dependency directory.
+  - "!**/.env"
+  - "!**/*.env"
+  - "!**/.env.*"
+  - "!**/*.env.*"
 
 # asar is deliberately OFF.
 #
@@ -109,9 +115,10 @@ linux:
 
 # electron-builder's legacy FUSE2 AppImage target otherwise hard-codes
 # `--no-sandbox` into the desktop entry. AppRun already performs a runtime
-# user-namespace capability check and adds that flag only when the host cannot
+# user-namespace capability check and adds that flag when the host cannot
 # provide Chromium's user-namespace sandbox. An empty explicit list removes the
-# unconditional desktop-entry downgrade without breaking that fallback.
+# unconditional desktop-entry downgrade; the packaged main process refuses the
+# launch if AppRun still requests that unsafe fallback.
 appImage:
   executableArgs: []
 

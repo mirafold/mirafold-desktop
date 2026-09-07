@@ -93,14 +93,15 @@ account boundary, and everything that remains unimplemented are recorded in
 ## What this is, precisely
 
 A thin Electron shell around the **published `mirafold` npm package**. It adds a
-window, a folder picker, a menu, and process lifecycle management. It contains
-no product logic, no UI, and no copy of the server — those all live in
-[`mirafold/mirafold`](https://github.com/mirafold/mirafold) and are consumed
-here as an ordinary dependency, the same artifact npm users install.
+window, a folder picker, a menu, secure Linux credential storage, and process
+lifecycle management. It contains no copy of the Shell UI or server — those
+live in [`mirafold/mirafold`](https://github.com/mirafold/mirafold) and are
+consumed here as an ordinary dependency, the same artifact npm users install.
 
 ```
 ┌─ Electron main process ─────────────────────┐
-│  folder picker · menu · crash dialog        │
+│  folder picker · menu · native dialogs      │
+│  encrypted Linux Pro state · PKCE callback  │
 │                                             │
 │  spawns ──► mirafold daemon (child process) │
 │             ├─ agent CLIs (pty)             │
@@ -149,12 +150,48 @@ per-launch auth token, its Origin guard) remains true here without re-auditing.
 The native pieces a desktop app owes you live in the main process, where they
 need no bridge.
 
+### Linux Pro activation stays outside the renderer
+
+The published Shell asks Linux Desktop to start activation with one fixed
+external URL marker. Electron accepts that marker only while the current
+top-level document belongs to this launch's daemon; every inexact URL retains
+the ordinary external-navigation policy. The main process then requires an
+available Secret Service or KWallet-backed `safeStorage` provider before it
+opens the fully parameterized activation page in the system browser.
+
+The private loopback callback state is encrypted and read back before the
+browser opens. A returned Pro key is likewise encrypted and read back before
+Desktop stops the current daemon and starts the same folder again. The key
+reaches the published Shell through a one-use standard-input pipe, never a
+renderer bridge, command-line argument, or child-process environment variable.
+An unexpired callback whose saved port remains available resumes after an app
+restart without opening a browser page on its own; choosing activation in the
+Shell reopens that exact saved flow. This native lifecycle is currently
+Linux-only. Windows activation remains a separate planned proof.
+
+On Linux, **Project → Remove Pro Access from This Device…** becomes available
+whenever an encrypted key or unfinished activation is present. Its native
+confirmation explains the accountless recovery limit: reconnecting later needs
+an existing Pro key, or Mirafold support when that key is unavailable. A
+confirmed removal first closes the private callback listener and any exchange,
+then proves the daemon tree stopped, removes only the dedicated encrypted Pro
+state, and starts the same folder without Pro. Canceling the confirmation does
+none of those things. Activation completion, removal, folder changes, daemon
+crashes, updater installation and recovery, restarts, and quit take one ordered
+main-process lifecycle turn each; native dialogs also wait their turn so stale
+outcomes do not stack over a newer decision. An unclean crash blocks every
+replacement daemon until the app exits. A presented folder chooser cannot hold
+terminal quit open, and neither can an active crash, startup-recovery, Pro
+result, or removal-failure dialog. Failed cleanup is reported before stale boot
+ownership is discarded. Rollback after failed removal or updater recovery keeps
+any returned Pro key that is still waiting for a secure save.
+
 ## Files
 
 | file | what it does |
 | --- | --- |
-| `src/main.js` | app lifecycle, window, menu, folder picker, crash dialog |
-| `src/app-lifecycle.js` | hold ordinary Electron quit until asynchronous cleanup finishes |
+| `src/main.js` | app lifecycle, window, menu, folder picker, native dialogs, and Linux Pro coordination |
+| `src/app-lifecycle.js` | serialize daemon/Pro lifecycle ownership and hold quit until asynchronous cleanup finishes |
 | `src/daemon-bootstrap.cjs` | enter packaged Node mode, scrub it, and register Linux pseudo-terminals |
 | `src/daemon.js` | spawn the daemon as a child, read its URL, own its lifecycle |
 | `src/daemon-output.js` | credential-redacting, memory-bounded handling of the daemon's output |
@@ -163,6 +200,8 @@ need no bridge.
 | `src/interface-scale.js` | validate, step, and reapply the device-level whole-interface scale |
 | `src/navigation.js` | what the window is allowed to load, and what goes to the browser |
 | `src/permissions.js` | deny Chromium permissions except notifications from the active daemon's main frame |
+| `src/pro-activation.js` | private loopback PKCE activation, exact callback validation, and restart resumption |
+| `src/pro-store.js` | encrypted, atomic Linux Pro state backed only by Secret Service or KWallet |
 | `src/platform-updaters.js` | atomic AppImage replacement and acknowledged NSIS launch |
 | `src/updater.js` | update policy for APT, direct installers, Store packages, and Linux tar archives |
 | `src/login-env.js` | recover the login shell's `PATH` so agent CLIs are findable |
@@ -182,9 +221,11 @@ npm start
 ```
 
 On a Linux dev checkout, Electron's `chrome-sandbox` helper isn't installed with
-the root ownership it needs, and the app aborts. Use `npm run start:nosandbox`
-while developing — packaged builds install the sandbox correctly and don't need
-it.
+the root ownership it needs, and the app may abort. `npm run start:nosandbox`
+is available only for local development. Release builds refuse to open if
+Chromium's sandbox is disabled. The `.deb` installs the required sandbox support;
+portable AppImage and tar builds require a host that permits unprivileged user
+namespaces and stop safely when it does not.
 
 Tests:
 
@@ -264,12 +305,11 @@ artifacts.
 
 Publication is gated on the repository Actions variable
 `MIRAFOLD_AUTOMATED_RELEASES`, which must equal the literal value `enabled`
-before the write job can run. It was kept absent through the first signed APT
-release (0.3.2) and its non-publishing rehearsals, and **has been `enabled`
-since 2026-08-30**: ordinary Shell releases now require no Desktop source
-edit, version command, tag, installer build, or GitHub Release action from a
-maintainer. Deleting the variable stops publication again (intake, tests, and
-rehearsals keep running); a release already published stays published.
+before the write job can run. It was enabled on 2026-08-30 and disabled during
+Phase 13's release-control review on 2026-09-07. Keep it `disabled` through
+candidate acceptance and until the reviewed release writer reaches `main`
+and its live behavior is verified. Setting it to `disabled` stops future
+publication; an already published release stays published.
 
 `npm run update:probe:linux OLD_APPIMAGE NEW_RELEASE_DIR` is the local-only,
 disposable proof of the real Linux update paths. It serves a freshly built
@@ -290,19 +330,21 @@ retry state, publication isolation, and the exact Shell identity carried from
 reviewed intake into the proposed native package. Each scenario must prove its
 named evidence test really ran — Node counts a test file itself as one passing
 test, so a bare pass count would accept a renamed or deleted scenario test. A
-manual dispatch of the `Release` workflow from canonical `main` is the separate
-native Linux/Windows rehearsal: it builds, smoke-checks, verifies, retains,
-signs with the production archive identity, and attests the 17 files, while the
-event gate keeps its only `contents: write` publication job skipped. The
-signer uses the existing `automated-release` environment, whose live branch
-policy admits only `main`; a real `v*` tag instead uses the reviewer-protected
-`manual-release` environment. Its build jobs use the same script-free pinned
-npm toolchain and signature/advisory gates as Shell intake, so the manual tag
-path and the automated path package identical, registry-verified bytes. Its
-manual form also
-accepts `fail_platform=linux` or `fail_platform=windows`; the selected native
-leg fails before dependency code, proving that either platform failure prevents
-provenance and publication while the other matrix leg is still allowed to run.
+manual dispatch of the `Release` workflow from canonical `main` builds and
+checks native Linux/Windows packages, signs the APT repository, attests all 17
+files, and retains them with `candidate.json` as `release-candidate` for 90 days.
+That manifest binds the commit, run, versions, and every file's SHA-256. The
+signer uses the main-only `automated-release` environment; the publication job
+stays skipped. A later signed `v*` tag names the accepted run and manifest hash.
+Its reviewer-protected `manual-release` publisher checks the exact main commit,
+successful first-attempt run, retained artifact, manifest, file hashes, and APT
+signature before uploading those original files. It does not rebuild or sign
+again. The complete procedure is in [docs/RELEASING.md](docs/RELEASING.md).
+
+The dispatch form also accepts `fail_platform=linux` or `fail_platform=windows`;
+the selected native leg fails before dependency code, proving that either
+platform failure prevents candidate retention while the other leg can finish.
+Start a new dispatch after failure; reruns are ineligible as frozen candidates.
 
 The Windows runner cannot truthfully stand in for a person. Its silent NSIS
 probe does not claim anything about SmartScreen, the visible install wizard,

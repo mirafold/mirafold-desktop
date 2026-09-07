@@ -25,8 +25,18 @@ let permissionCheckHandler = null;
 let permissionRequestHandler = null;
 let windowOpenHandler = null;
 const mode = process.env.MIRAFOLD_MAIN_PROBE_MODE;
+if (["packaged-no-sandbox", "packaged-no-sandbox-windows"].includes(mode)) {
+  Object.defineProperty(process, "platform", {
+    value: mode === "packaged-no-sandbox" ? "linux" : "win32",
+  });
+}
 if (mode === "apt-managed") process.resourcesPath = "/fixture-resources";
-if (mode === "navigation-rejection" || mode === "loading-file-failure") {
+if (
+  mode === "navigation-rejection"
+  || mode === "loading-file-failure"
+  || mode === "initial-folder-rejection"
+  || mode === "project-folder-rejection"
+) {
   process.on("unhandledRejection", (error) => { unhandledRejections.push(error); });
 }
 if (mode === "navigation-rejection") {
@@ -36,6 +46,10 @@ let folderDialogs = 0;
 let menuTemplate = null;
 let failStops = false;
 let quitCalls = 0;
+const exitCalls = [];
+const sandboxErrors = [];
+let singleInstanceLockCalls = 0;
+let readyCalls = 0;
 let updaterStarts = 0;
 let releaseStaleStart;
 const staleStart = new Promise((resolve) => { releaseStaleStart = resolve; });
@@ -64,8 +78,9 @@ class FakeDaemon {
     daemonInstances.push(this);
   }
 
-  async start(folder) {
+  async start(folder, options) {
     this.folder = folder;
+    this.options = options;
     this.running = true;
     if (
       mode === "boot-failure-quit"
@@ -105,6 +120,7 @@ class FakeWindow extends EventEmitter {
       },
     };
     this.webContents.isDestroyed = () => false;
+    this.webContents.getURL = () => this.currentUrl ?? "";
     this.webContents.setZoomFactor = (scale) => { this.appliedScales.push(scale); };
     this.webContents.setWindowOpenHandler = (handler) => { windowOpenHandler = handler; };
     windows.push(this);
@@ -114,10 +130,12 @@ class FakeWindow extends EventEmitter {
     if (mode === "loading-file-failure") {
       throw new Error("fixture loading screen failure");
     }
+    this.currentUrl = "file:///fixture-loading.html";
     this.webContents.emit("did-finish-load");
   }
   async loadURL(url) {
     this.loadedUrls.push(url);
+    this.currentUrl = url;
     if (mode === "page-load-failure") {
       const failure = new Error(
         "ERR_FAILED (-2) loading 'http://127.0.0.1:4100/?token=dummy-dialog-token'",
@@ -150,21 +168,40 @@ class FakeWindow extends EventEmitter {
 }
 
 const app = new EventEmitter();
-app.isPackaged = mode === "apt-managed";
-app.requestSingleInstanceLock = () => true;
-app.whenReady = () => Promise.resolve();
+app.isPackaged = mode === "apt-managed" || [
+  "packaged-no-sandbox",
+  "packaged-no-sandbox-windows",
+].includes(mode);
+app.commandLine = {
+  hasSwitch: (name) => ["packaged-no-sandbox", "packaged-no-sandbox-windows"].includes(mode)
+    && name === "no-sandbox",
+};
+app.requestSingleInstanceLock = () => { singleInstanceLockCalls += 1; return true; };
+app.whenReady = () => { readyCalls += 1; return Promise.resolve(); };
 app.getPath = () => "/fixture-home";
 app.getVersion = () => "0.1.1";
 app.quit = () => { quitCalls += 1; };
+app.exit = (code) => { exitCalls.push(code); };
 
 const autoUpdater = new EventEmitter();
+const safeStorage = {};
 const dialog = {
   async showOpenDialog(...args) {
+    if (mode === "initial-folder-rejection") {
+      throw new Error("fixture initial folder dialog failure");
+    }
     folderDialogs += 1;
     assert.ok(args[0] instanceof FakeWindow, "an active window must own the folder dialog");
+    if (mode === "project-folder-rejection") {
+      throw new Error("fixture project folder dialog failure");
+    }
     return { canceled: false, filePaths: ["/next-project"] };
   },
   async showMessageBox(...args) {
+    if (["packaged-no-sandbox", "packaged-no-sandbox-windows"].includes(mode)) {
+      sandboxErrors.push(args.at(-1));
+      return { response: 0 };
+    }
     if (
       mode !== "cleanup-failure"
       && mode !== "crash-during-load"
@@ -204,15 +241,30 @@ const shell = {
 };
 
 mock.module("electron", {
-  namedExports: { app, autoUpdater, BrowserWindow: FakeWindow, dialog, Menu, shell },
+  namedExports: { app, autoUpdater, BrowserWindow: FakeWindow, dialog, Menu, safeStorage, shell },
 });
 mock.module(new URL("./src/daemon.js", import.meta.url).href, {
   namedExports: { Daemon: FakeDaemon },
 });
+mock.module(new URL("./src/pro-store.js", import.meta.url).href, {
+  namedExports: {
+    PRO_STORE_VERSION: 1,
+    createProStore: () => ({
+      inspect: async () => ({ present: false }),
+    }),
+  },
+});
+mock.module(new URL("./src/pro-activation.js", import.meta.url).href, {
+  namedExports: {
+    createProActivationController: () => ({
+      shutdown: async () => false,
+    }),
+  },
+});
 mock.module(new URL("./src/state.js", import.meta.url).href, {
   namedExports: {
     interfaceScale: () => mode === "zoom" ? 1.25 : 1,
-    lastFolder: () => "/initial-project",
+    lastFolder: () => mode === "initial-folder-rejection" ? null : "/initial-project",
     setInterfaceScale: (scale) => rememberedScales.push(scale),
     setLastFolder: (folder) => rememberedFolders.push(folder),
   },
@@ -244,6 +296,31 @@ async function waitFor(predicate, message) {
   assert.ok(predicate(), message);
 }
 
+if (mode === "packaged-no-sandbox") {
+  await waitFor(() => exitCalls.length === 1, "the sandbox refusal did not settle");
+  assert.deepEqual(exitCalls, [1], "the unsafe packaged process must exit with failure");
+  assert.equal(sandboxErrors.length, 1, "the refusal must explain why the app cannot open");
+  assert.match(sandboxErrors[0].title, /Chromium sandbox/);
+  assert.match(sandboxErrors[0].message, /cannot open safely/);
+  assert.match(sandboxErrors[0].message, /Linux host/);
+  assert.match(sandboxErrors[0].detail, /\.deb package|user namespaces/);
+  assert.equal(singleInstanceLockCalls, 0, "unsafe startup must stop before acquiring app ownership");
+  assert.equal(readyCalls, 1, "unsafe startup must reach readiness only to display its refusal");
+  assert.equal(windows.length, 0, "unsafe startup must not create a renderer window");
+  assert.equal(daemonInstances.length, 0, "unsafe startup must not launch the Shell daemon");
+  process.stdout.write("main lifecycle probe passed\n");
+} else if (mode === "initial-folder-rejection") {
+  await waitFor(
+    () => quitCalls === 1 || unhandledRejections.length > 0,
+    "the rejected initial folder picker did not settle",
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(quitCalls, 1, "a rejected initial folder picker left startup hanging");
+  assert.deepEqual(unhandledRejections, [], "initial startup escaped as an unhandled rejection");
+  assert.equal(windows.length, 0);
+  assert.equal(daemonInstances.length, 0);
+  process.stdout.write("main lifecycle probe passed\n");
+} else {
 await waitFor(
   () => menuTemplate !== null && (
     mode === "loading-file-failure"
@@ -270,13 +347,21 @@ assert.deepEqual(menuTemplate.map((item) => item.label), ["Project", "Edit", "Vi
 const projectMenu = menuTemplate.find((item) => item.label === "Project");
 assert.equal(projectMenu.submenu[0].label, "Open Project Folder…");
 const openFolder = projectMenu.submenu[0].click;
+const removeProItem = projectMenu.submenu.find(
+  (item) => item.label === "Remove Pro Access from This Device…",
+);
+if (process.platform === "linux") {
+  assert.equal(removeProItem?.enabled, false, "removal must stay neutral and disabled without saved state");
+} else {
+  assert.equal(removeProItem, undefined, "the Linux-only Pro phase changed another platform's menu");
+}
 const developmentViewRoles = menuTemplate
   .find((item) => item.label === "View")
   .submenu.map((item) => item.role)
   .filter(Boolean);
 assert.deepEqual(
   developmentViewRoles,
-  mode === "apt-managed"
+  app.isPackaged
     ? ["togglefullscreen"]
     : ["reload", "togglefullscreen", "toggleDevTools"],
 );
@@ -307,6 +392,14 @@ if (mode === "apt-managed") {
   assert.equal(helpItem.label, "Updates managed by APT");
   assert.equal(helpItem.enabled, false);
   process.stdout.write("main lifecycle probe passed\n");
+} else if (mode === "packaged-no-sandbox-windows") {
+  assert.deepEqual(exitCalls, [], "the Linux AppImage guard changed Windows startup");
+  assert.deepEqual(sandboxErrors, [], "the Linux AppImage refusal appeared on Windows");
+  assert.equal(singleInstanceLockCalls, 1, "Windows startup did not acquire app ownership");
+  assert.equal(windows.length, 1, "Windows startup did not create its renderer window");
+  assert.equal(daemonInstances.length, 1, "Windows startup did not launch its Shell daemon");
+  assert.equal(daemonInstances[0].running, true, "the Windows Shell daemon did not stay running");
+  process.stdout.write("main lifecycle probe passed\n");
 } else if (mode === "packaged-menu") {
   mainModule.buildMenu(true);
   const packagedViewRoles = menuTemplate
@@ -318,6 +411,16 @@ if (mode === "apt-managed") {
     ["togglefullscreen"],
     "packaged builds must not present reload or developer tools as product commands",
   );
+  process.stdout.write("main lifecycle probe passed\n");
+} else if (mode === "project-folder-rejection") {
+  const originalDaemon = daemonInstances[0];
+  openFolder();
+  await waitFor(() => folderDialogs === 1, "the project folder picker did not open");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(unhandledRejections, [], "project folder selection escaped as an unhandled rejection");
+  assert.equal(quitCalls, 0, "a failed optional folder picker quit a working session");
+  assert.equal(daemonInstances.length, 1, "a failed folder picker started a replacement daemon");
+  assert.equal(originalDaemon.running, true, "a failed folder picker stopped the current daemon");
   process.stdout.write("main lifecycle probe passed\n");
 } else if (mode === "zoom") {
   assert.deepEqual(
@@ -550,6 +653,7 @@ assert.deepEqual(
 );
 process.stdout.write("main lifecycle probe passed\n");
 }
+}
 `;
 
 function runProbe(mode) {
@@ -594,6 +698,14 @@ test("a loading-screen failure is reported and quits without an unhandled reject
   runProbe("loading-file-failure");
 });
 
+test("a rejected initial folder picker quits without an unhandled rejection", () => {
+  runProbe("initial-folder-rejection");
+});
+
+test("a rejected project folder picker preserves the working session", () => {
+  runProbe("project-folder-rejection");
+});
+
 test("rejected popup and external navigation promises are handled", () => {
   runProbe("navigation-rejection");
 });
@@ -610,4 +722,9 @@ test("a packaged Debian install with the archive marker leaves updates to APT", 
   skip: process.platform !== "linux",
 }, () => {
   runProbe("apt-managed");
+});
+
+test("the Linux AppImage sandbox refusal does not change Windows startup", () => {
+  runProbe("packaged-no-sandbox");
+  runProbe("packaged-no-sandbox-windows");
 });
