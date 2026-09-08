@@ -1630,9 +1630,9 @@ security primitive the platform does not already provide.
   `34166008224`, including the real Windows package lifecycle) and DCO.
   Automated PR review completed without findings on that implementation.
   The closeout follow-up changes only this plan and the audit report.
-  Step 13.10 is next and has not started; automated releases remain disabled.
+  Step 13.10 subsequently completed below; automated releases remain disabled.
 
-- [ ] **Step 13.10 — freeze one release candidate without changing it.** From
+- [x] **Step 13.10 — freeze one release candidate without changing it.** From
   the exact commit that cleared Steps 13.7–13.9, run the full clean-room release
   rehearsal and native CI, build `.deb`, AppImage, and tar exactly once, inspect
   their contents and secret-free metadata, and record immutable hashes. Any
@@ -1658,15 +1658,35 @@ security primitive the platform does not already provide.
   Three final suites pass 341 tests with one skip; dependency, actionlint,
   rehearsal, and all Linux package checks pass. Hosted CI `34168622219` passes
   Linux and the real Windows packaged lifecycle. Fresh cold and automated PR
-  reviews report no remaining findings. Finish the required final-head checks
-  and PR merge, then reconstruct the reviewed tree on a release branch into `main`, require its checks and
-  review, record that exact merged commit, and only then dispatch the full
-  nonpublishing candidate build. Keep `main` fixed throughout freeze/acceptance.
-  This source preparation does not freeze a candidate. Automated releases stay
-  disabled, no signing policy changes, and DPC.11 remains dependent on 13.10.
+  reviews report no remaining findings. PR #65 merged as `626eac2` after the
+  final checks. PR #66 reconstructed that exact reviewed tree on `main` and
+  merged as `dd019377cc3975171dd783c6bb71d9ffa20ab6cd` after native CI and review.
   [Original preflight](docs/candidate-freeze-preflight.md),
   [preparation review](docs/audits/phase13-release-preparation.md), and persistent
   `/home/serrecchia/Projects/mirafold-desktop-dpc10/HANDOFF.md` carry the evidence.
+
+  **2026-09-07: freeze complete.** First-attempt nonpublishing Release run
+  `34170884999` built Desktop `0.4.0` / Shell `0.9.0` once, signed its APT
+  repository, and attested all 17 release files. Exact-main CI `34170857962`
+  and release-PR CI `34170228385` pass on Linux and Windows. Artifact
+  `10035864998`, its original manifest, and the extracted files are retained at
+  `/home/serrecchia/Projects/mirafold-desktop-0.4.0-candidate`.
+  Manifest SHA-256:
+  `32a536b52c108fb19e69b72d7a2c15c3fef2449fe27b01d05b899f62ad2151fb`.
+  Archive/file hashes, complete release metadata, approved APT signatures, and
+  the signed provenance statement's exact source/run and 17 subjects verify.
+  The release rehearsal and all three extracted Linux package smokes pass;
+  Windows passed its actual NSIS install/uninstall lifecycle on the native
+  runner. Post-smoke hashes still match. [Freeze report](docs/releases/desktop-0.4.0-candidate.md)
+  and [original manifest](docs/releases/desktop-0.4.0-candidate.json) record the
+  portable evidence; detailed logs are in the adjacent permanent
+  `mirafold-desktop-dpc10-freeze-evidence` directory.
+
+  Step 13.11 is next. Keep `main` fixed at the candidate commit and `next`
+  closed to merges until the release sync. This completion documentation lives
+  on the separate `docs/desktop-candidate-freeze` branch. Automated releases
+  remain disabled; no tag, public release, installed production acceptance,
+  real Pro key, or purchase was performed in this freeze.
 
 - [ ] **Step 13.11 — accept the frozen candidate against production.** Require
   the reviewed site activation endpoints and D1 migration live first. Install

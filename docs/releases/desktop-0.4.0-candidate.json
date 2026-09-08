@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "repository": "mirafold/mirafold-desktop",
+  "workflow": ".github/workflows/release.yml",
+  "commit": "dd019377cc3975171dd783c6bb71d9ffa20ab6cd",
+  "runId": "34170884999",
+  "runAttempt": 1,
+  "desktopVersion": "0.4.0",
+  "shellVersion": "0.9.0",
+  "assets": [
+    {
+      "name": "InRelease",
+      "size": 1401,
+      "sha256": "35e9b538a2838811b44a115adbf419aa0a99623e13026fdc4b3931a1ce1629fe"
+    },
+    {
+      "name": "Mirafold-0.4.0.AppImage",
+      "size": 219590116,
+      "sha256": "0589636aa67816eee5a1b404391ff52d2a64a29ee7d60bef81f514f95a7bf24c"
+    },
+    {
+      "name": "Mirafold-Setup-0.4.0.exe",
+      "size": 166056591,
+      "sha256": "3fd491a6129c934d28358ef83138b0849726a0ac213bfbf4323579561a7bc8aa"
+    },
+    {
+      "name": "Mirafold-Setup-0.4.0.exe.blockmap",
+      "size": 173646,
+      "sha256": "43d8f30b9eee2f174a67ea958f91f6419a5285b60faef1282d5813fb90517207"
+    },
+    {
+      "name": "Packages",
+      "size": 1578,
+      "sha256": "5e260647c92434bdb3bb97318feb15cf32ff9fdf197a0ca0ef12820c449b4006"
+    },
+    {
+      "name": "Packages.gz",
+      "size": 891,
+      "sha256": "27f4fd46c52f7c9d4fd5cb0d8fada0d8b5f50f54090362a8fc7f39777c6c013c"
+    },
+    {
+      "name": "Release",
+      "size": 693,
+      "sha256": "0f39739f6e669290801325f19ea88699ab597195f27d6d432bbddd81155151b2"
+    },
+    {
+      "name": "Release.gpg",
+      "size": 659,
+      "sha256": "aa25a6afc3fdc340f5a19074c8fa34a0668882d45f10f445e1a7c6ced9634e8c"
+    },
+    {
+      "name": "SHA256SUMS-linux.txt",
+      "size": 368,
+      "sha256": "6e8eb07a63be4a0a05b065603dd67bf349b7bf0bc09c7a42f4a217585f76c707"
+    },
+    {
+      "name": "SHA256SUMS-windows.txt",
+      "size": 268,
+      "sha256": "a4e398b751d5bf6067518445565c19210f0012a0ec83920814464ecdb737d408"
+    },
+    {
+      "name": "latest-linux.yml",
+      "size": 531,
+      "sha256": "02f9d1a15eee09244a91862890a5430a9aa42c64a4099e1c164ed24cee3264f3"
+    },
+    {
+      "name": "latest.yml",
+      "size": 345,
+      "sha256": "7c2cd5037d81054d1399ee51b38c0e092405e605826955f1ba8ede704d427cc3"
+    },
+    {
+      "name": "mirafold-archive-keyring.gpg",
+      "size": 928,
+      "sha256": "905193ea37b5c0199a3c45b84d747f265861ede084c6c9e17e758ce4d12b98e3"
+    },
+    {
+      "name": "mirafold-archive-keyring_1.0_all.deb",
+      "size": 2114,
+      "sha256": "b07dec086725b089ed53a5bd3e6ba41dabcdb1dee98518050270ff8cc8a89af7"
+    },
+    {
+      "name": "mirafold-desktop-0.4.0.tar.gz",
+      "size": 207311694,
+      "sha256": "94bb428c2fbb44ed967ac83bcd7e6e970530a4581fe0f45482203c61389c161d"
+    },
+    {
+      "name": "mirafold-desktop_0.4.0_amd64.deb",
+      "size": 168911560,
+      "sha256": "4001582a273bb9ae7971d0396ef9fcc92112bece14b579493ee11274482415b8"
+    },
+    {
+      "name": "mirafold.sources",
+      "size": 180,
+      "sha256": "83f14d2633beda52bd2e805c2faa29fbd37db5a3babd25dd0037ca22d55795fa"
+    }
+  ]
+}
