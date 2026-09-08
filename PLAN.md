@@ -1690,8 +1690,11 @@ security primitive the platform does not already provide.
 
 - [ ] **Step 13.11 — accept the frozen candidate against production.** Require
   the reviewed site activation endpoints and D1 migration live first. Install
-  Step 13.10's exact bytes through a candidate APT source on a clean supported
-  Linux desktop and launch from the app center. First activate with an existing
+  Step 13.10's exact bytes with APT on a supported Linux desktop and launch
+  from the app center. Kyle selected an upgrade of his existing Ubuntu system
+  rather than the originally proposed clean installation; authenticate the
+  candidate's signed index and exact package before that upgrade, and report
+  the evidence as an upgrade. First activate with an existing
   real Pro key to prove the no-charge path; Kyle types it in his own system
   browser, never pastes it into chat, and the assistant never reads it. Then,
   only with Kyle's explicit authorization in that future turn, run one fresh
@@ -1706,16 +1709,28 @@ security primitive the platform does not already provide.
   approximation—pass the full installed arc. Do not publish or edit
   mirafold.com in this Step.
 
-  **2026-09-07 preflight passed; installed acceptance remains pending.** The
+  **2026-09-07: installed upgrade, existing-key activation, phone access,
+  and application restart passed; Step remains in progress.** The
   frozen manifest and all 17 files still verify. Seven live site files match
   reviewed `2eb9001`; private endpoint refusals and the nonexistent-code D1
   lookup pass. An isolated APT client authenticates the retained signed index,
-  selects 0.4.0, and downloads the exact frozen Debian package. Host packages
-  and APT configuration were not changed. This host is Ubuntu 24.04.4 amd64
-  with Desktop 0.3.15 already installed; the clean installation environment
-  still needs to be identified with Kyle. No real key, trial, installation,
-  or production acceptance has occurred. Exact continuation, remaining manual
-  sequence, helper commands, and evidence are retained in
+  selects 0.4.0, and downloads the exact frozen Debian package. Kyle chose this
+  Ubuntu 24.04.4 amd64 computer and a direct upgrade. Public APT first moved
+  0.3.15 to 0.3.16; installing the retained local Debian package with APT then
+  moved it to 0.4.0. All 3,003 installed package files match its recorded
+  checksums, and the APT ownership marker is present. Existing profile and
+  project data were preserved; no clean installation is claimed.
+
+  Kyle opened the normal app through Ubuntu's launcher, found his existing
+  license key himself, entered it in his own browser, and reported successful
+  activation. He then confirmed a QR code and real use from his phone. After
+  closing and reopening Mirafold, he reported access without returning to the
+  browser or entering the key again. These are direct human observations;
+  the assistant never received or read the key. No trial or new subscription
+  is authorized. Computer-restart persistence is next, followed by the
+  remaining management/removal/fallback and separately authorized trial checks.
+  [Acceptance record](docs/releases/desktop-0.4.0-acceptance.md) and the exact
+  continuation, remaining manual sequence, helper commands, and evidence are in
   `/home/serrecchia/Projects/mirafold-desktop-dpc11-evidence/HANDOFF.md`.
 
 - [ ] **Step 13.12 — publish exactly the accepted Linux release.** Reconfirm the
