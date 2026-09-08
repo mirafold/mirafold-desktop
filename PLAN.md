@@ -1706,6 +1706,18 @@ security primitive the platform does not already provide.
   approximation—pass the full installed arc. Do not publish or edit
   mirafold.com in this Step.
 
+  **2026-09-07 preflight passed; installed acceptance remains pending.** The
+  frozen manifest and all 17 files still verify. Seven live site files match
+  reviewed `2eb9001`; private endpoint refusals and the nonexistent-code D1
+  lookup pass. An isolated APT client authenticates the retained signed index,
+  selects 0.4.0, and downloads the exact frozen Debian package. Host packages
+  and APT configuration were not changed. This host is Ubuntu 24.04.4 amd64
+  with Desktop 0.3.15 already installed; the clean installation environment
+  still needs to be identified with Kyle. No real key, trial, installation,
+  or production acceptance has occurred. Exact continuation, remaining manual
+  sequence, helper commands, and evidence are retained in
+  `/home/serrecchia/Projects/mirafold-desktop-dpc11-evidence/HANDOFF.md`.
+
 - [ ] **Step 13.12 — publish exactly the accepted Linux release.** Reconfirm the
   candidate hashes equal Step 13.11, then use the protected Desktop release path
   without source changes. Verify the tag, release manifests, attestations,
