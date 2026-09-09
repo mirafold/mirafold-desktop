@@ -1781,6 +1781,13 @@ security primitive the platform does not already provide.
   [release record](docs/releases/desktop-0.4.0-release.md). Site public positioning
   is unblocked and authorized.
 
+**Post-release documentation follow-up (2026-09-08):** PR #67 is pushed but
+blocked by new npm advisories for runtime Hono 4.12.34 and js-yaml 4.3.1. Both
+CI jobs stop at audit, before tests. Candidate publication and the website are
+complete; a separately reviewed dependency update/forward release is required
+before these records can merge under green checks. No package asset or check
+policy was changed. See the release record's “Documentation merge status.”
+
 ### Phase 14 — Windows Desktop Pro activation proof (deferred; not a Linux gate)
 
 Windows may not inherit the Linux result by analogy. Its current PowerShell Job

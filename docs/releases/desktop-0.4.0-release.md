@@ -60,3 +60,15 @@ unblocked and expressly authorized in the current conversation.
 
 Detailed evidence is retained at
 `/home/serrecchia/Projects/mirafold-desktop-dpc12-evidence/`.
+
+## Documentation merge status
+
+The release records are committed and pushed in PR #67, but its Linux and
+Windows jobs in run `34309717138` stop at the current dependency audit before
+tests. Existing runtime Hono 4.12.34 and js-yaml 4.3.1 now match moderate/high
+advisories added to GitHub’s database on 2026-09-08. This does not change the
+verified release hashes; actual Mirafold exploitability remains unverified.
+A dependency update changes packaged runtime bytes and requires a separately
+reviewed forward release. The published 0.4.0 files are immutable. No check was
+bypassed, and PR #67 remains open. Details and upstream fixes are recorded in
+`/home/serrecchia/Projects/mirafold-desktop-dpc12-evidence/documentation-ci-block.md`.
