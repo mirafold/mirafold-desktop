@@ -1,8 +1,13 @@
-# Desktop 0.4.0 installed acceptance — in progress
+# Desktop 0.4.0 installed acceptance — accepted
 
-Updated 2026-09-07. DPC.11 / Step 13.11 remains unfinished. The next manual
-check is persistence across a computer restart. No tag or public release has
-been created for this candidate, and no trial or new subscription is authorized.
+Updated 2026-09-08. Kyle accepted the observed installed-upgrade results,
+stopped extra manual testing, and then explicitly authorized closing acceptance,
+publishing Desktop 0.4.0, and completing the website changes ("let's do them now").
+DPC.11 / Step 13.11 is complete under that accepted scope. The omitted checks
+below remain unperformed; closure is not a claim that they passed. In the current
+conversation Kyle also reports Desktop Pro working. No trial or new
+subscription is authorized. DPC.12 subsequently published the exact accepted bytes; see the
+[release record](desktop-0.4.0-release.md).
 
 ## Candidate and selected installation
 
@@ -51,37 +56,67 @@ uninstall instruction as the next step.
   reopened it. The installed main-process source quits when its last window
   closes. He reported access without reopening the browser or entering his
   key again, establishing the human application-restart persistence check.
+- Kyle confirmed restarting this computer, then reported that opening the
+  installed app and displaying the Pair QR code worked without browser
+  activation or another key entry. He scanned the QR code with his phone and
+  confirmed that connection and use worked. The visible boot ID changed from
+  `4d74bcb0-b374-4316-8255-33e92582d199` before the restart to
+  `7e087037-203b-4470-bc64-097924108a64` afterward. This combines the tool's boot
+  observation with Kyle's direct reports; it is not automated GUI inspection.
+- Kyle clicked `manage subscription` in the desktop Pair panel and reported
+  an option to cancel his subscription. This proves management-screen access;
+  no cancellation was requested or reported, and cancellation behavior is not
+  claimed as tested.
+- Kyle revealed the hidden native menu by pressing and releasing Alt,
+  confirmed that he can retrieve his existing key, and used device-level
+  removal. He reported the app reopening successfully, then no Pair QR code
+  and browser actions to get Pro or connect an existing key. The desktop
+  removal UI check passed. An already-open phone connection was not checked;
+  the assistant had not instructed him to keep it open. Kyle chose to stop
+  extra testing rather than repeat removal. Reconnection is not yet observed.
 
-## Remaining checks and boundaries
+## Unperformed checks and boundaries
 
-- Computer restart, followed by Pro access and phone use without reentering
-  the license key. Record a before/after boot observation where available.
-- Subscription-management access, device-level Pro removal, and
-  reconnect/support fallback. Do not cancel Kyle's existing subscription
+- Active-phone disconnection during removal and reconnect/support fallback
+  remain unverified. Kyle stopped extra manual testing; do not repeat removal
+  by default. Do not cancel Kyle's existing subscription
   merely to exercise a management control.
 - A fresh live monthly Paddle trial only after Kyle explicitly authorizes
   creating it: $0 immediately, then $12/month after seven days unless canceled.
   Cancel that test trial in the same acceptance pass. No authorization for it
   has been given, and no test purchase has occurred.
-- Complete the remaining installed-flow observations and ordinary npm/browser
-  checkout checks. Reconfirm candidate hashes, then mark DPC.11 complete only
-  when its selected installed acceptance arc has passed.
+- Additional installed-flow observations and a fresh paid browser checkout
+  were not performed. On 2026-09-08 the release preflight again verified all 17
+  package hashes, the accepted manifest, the approved APT signature, fixed live
+  main/next commits, the original successful candidate run and unexpired artifact,
+  installed version 0.4.0, and disabled automated releases. Seven production
+  pages/scripts, including ordinary pay/welcome, still match reviewed source;
+  all three synthetic-invalid activation endpoint probes passed. Those checks
+  establish unchanged served checkout bytes, not a new live purchase.
 
-Keep main at the candidate commit, next closed to merges until release sync,
-and automated releases disabled. DPC.12 publication and public website
-positioning remain gated. Windows Pro is a separate deferred proof.
+Publication completed, and live main/next source trees are equal; the staging
+hold is closed. Automated releases remain disabled. Kyle authorized the
+following website work in the current conversation. The repeated host update
+and manual pairing checks are not resumed: this host already runs the accepted
+0.4.0 bytes. Verify the public APT index and exact download without changing
+system packages. Windows Pro remains a separate deferred proof.
+
+Release preflight and publication evidence:
+`/home/serrecchia/Projects/mirafold-desktop-dpc12-evidence/`.
 
 ## Permanent continuation
 
 `/home/serrecchia/Projects/mirafold-desktop-dpc11-evidence/HANDOFF.md` is the
 current continuation. The same directory holds `acceptance-state.json`,
 `production-preflight.json`, `apt-download-preflight.json`,
-`installed-package-verification.json`, the scripts and APT logs. Human
+`installed-package-verification.json`, `before-computer-restart.json`,
+`after-computer-restart.json`, the scripts and APT logs. Human
 observations record outcomes only; no license value, callback/pairing URL,
 or phone-session content was captured.
 
 The coordination roadmap is
 `/home/serrecchia/Projects/mirafold/ROADMAP.md`. This report and Desktop PLAN.md
-live on `docs/desktop-candidate-freeze` in intentionally unmerged draft PR #67,
-outside the fixed source checkout. Permanent handoffs in the coordination,
+live on `docs/desktop-candidate-freeze` in PR #67, outside the fixed source
+checkout. Its release hold has ended; the PR now records completed acceptance
+and publication. Permanent handoffs in the coordination,
 fixed-source, and candidate directories all point to the current checkpoint.

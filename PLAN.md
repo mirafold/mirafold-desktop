@@ -1688,7 +1688,7 @@ security primitive the platform does not already provide.
   remain disabled; no tag, public release, installed production acceptance,
   real Pro key, or purchase was performed in this freeze.
 
-- [ ] **Step 13.11 — accept the frozen candidate against production.** Require
+- [x] **Step 13.11 — accept the frozen candidate against production.** Require
   the reviewed site activation endpoints and D1 migration live first. Install
   Step 13.10's exact bytes with APT on a supported Linux desktop and launch
   from the app center. Kyle selected an upgrade of his existing Ubuntu system
@@ -1727,20 +1727,59 @@ security primitive the platform does not already provide.
   closing and reopening Mirafold, he reported access without returning to the
   browser or entering the key again. These are direct human observations;
   the assistant never received or read the key. No trial or new subscription
-  is authorized. Computer-restart persistence is next, followed by the
-  remaining management/removal/fallback and separately authorized trial checks.
+  is authorized.
+
+  **2026-09-08: computer-restart persistence and phone use passed.** Kyle
+  confirmed restarting this computer, then reported that the installed app's
+  Pair QR code appeared without browser activation or another key entry. He
+  scanned it and confirmed phone connection and use. The tool-visible boot ID
+  changed from the saved baseline, supporting his direct report of a computer
+  restart. Kyle then opened subscription management and reported an option
+  to cancel his subscription; no cancellation was requested or reported.
+  Kyle then confirmed access to his existing key, used device-level removal,
+  and reported a successful app restart followed by no QR code and browser
+  actions to get Pro or connect an existing key. He accepted the observed
+  results and stopped extra manual testing. The assistant had not asked him
+  to keep his phone page open, so disconnection of an already-open phone
+  session was not checked. Do not repeat removal or resume omitted manual
+  checks by default. Reconnection/fallback, the
+  separately authorized trial, ordinary npm/browser compatibility, and final
+  hash checks remain pending. Step 13.11 remains unfinished.
   [Acceptance record](docs/releases/desktop-0.4.0-acceptance.md) and the exact
   continuation, remaining manual sequence, helper commands, and evidence are in
   `/home/serrecchia/Projects/mirafold-desktop-dpc11-evidence/HANDOFF.md`.
 
-- [ ] **Step 13.12 — publish exactly the accepted Linux release.** Reconfirm the
+  **2026-09-08 acceptance closeout:** Kyle accepted the observed upgrade,
+  stopped extra manual testing, and explicitly requested acceptance closeout,
+  publication, and the website work. This supersedes the unfinished status above
+  and closes this Step with the omitted manual checks recorded as unperformed.
+  No trial or new subscription is authorized. Fresh release preflight passed all
+  17 frozen hashes, manifest, approved APT signature, live source/run/artifact
+  identity, installed 0.4.0, and unchanged production pay/welcome/activation
+  bytes with three expected private-API refusals. See the acceptance record.
+
+- [x] **Step 13.12 — publish exactly the accepted Linux release.** Reconfirm the
   candidate hashes equal Step 13.11, then use the protected Desktop release path
   without source changes. Verify the tag, release manifests, attestations,
   anonymous assets, APT index/signature, and installed version; update one
   existing APT installation through the real channel and repeat activation
   persistence plus relay pairing after update. Record versions, commits, run
-  IDs, artifacts, hashes, and observations. Only this completed Step unlocks
-  the site's public-positioning phase; it does not itself edit mirafold.com.
+  IDs, artifacts, hashes, and observations. Kyle's 2026-09-08 direction to
+  finish without extra manual testing supersedes the repeated host-update and
+  pairing procedure: the host already runs the accepted 0.4.0 bytes. Verify the
+  public signed APT index and exact package download using isolated client state;
+  do not claim a second host upgrade. Only this completed Step unlocks the site's
+  public-positioning phase; it does not itself edit mirafold.com.
+
+  **Completed 2026-09-08.** Signed `v0.4.0` selects the exact accepted candidate.
+  Protected run `34308830976` published all 17 unchanged files as public latest;
+  public hashes, signed provenance, approved APT index, and anonymous Debian
+  download match. No rebuild, extra manual test, new subscription, or host
+  package mutation occurred. Main and next already have the identical source
+  tree, so no content sync is needed and the staging hold ends. Automated
+  publication remains disabled under existing policy. Full evidence and limits:
+  [release record](docs/releases/desktop-0.4.0-release.md). Site public positioning
+  is unblocked and authorized.
 
 ### Phase 14 — Windows Desktop Pro activation proof (deferred; not a Linux gate)
 
