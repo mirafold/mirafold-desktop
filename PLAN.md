@@ -1630,9 +1630,9 @@ security primitive the platform does not already provide.
   `34166008224`, including the real Windows package lifecycle) and DCO.
   Automated PR review completed without findings on that implementation.
   The closeout follow-up changes only this plan and the audit report.
-  Step 13.10 is next and has not started; automated releases remain disabled.
+  Step 13.10 subsequently completed below; automated releases remain disabled.
 
-- [ ] **Step 13.10 — freeze one release candidate without changing it.** From
+- [x] **Step 13.10 — freeze one release candidate without changing it.** From
   the exact commit that cleared Steps 13.7–13.9, run the full clean-room release
   rehearsal and native CI, build `.deb`, AppImage, and tar exactly once, inspect
   their contents and secret-free metadata, and record immutable hashes. Any
@@ -1658,20 +1658,43 @@ security primitive the platform does not already provide.
   Three final suites pass 341 tests with one skip; dependency, actionlint,
   rehearsal, and all Linux package checks pass. Hosted CI `34168622219` passes
   Linux and the real Windows packaged lifecycle. Fresh cold and automated PR
-  reviews report no remaining findings. Finish the required final-head checks
-  and PR merge, then reconstruct the reviewed tree on a release branch into `main`, require its checks and
-  review, record that exact merged commit, and only then dispatch the full
-  nonpublishing candidate build. Keep `main` fixed throughout freeze/acceptance.
-  This source preparation does not freeze a candidate. Automated releases stay
-  disabled, no signing policy changes, and DPC.11 remains dependent on 13.10.
+  reviews report no remaining findings. PR #65 merged as `626eac2` after the
+  final checks. PR #66 reconstructed that exact reviewed tree on `main` and
+  merged as `dd019377cc3975171dd783c6bb71d9ffa20ab6cd` after native CI and review.
   [Original preflight](docs/candidate-freeze-preflight.md),
   [preparation review](docs/audits/phase13-release-preparation.md), and persistent
   `/home/serrecchia/Projects/mirafold-desktop-dpc10/HANDOFF.md` carry the evidence.
 
-- [ ] **Step 13.11 — accept the frozen candidate against production.** Require
+  **2026-09-07: freeze complete.** First-attempt nonpublishing Release run
+  `34170884999` built Desktop `0.4.0` / Shell `0.9.0` once, signed its APT
+  repository, and attested all 17 release files. Exact-main CI `34170857962`
+  and release-PR CI `34170228385` pass on Linux and Windows. Artifact
+  `10035864998`, its original manifest, and the extracted files are retained at
+  `/home/serrecchia/Projects/mirafold-desktop-0.4.0-candidate`.
+  Manifest SHA-256:
+  `32a536b52c108fb19e69b72d7a2c15c3fef2449fe27b01d05b899f62ad2151fb`.
+  Archive/file hashes, complete release metadata, approved APT signatures, and
+  the signed provenance statement's exact source/run and 17 subjects verify.
+  The release rehearsal and all three extracted Linux package smokes pass;
+  Windows passed its actual NSIS install/uninstall lifecycle on the native
+  runner. Post-smoke hashes still match. [Freeze report](docs/releases/desktop-0.4.0-candidate.md)
+  and [original manifest](docs/releases/desktop-0.4.0-candidate.json) record the
+  portable evidence; detailed logs are in the adjacent permanent
+  `mirafold-desktop-dpc10-freeze-evidence` directory.
+
+  Step 13.11 is next. Keep `main` fixed at the candidate commit and `next`
+  closed to merges until the release sync. This completion documentation lives
+  on the separate `docs/desktop-candidate-freeze` branch. Automated releases
+  remain disabled; no tag, public release, installed production acceptance,
+  real Pro key, or purchase was performed in this freeze.
+
+- [x] **Step 13.11 — accept the frozen candidate against production.** Require
   the reviewed site activation endpoints and D1 migration live first. Install
-  Step 13.10's exact bytes through a candidate APT source on a clean supported
-  Linux desktop and launch from the app center. First activate with an existing
+  Step 13.10's exact bytes with APT on a supported Linux desktop and launch
+  from the app center. Kyle selected an upgrade of his existing Ubuntu system
+  rather than the originally proposed clean installation; authenticate the
+  candidate's signed index and exact package before that upgrade, and report
+  the evidence as an upgrade. First activate with an existing
   real Pro key to prove the no-charge path; Kyle types it in his own system
   browser, never pastes it into chat, and the assistant never reads it. Then,
   only with Kyle's explicit authorization in that future turn, run one fresh
@@ -1686,14 +1709,84 @@ security primitive the platform does not already provide.
   approximation—pass the full installed arc. Do not publish or edit
   mirafold.com in this Step.
 
-- [ ] **Step 13.12 — publish exactly the accepted Linux release.** Reconfirm the
+  **2026-09-07: installed upgrade, existing-key activation, phone access,
+  and application restart passed; Step remains in progress.** The
+  frozen manifest and all 17 files still verify. Seven live site files match
+  reviewed `2eb9001`; private endpoint refusals and the nonexistent-code D1
+  lookup pass. An isolated APT client authenticates the retained signed index,
+  selects 0.4.0, and downloads the exact frozen Debian package. Kyle chose this
+  Ubuntu 24.04.4 amd64 computer and a direct upgrade. Public APT first moved
+  0.3.15 to 0.3.16; installing the retained local Debian package with APT then
+  moved it to 0.4.0. All 3,003 installed package files match its recorded
+  checksums, and the APT ownership marker is present. Existing profile and
+  project data were preserved; no clean installation is claimed.
+
+  Kyle opened the normal app through Ubuntu's launcher, found his existing
+  license key himself, entered it in his own browser, and reported successful
+  activation. He then confirmed a QR code and real use from his phone. After
+  closing and reopening Mirafold, he reported access without returning to the
+  browser or entering the key again. These are direct human observations;
+  the assistant never received or read the key. No trial or new subscription
+  is authorized.
+
+  **2026-09-08: computer-restart persistence and phone use passed.** Kyle
+  confirmed restarting this computer, then reported that the installed app's
+  Pair QR code appeared without browser activation or another key entry. He
+  scanned it and confirmed phone connection and use. The tool-visible boot ID
+  changed from the saved baseline, supporting his direct report of a computer
+  restart. Kyle then opened subscription management and reported an option
+  to cancel his subscription; no cancellation was requested or reported.
+  Kyle then confirmed access to his existing key, used device-level removal,
+  and reported a successful app restart followed by no QR code and browser
+  actions to get Pro or connect an existing key. He accepted the observed
+  results and stopped extra manual testing. The assistant had not asked him
+  to keep his phone page open, so disconnection of an already-open phone
+  session was not checked. Do not repeat removal or resume omitted manual
+  checks by default. Reconnection/fallback, the
+  separately authorized trial, ordinary npm/browser compatibility, and final
+  hash checks remain pending. Step 13.11 remains unfinished.
+  [Acceptance record](docs/releases/desktop-0.4.0-acceptance.md) and the exact
+  continuation, remaining manual sequence, helper commands, and evidence are in
+  `/home/serrecchia/Projects/mirafold-desktop-dpc11-evidence/HANDOFF.md`.
+
+  **2026-09-08 acceptance closeout:** Kyle accepted the observed upgrade,
+  stopped extra manual testing, and explicitly requested acceptance closeout,
+  publication, and the website work. This supersedes the unfinished status above
+  and closes this Step with the omitted manual checks recorded as unperformed.
+  No trial or new subscription is authorized. Fresh release preflight passed all
+  17 frozen hashes, manifest, approved APT signature, live source/run/artifact
+  identity, installed 0.4.0, and unchanged production pay/welcome/activation
+  bytes with three expected private-API refusals. See the acceptance record.
+
+- [x] **Step 13.12 — publish exactly the accepted Linux release.** Reconfirm the
   candidate hashes equal Step 13.11, then use the protected Desktop release path
   without source changes. Verify the tag, release manifests, attestations,
   anonymous assets, APT index/signature, and installed version; update one
   existing APT installation through the real channel and repeat activation
   persistence plus relay pairing after update. Record versions, commits, run
-  IDs, artifacts, hashes, and observations. Only this completed Step unlocks
-  the site's public-positioning phase; it does not itself edit mirafold.com.
+  IDs, artifacts, hashes, and observations. Kyle's 2026-09-08 direction to
+  finish without extra manual testing supersedes the repeated host-update and
+  pairing procedure: the host already runs the accepted 0.4.0 bytes. Verify the
+  public signed APT index and exact package download using isolated client state;
+  do not claim a second host upgrade. Only this completed Step unlocks the site's
+  public-positioning phase; it does not itself edit mirafold.com.
+
+  **Completed 2026-09-08.** Signed `v0.4.0` selects the exact accepted candidate.
+  Protected run `34308830976` published all 17 unchanged files as public latest;
+  public hashes, signed provenance, approved APT index, and anonymous Debian
+  download match. No rebuild, extra manual test, new subscription, or host
+  package mutation occurred. Main and next already have the identical source
+  tree, so no content sync is needed and the staging hold ends. Automated
+  publication remains disabled under existing policy. Full evidence and limits:
+  [release record](docs/releases/desktop-0.4.0-release.md). Site public positioning
+  is unblocked and authorized.
+
+**Post-release documentation follow-up (2026-09-08):** PR #67 is pushed but
+blocked by new npm advisories for runtime Hono 4.12.34 and js-yaml 4.3.1. Both
+CI jobs stop at audit, before tests. Candidate publication and the website are
+complete; a separately reviewed dependency update/forward release is required
+before these records can merge under green checks. No package asset or check
+policy was changed. See the release record's “Documentation merge status.”
 
 ### Phase 14 — Windows Desktop Pro activation proof (deferred; not a Linux gate)
 
