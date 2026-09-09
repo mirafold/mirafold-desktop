@@ -4,6 +4,21 @@ Started 2026-08-02. The goal is a download other people can install and run on
 the supported platforms, with the unsigned direct-download boundary stated
 accurately.
 
+## Patch release 0.4.1 — authorized 2026-09-09
+
+Kyle authorized publishing the reviewed dependency fix with Shell 0.9.1.
+PR #68 updates only the existing Hono and js-yaml lock records to 4.13.7 and
+4.3.2; Linux/Windows CI, package smoke, registry signatures, and the zero-finding
+dependency audit passed. PR #67 then merged the completed Desktop 0.4.0 release
+records after its refreshed checks passed.
+
+Release preparation pins the published Shell 0.9.1 package and advances Desktop
+to 0.4.1. Follow the existing retained-candidate release path, verify the exact
+Linux and Windows packages, publish the same 17 files, and sync production back
+to staging. Automatic publication remains disabled under the existing DPC.8
+policy. Prior real-device and Windows Pro acceptance limits remain recorded;
+this dependency patch does not establish new acceptance results for them.
+
 ## Active program — continuous, hardened Desktop delivery
 
 Started 2026-08-13 after the first full product/repository audit. This is an
