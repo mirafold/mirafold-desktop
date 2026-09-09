@@ -61,7 +61,7 @@ unblocked and expressly authorized in the current conversation.
 Detailed evidence is retained at
 `/home/serrecchia/Projects/mirafold-desktop-dpc12-evidence/`.
 
-## Documentation merge status
+## Documentation merge status — original blocker
 
 The release records are committed and pushed in PR #67, but its Linux and
 Windows jobs in run `34309717138` stop at the current dependency audit before
@@ -72,3 +72,9 @@ A dependency update changes packaged runtime bytes and requires a separately
 reviewed forward release. The published 0.4.0 files are immutable. No check was
 bypassed, and PR #67 remains open. Details and upstream fixes are recorded in
 `/home/serrecchia/Projects/mirafold-desktop-dpc12-evidence/documentation-ci-block.md`.
+
+**Resolved 2026-09-09:** dependency fix PR #68 merged as `9036732`. PR #67
+was rebased onto it, passed Linux, Windows (including packaged smoke), and DCO
+checks in run `34394496655`, and merged as `89029a6`. The original release
+files and hashes above remain unchanged. Desktop 0.4.1 carries the separately
+reviewed dependency fixes forward with Shell 0.9.1.
