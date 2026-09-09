@@ -1,23 +1,18 @@
 ## Included versions
 
-- Mirafold Desktop `0.4.0`
-- Mirafold Shell `0.9.0`
+- Mirafold Desktop `0.4.1`
+- Mirafold Shell `0.9.1`
 
 ## What changed
 
-- Linux Desktop can open Pro activation in your system browser and receive the
-  result privately. Pro state is encrypted using an available Secret Service
-  or KWallet provider; activation requires that secure storage to be available.
-- The saved Pro key reaches the bundled Shell through a one-use private pipe.
-  It is kept out of the page, command-line arguments, and child environment.
-- An unfinished activation can resume after restarting Desktop when its saved
-  callback port remains available. The Project menu can remove Pro access from
-  this device after confirmation; reconnecting requires an existing key or
-  help from support.
-- Activation, removal, folder changes, crashes, updates, and quit coordinate
-  daemon cleanup before starting a replacement. Diagnostic output redacts keys.
-- Release publication now verifies and reuses the candidate packages selected
-  for acceptance, including their signed APT repository and updater metadata.
+- Session switches open at the end of replayed history, and phone prompts
+  wait for a tap before focusing.
+- Painting file links open in Files; question details open independently of
+  answer submission. Unfinished turns remain visible across reconnects.
+- Shell action dispatch, settings replacement, encrypted message handling,
+  code fences, and workspace containment are hardened.
+- Updated Hono and js-yaml to patched versions, resolving the dependency
+  audit failures that blocked Desktop builds and Shell intake.
 
-Windows remains a beta desktop package. The Linux Pro result does not establish
-Windows Pro support; that installed activation proof remains separate.
+Windows remains a beta desktop package. This patch does not establish Windows
+Pro support or complete the outstanding real-device acceptance checks.
