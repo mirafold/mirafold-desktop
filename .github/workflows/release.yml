@@ -181,7 +181,7 @@ jobs:
       - name: Verify updater artifact set and manifest
         run: node scripts/release-contract.mjs platform "${{ matrix.name }}" dist
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.name }}
           path: |
@@ -246,7 +246,7 @@ jobs:
             packaging/apt/mirafold-archive-keyring.gpg \
             packaging/apt/fingerprint.txt
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: apt
           path: |
@@ -303,7 +303,7 @@ jobs:
       - name: Record immutable candidate identity and file hashes
         run: node scripts/release-candidate.mjs create "${{ runner.temp }}/mirafold-release-assets"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-candidate
           path: ${{ runner.temp }}/mirafold-release-assets/*
